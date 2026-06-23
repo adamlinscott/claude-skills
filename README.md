@@ -7,11 +7,38 @@ them in every session, on every machine.
 
 ## Skills
 
-| Skill | What it does |
-|-------|--------------|
-| **reground** | Halts a drifting agent and re-anchors it to codebase evidence for the current task — clears speculative context without a full compaction. Trigger when the agent has gone off course, hallucinated files/APIs, or over-built. |
-| **context-audit** | Audits a repo's Claude context setup (CLAUDE.md, CONTEXT.md, `docs/`, `.claude/agents/`, per-project memory). Reports bloat, broken links, orphaned docs, security risks, and memory/instruction conflicts. |
-| **memory-audit** | Audits Claude's per-user memory for a project and produces a report (non-technical summary or full technical audit). Report only — never edits memory. |
+**`/reground`** — re-anchor a drifting agent to the evidence.
+
+Halts an agent that has wandered off the task and re-grounds it in actual codebase
+evidence for the work at hand, clearing speculative context without the cost of a full
+compaction.
+
+*When to use:* the agent has gone off course, hallucinated files or APIs, or started
+building more than you asked for.
+
+---
+
+**`/context-audit`** — find what's working against Claude in a repo.
+
+Audits the context that gets injected into every Claude session — `CLAUDE.md`,
+`CONTEXT.md`, `docs/`, `.claude/agents/`, and the per-project memory directory — and
+reports bloat, broken links, orphaned docs, security risks, rules that live in memory but
+never reach subagents, and conflicts between memory and project instructions. Read-only;
+produces a report, never edits.
+
+*When to use:* you want to know why Claude underperforms in a repo, or you're tidying up a
+`CLAUDE.md` / agents / memory setup that has grown messy.
+
+---
+
+**`/memory-audit`** — review Claude's per-user memory for a project.
+
+Reads the project's per-user memory and produces a report — either a plain-English summary
+or a full technical audit (classification, stale-reference checks, orphaned files,
+structural smells). Report only; it never edits, renames, or deletes a memory file.
+
+*When to use:* you suspect memory has gone stale or cluttered, or you want a readable
+overview of what Claude has remembered about a project.
 
 ## Install
 
