@@ -18,7 +18,7 @@ them in every session, on every machine.
 Requires [Node.js](https://nodejs.org/). Clone, then run the installer:
 
 ```sh
-git clone <this-repo-url> claude-skills
+git clone https://github.com/adamlinscott/claude-skills.git
 cd claude-skills
 node install.mjs
 ```
@@ -44,3 +44,7 @@ node install.mjs --uninstall
 1. Create `skills/<name>/SKILL.md` (see the [skill format docs](https://code.claude.com/docs/en/skills)).
 2. Run `node install.mjs` to link it.
 3. Commit and push.
+
+## License
+
+[MIT](LICENSE) — free to use, modify, and share.
