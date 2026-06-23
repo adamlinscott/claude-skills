@@ -9,6 +9,9 @@ You are running a memory audit for the user's per-user Claude memory in this pro
 **Hard rule: this skill produces a report only. Do not edit, rename, move, or delete any memory file. If the user wants
 to act on findings, that is a separate follow-up turn after they review the report.**
 
+This skill focuses on the internal health of the memory directory itself. For how memory interacts with the wider
+repo — conflicts with CLAUDE.md, rules that never reach subagent prompts, broken doc links — see `/context-audit`.
+
 ## Step 1 — Ask the user which report style they want
 
 Before reading anything, call `AskUserQuestion` with:
@@ -40,7 +43,9 @@ nothing to audit."
 ## Step 3 — Read everything
 
 - Read `MEMORY.md`.
-- Read every memory file the index points to.
+- Read every `.md` file in the directory — both those the index points to and any that are not indexed. Do not assess a
+  memory you have not read.
+- For each memory, note its declared `type` from frontmatter (one of: user / feedback / project / reference).
 - List the directory contents and identify:
     - Files in the directory **not indexed** in `MEMORY.md`
     - Index entries pointing to **files that don't exist**
@@ -104,6 +109,9 @@ For each entry include:
 After the per-entry list, report:
 
 - **Orphans:** files in the memory dir not in `MEMORY.md`, and index entries pointing to missing files
+- **Type sanity:** does each entry's body match its declared `type`? A `reference` entry should point to a resource
+  that still resolves (verify the URL or path); a `project` entry should use absolute dates, not "last week" / "recently";
+  a `feedback` entry should carry both a *why* and a *how to apply*. Flag mismatches.
 - **Prohibition ratio:** count of entries whose rule is a "don't / never / avoid / stop" against total entries. If
   above ~60%, call this out as a memory-as-corrections-log smell — memory is meant to shape behavior, not log every past
   mistake.

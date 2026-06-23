@@ -7,38 +7,32 @@ them in every session, on every machine.
 
 ## Skills
 
-**`/reground`** — re-anchor a drifting agent to the evidence.
+### `/reground`
 
-Halts an agent that has wandered off the task and re-grounds it in actual codebase
-evidence for the work at hand, clearing speculative context without the cost of a full
-compaction.
+Halts an agent that has drifted off task and re-grounds it in actual codebase evidence,
+clearing speculative context without the cost of a full compaction.
 
-*When to use:* the agent has gone off course, hallucinated files or APIs, or started
+**When to use:** the agent has gone off course, hallucinated files or APIs, or started
 building more than you asked for.
 
----
+### `/context-audit`
 
-**`/context-audit`** — find what's working against Claude in a repo.
+Audits the context injected into every Claude session (`CLAUDE.md`, `CONTEXT.md`, `docs/`,
+`.claude/agents/`, and per-project memory) and flags bloat, broken links, orphaned docs,
+security risks, rules that never reach subagents, and memory/instruction conflicts.
+Read-only; it produces a report, never edits.
 
-Audits the context that gets injected into every Claude session — `CLAUDE.md`,
-`CONTEXT.md`, `docs/`, `.claude/agents/`, and the per-project memory directory — and
-reports bloat, broken links, orphaned docs, security risks, rules that live in memory but
-never reach subagents, and conflicts between memory and project instructions. Read-only;
-produces a report, never edits.
+**When to use:** Claude underperforms in a repo, or a `CLAUDE.md` / agents / memory setup
+has grown messy and you want it tidied.
 
-*When to use:* you want to know why Claude underperforms in a repo, or you're tidying up a
-`CLAUDE.md` / agents / memory setup that has grown messy.
+### `/memory-audit`
 
----
-
-**`/memory-audit`** — review Claude's per-user memory for a project.
-
-Reads the project's per-user memory and produces a report — either a plain-English summary
+Reviews a project's per-user memory and produces a report: either a plain-English summary
 or a full technical audit (classification, stale-reference checks, orphaned files,
 structural smells). Report only; it never edits, renames, or deletes a memory file.
 
-*When to use:* you suspect memory has gone stale or cluttered, or you want a readable
-overview of what Claude has remembered about a project.
+**When to use:** you suspect memory has gone stale or cluttered, or you want a readable
+overview of what Claude remembers about a project.
 
 ## Install
 
@@ -50,7 +44,7 @@ cd claude-skills
 node install.mjs
 ```
 
-This links each skill in `skills/` into `~/.claude/skills/<name>`. It is idempotent —
+This links each skill in `skills/` into `~/.claude/skills/<name>`. It is idempotent;
 re-run any time to repair links. It will **not** overwrite a real directory it did not
 create; if it reports a `SKIP`, move or delete that directory and re-run.
 
@@ -74,4 +68,4 @@ node install.mjs --uninstall
 
 ## License
 
-[MIT](LICENSE) — free to use, modify, and share.
+[MIT](LICENSE). Free to use, modify, and share.
