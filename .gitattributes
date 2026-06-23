@@ -1,0 +1,4 @@
+# Keep skill text LF in the repo regardless of the contributor's OS.
+* text=auto eol=lf
+*.mjs text eol=lf
+*.md  text eol=lf
