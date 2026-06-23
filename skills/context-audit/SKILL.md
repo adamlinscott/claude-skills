@@ -1,13 +1,16 @@
 ---
 name: context-audit
 description: Audits a repository's Claude context-injection setup — CLAUDE.md, CONTEXT.md, docs/, .claude/agents/, and the per-project memory directory. Reports bloat, broken links, orphaned docs, security risks, missing rules in subagent prompts, and conflicts between memory and project instructions. Use when the user asks to audit their Claude setup, asks "what's wrong with my CLAUDE.md", wants to know if their agents/memory/docs are configured well, or wants to improve Claude's effectiveness in this repository.
+allowed-tools: Read, Grep, Glob, Bash
 ---
 
 # Context audit
 
 Audit the context that gets injected into every Claude session in the current repository. The goal: identify everything that could be working against the agent — security risks, conflicts, bloat, orphaned docs, broken links, and rules that exist in memory but never reach subagents.
 
-Read-only. Print one markdown report. Do not modify any files.
+Read-only. Print one markdown report. Do not modify any files. (The skill is granted no edit tools, so this is enforced, not just asked.)
+
+**Scope note.** This is a whole-setup audit. For a deep, classification-based review of the memory directory on its own (Keep / Move / Refresh / Merge / Drop), defer to `/memory-audit`. Here, assess memory only where it interacts with the rest of the context: conflicts, subagent gaps, and stale references.
 
 ## What to read
 
@@ -16,11 +19,9 @@ Read-only. Print one markdown report. Do not modify any files.
 3. Everything under **`docs/`** (`Glob "docs/**/*.md"`).
 4. Every agent file under **`.claude/agents/`** (`Glob ".claude/agents/*.md"`) — note each agent's `description`, `tools` frontmatter, and body.
 5. The repo's **`.claude/settings.json`** and **`.claude/settings.local.json`** if present.
-6. The repo's **per-project memory directory**. Derive its path:
-   - Take the absolute repo path (`pwd`).
-   - Replace `:` with nothing, then replace every `/` and `\` with `-`.
-   - The directory is `~/.claude/projects/<encoded-path>/memory/` (on Windows: `C:\Users\<user>\.claude\projects\<encoded-path>\memory\`).
-   - The index is `MEMORY.md`; sibling `.md` files are individual memories.
+6. The repo's **per-project memory directory** (Claude's per-user memory, scoped to this repo). To locate it reliably, list `~/.claude/projects/` and pick the directory whose name is the current repo path with every `:`, `/`, and `\` replaced by `-` (e.g. `C:\Users\me\proj` → `C--Users-me-proj` — note the double dash where `:` meets `\`). Match against the actual listing rather than hand-building the path from a guessed rule.
+   - The index is `MEMORY.md`; sibling `.md` files are individual memories. Read all of them, including any not listed in `MEMORY.md`.
+   - Note each memory's declared `type` (user / feedback / project / reference) from its frontmatter.
    - If the directory does not exist, note that no per-project memory has been set up and continue.
 
 ## What to check
@@ -31,6 +32,7 @@ Read-only. Print one markdown report. Do not modify any files.
 - Instructions that authorise irreversible operations (push, force-push, delete, deploy, post-to-external) without confirmation.
 - Overly broad tool access in agent frontmatter (`tools: *`, `tools: All tools`) when the agent's role doesn't justify it.
 - Agents that can write/edit and also have network egress (`WebFetch`, vendor MCPs) without scoping.
+- In `.claude/settings.json` / `.claude/settings.local.json`: a repo-wide `defaultMode` of `bypassPermissions` (or broad `acceptEdits`), an over-broad permission allowlist (e.g. `Bash(*)`, `Bash(rm *)`, `Bash(curl *)`), or `hooks` that run unreviewed shell commands. Flag each with the specific risk it creates.
 
 ### Conflicts
 - A memory feedback rule that directly contradicts a rule in CLAUDE.md or an agent prompt.
@@ -59,7 +61,7 @@ Distinguish:
 
 ### Stale or inaccurate context
 - Memory files that cite specific file paths, classes, or symbols. For each citation, `Glob` or `Grep` to verify it still exists. Flag stale ones.
-- Doc files whose age (file mtime) is more than ~90 days old AND that name specific code symbols — recommend verification against current state.
+- Doc files that name specific code symbols and look stale (e.g. file mtime over ~90 days — a weak signal, since clones reset mtimes; prefer `git log -1 --format=%cs -- <file>` where git is available). Recommend verifying against current state rather than asserting staleness.
 
 ### Documentation coverage
 - Top-level source modules, packages, or services (whatever the repo's layout calls them) without a `README.md` — note as a coverage gap, not a hard issue.
@@ -68,7 +70,7 @@ Distinguish:
 
 ## Report format
 
-Print one markdown report to stdout. Group findings by severity (highest first). Within each section, one bullet per finding. Each finding must include: severity tag, the file path (and line number where applicable), a one-line root cause, and a concrete fix.
+Print one markdown report to stdout. Use the sections below, ordered roughly by severity (highest first). Within each section, one bullet per finding. Each finding must include: severity tag, the file path (and line number where applicable), a one-line root cause, and a concrete fix.
 
 ```
 # Context audit — <repo name> (<absolute path>)
