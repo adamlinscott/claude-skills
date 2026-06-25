@@ -4,6 +4,29 @@ This walks you through driving the whole loop with a real, connected Claude sess
 itself never calls an LLM — *you* connect an agent and it does the reasoning via the tools +
 the instruction sheets in `prompts/`.
 
+## Fastest path: the zero-config CLI (no MCP, no paths)
+
+The skill-friendly subcommands wrap the SAME handlers the MCP server uses and print JSON, so you
+can drive the whole loop from bash with no corpus path and no MCP registration. Everything below
+resolves the CURRENT PROJECT's corpus automatically (`--global` for the cross-project roll-up):
+
+```bash
+debrief corpus            # discover this project's sessions and merge them all
+debrief patterns          # see the clusters
+debrief grouping-task     # consolidate: debrief merge <from> <into> / debrief group "<name>" <ids...>
+debrief themes            # pick a theme
+debrief ask <themeId>     # get the depth instruction + evidence; reason to a question SET
+debrief answer <id> "..."                       # record an inferred answer
+debrief answer <id> "..." --source user --confirmed   # record the user's ground truth
+debrief pending           # next session: unanswered questions resurface
+debrief export-rules      # material for a CLAUDE.md of principles
+```
+
+The reference skill `skills/debrief/SKILL.md` (BETA) automates exactly this. Install it with
+`node install.mjs --beta` from the repo root (a normal install skips the beta skill).
+
+The connected-MCP walkthrough below is equivalent (same handlers) for clients that prefer MCP.
+
 ## 0. Build
 
 ```bash

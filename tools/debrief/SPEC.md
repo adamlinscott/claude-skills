@@ -30,6 +30,22 @@ snippet even if an upstream bug attaches one to a cluster.
 > or run a secret/path scrubber over them. Until then, do not treat the hot file as safe to
 > publish unreviewed.
 
+## Corpus locations (zero-config discovery)
+
+The reference CLI/MCP resolve the corpus with NO path required (`src/discover.ts`):
+
+- **Per-project (default):** `~/.debrief/projects/<project-slug>/corpus.json`, where `<project-slug>`
+  is the sanitized (lowercased, non-alphanumerics collapsed to `-`) absolute project root from
+  `git rev-parse --show-toplevel` (falling back to the cwd).
+- **Global (`--global`):** `~/.debrief/global/corpus.json` — the cross-project roll-up.
+- The evidence sidecar always lives beside the hot file (`corpus.evidence.json`).
+- An explicit path argument or `--corpus <path>` overrides discovery (back-compat).
+
+Session discovery scans `~/.claude/projects/*/*.jsonl`. For the per-project scope it keeps sessions
+whose first recorded `cwd` is INSIDE the project root (path-normalized; case-insensitive on win32);
+`--global` keeps all. These locations are a property of the reference implementation, not the
+portable format — the `corpus.json` *shape* below is the contract, wherever the file lives.
+
 ## Versioning
 
 - `schemaVersion` (hot file) and `schemaVersion` (sidecar) are independent integers, both

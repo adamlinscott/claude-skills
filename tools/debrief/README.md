@@ -80,12 +80,52 @@ npm run build     # tsc -> dist/
 
 ## CLI
 
+### Zero-config discovery (no paths required)
+
+Every corpus-bearing command resolves the corpus automatically:
+- **default = the CURRENT PROJECT** — `~/.debrief/projects/<project-slug>/corpus.json` (+ a
+  `.evidence.json` sidecar beside it). The project root is `git rev-parse --show-toplevel`
+  (falling back to the cwd).
+- **`--global`** — the cross-project roll-up at `~/.debrief/global/corpus.json`.
+- An explicit positional path (back-compat) or `--corpus <path>` always overrides.
+
+`debrief corpus` (no args) discovers this project's sessions by scanning
+`~/.claude/projects/*/*.jsonl` and keeping the ones whose recorded `cwd` is inside the project
+root, then merges them ALL into the resolved corpus. `--global` keeps every session. See
+`src/discover.ts`.
+
 ```bash
 debrief extract <session.jsonl>                 # structural candidate stats (no write)
-debrief corpus  <session.jsonl> [corpus.json]   # merge candidates -> hot file + sidecar
-debrief show    [corpus.json]                    # print the evidence-free hot file summary
-debrief serve   [corpus.json]                    # start the MCP stdio server (alias: mcp)
+debrief corpus  [session.jsonl] [corpus.json]   # merge candidates -> hot file + sidecar (zero-config; --global)
+debrief show    [corpus.json]                    # print the evidence-free hot file summary (--global)
+debrief serve   [corpus.json]                    # start the MCP stdio server (alias: mcp) (--global)
 ```
+
+### Skill-friendly subcommands (wrap the SAME handlers as the MCP server)
+
+These call the exact pure functions in `src/mcp/handlers.ts` (no logic duplication) and print
+JSON to stdout, so a skill can drive the whole loop from bash with no paths and no MCP
+registration. All honor the zero-config / `--global` / `--corpus` resolution above.
+
+```bash
+debrief patterns                                 # evidence-free pattern summaries (get_patterns)
+debrief themes                                   # evidence-free theme summaries (get_themes)
+debrief evidence <clusterId|themeId>             # delimited untrusted evidence (get_evidence)
+debrief ask <clusterId|themeId> [--mode self|user]   # return-instruction payload (answer_open_question)
+debrief answer <id> "<text>" [--source user --confirmed]  # write an answer (submit_answer; user GATED on --confirmed)
+debrief grouping-task                            # tidy-up instruction + summaries (get_grouping_task)
+debrief group <name> <clusterId...>              # create/extend a theme (group_theme)
+debrief ungroup <themeId> <clusterId...>         # remove clusters from a theme (ungroup_theme)
+debrief merge <fromClusterId> <intoClusterId>    # semantic merge (merge_clusters)
+debrief add-alias <normalizedSubject> <clusterId>  # lighter merge (add_alias)
+debrief set-kind <clusterId> <R|O|C|Q|X> [secondary]  # tag intent (set_cluster_kind)
+debrief pending                                  # forwarded-but-unanswered questions (get_pending_questions)
+debrief skip <clusterId|themeId>                 # defer a pending question (skip_question)
+debrief record-protocol "<statement>" [--confidence 0..1]  # record a standing protocol (record_protocol)
+debrief export-rules                             # material + synthesis instruction for a CLAUDE.md (export_rules_file)
+```
+
+The reference skill at `skills/debrief/SKILL.md` (BETA) drives this loop end to end.
 
 ## MCP server
 
@@ -153,10 +193,16 @@ so `answer_open_question`, `submit_answer`, `get_pending_questions`, and `skip_q
 - `get_themes({ limit?, cursor? })` — evidence-free theme summaries (`name`, `memberCount`,
   `answered?`, `answerSource?`, `pending?`), paginated oldest-first.
 
-Register it with Claude Code:
+Register it with Claude Code. This is an early build (not yet on npm), so register the locally
+installed binary at **user scope** (`-s user`) so the zero-config server is available in every
+project — `debrief serve` re-resolves the per-project corpus from its launch cwd:
 
 ```bash
-claude mcp add debrief -- npx -y @adamlinscott/debrief serve
+# after `node install.mjs --beta` (which npm-links the global `debrief`):
+claude mcp add -s user debrief -- debrief serve
+
+# or point straight at the built CLI (no npm link needed):
+claude mcp add -s user debrief -- node "<repo>/tools/debrief/dist/cli.js" serve
 ```
 
 …or the equivalent config block (e.g. `.mcp.json` / `claude_desktop_config.json`):
@@ -165,15 +211,32 @@ claude mcp add debrief -- npx -y @adamlinscott/debrief serve
 {
   "mcpServers": {
     "debrief": {
-      "command": "npx",
-      "args": ["-y", "@adamlinscott/debrief", "serve"]
+      "command": "debrief",
+      "args": ["serve"]
     }
   }
 }
 ```
 
+Once published to npm, the install-free form will be `claude mcp add -s user debrief -- npx -y @adamlinscott/debrief serve`.
+
 The two instruction files under `prompts/` are read **live** per `answer_open_question` call
 (short-TTL cache): edit a prompt and a running server picks it up — no rebuild, no restart.
+
+## Install as a repo skill (BETA)
+
+From the repo root, `install.mjs` links skills into `~/.claude/skills`. A **normal** run is
+unchanged and **skips** the `debrief` skill. The `--beta` flag opts in and sets up the tool:
+
+```bash
+node install.mjs --beta            # link the debrief skill, npm install + build the tool,
+                                   # npm link the global `debrief` command, and best-effort
+                                   # `claude mcp add -s user debrief -- debrief serve`
+node install.mjs --beta --uninstall   # undo the link + best-effort `claude mcp remove -s user debrief`
+```
+
+Every step is idempotent. If the `claude` CLI is absent, `--beta` prints manual MCP-registration
+instructions instead of failing. The skill itself needs NO MCP registration — it drives the CLI.
 
 ## Build order (from eng review)
 
