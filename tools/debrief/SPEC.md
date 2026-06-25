@@ -14,7 +14,7 @@ are kept byte-for-byte consistent with it and a test validates a corpus against 
 
 | File | Contents | Portable? |
 |------|----------|-----------|
-| `corpus.json` (hot file) | patterns (clusters) + accumulated answers + alias index + standing-protocol state + sources | **Yes.** Evidence-free by construction — carries only `evidenceIds`, never snippets. Sharing it leaks no transcript. |
+| `corpus.json` (hot file) | patterns (clusters) + themes + accumulated answers + alias index + standing-protocol state + sources | **Yes.** Evidence-free by construction — carries only `evidenceIds`, never snippets. Sharing it leaks no transcript. |
 | `corpus.evidence.json` (sidecar) | raw transcript snippets keyed by id | **No.** Stays local. Loaded only when a question is live (`get_evidence`). |
 
 This split is a privacy invariant, not a convenience: the evidence-free hot file is the
@@ -169,6 +169,62 @@ Lifecycle (design "Interaction states" — orphaned pending questions):
   clear pending — the forwarded question still awaits genuine user ground truth.
 - **Merge.** If either merged cluster was pending, the surviving cluster stays pending with the
   EARLIER `forwardedAt` and the MAX `skipCount` (a demotion survives a merge).
+
+## Two tiers: clusters (Tier 1) and themes (Tier 2)
+
+- **Tier 1 — clusters** are the narrow, answer-bearing, attributable units (the identity model
+  above). Same-topic duplicates are fused conservatively via `merge_clusters` / `add_alias`.
+- **Tier 2 — themes** are a NON-DESTRUCTIVE overlay that GROUPS related clusters under an abstract
+  theme WITHOUT fusing them. Member clusters keep their own `count`/`answers`/`evidence` intact, and
+  a cluster MAY belong to MULTIPLE themes. Themes are reversible (regroup freely; no data loss). A
+  theme is itself QUESTION-ABLE at the abstract level, so it carries its OWN `answers[]` and
+  `pending` (the depth step asks theme-level existential questions). Themes are **evidence-free**:
+  they hold only `memberClusterIds` + `answers`, never snippets.
+
+Each theme is `{ themeId (UUID), name, memberClusterIds[], answers[], pending?, firstSeen,
+lastActivityAt }`.
+
+- **Write path.** `group_theme({ name, clusterIds })` creates a theme or EXTENDS an existing one by
+  name (idempotent member add; refuses a non-existent `clusterId`). Returns `themeId`.
+- **Un-group path (reversibility).** `ungroup_theme({ themeId, clusterIds })` REMOVES clusters from a
+  theme non-destructively — the cluster keeps its counts/answers/evidence and any OTHER theme
+  membership. Combined with `group_theme` it MOVES a cluster between themes, making the
+  "regroup freely; no data loss" property reachable over the wire. Throws on an unknown `themeId`.
+- **Read path.** `get_themes({ limit?, cursor? })` returns evidence-free summaries (`name`,
+  `memberCount`, `answered?`, `answerSource?`, `pending?`), paginated oldest-first.
+- **Question a theme.** `answer_open_question({ themeId })` aggregates representative evidence across
+  the member clusters (delimited untrusted) + the member topics and returns the depth instruction so
+  the connected agent produces the theme-level question SET. `mode:'user'` marks the THEME pending.
+- **Answer / pending / skip.** `submit_answer`, `get_pending_questions` (themes surface in
+  `pendingThemes[]` / `totalPendingThemes`), and `skip_question` all accept a `themeId`. The
+  write-poisoning guard and `user`-outranks-`inferred` precedence apply identically to themes; a
+  confirmed `source:user` theme answer CLEARS the theme's pending state.
+
+### Referential integrity (themes)
+
+Every `memberClusterIds` entry MUST reference an existing cluster. The reference implementation
+maintains this: a `merge_clusters` that absorbs `from` INTO `into` REWRITES every theme's
+`from` member id to `into` (deduped), so no member id ever dangles; an outright cluster removal
+drops the id from every theme.
+
+## Kind tagging (R/O/C/Q/X taxonomy)
+
+A cluster carries an OPTIONAL `primaryKind` and (only when a turn genuinely does two things)
+`secondaryKind`, each one of `R` (redirect), `O` (observed), `C` (continue), `Q` (query), `X`
+(not-a-real-turn). The CLI NEVER derives intent (CORE PRINCIPLE) — `set_cluster_kind({ clusterId,
+primary, secondary? })` STORES the connected agent's classification verbatim (validated against the
+enum). `get_patterns` surfaces the kind once tagged. Both fields are optional for backward-compat.
+
+## Grouping task (the tidy-up surface)
+
+`get_grouping_task({ limit?, clustersCursor?, themesCursor? })` returns the live
+`prompts/group-themes.md` instruction text (loaded from disk, same mechanism as the depth/classify
+instructions) PLUS the current evidence-free cluster and theme summaries, so the connected agent can
+run the tidy-up: fuse true duplicates (`merge_clusters` / `add_alias`) and form broad themes
+(`group_theme`). It also reports `totalClusters` / `totalThemes` and `clustersCursor` /
+`themesCursor` so a heavy user with more than the cap (100) clusters/themes knows the consolidation
+set is PARTIAL and can page the full set — otherwise true duplicates beyond the first page would be
+invisible and unfusable. The tool generates nothing.
 
 ## Standing protocols (deepens over time)
 

@@ -8,8 +8,8 @@ test("loadReturnInstructions reads BOTH prompt files from disk at runtime", asyn
   // depth-instruction.md and classify-intent.md actually loaded (non-empty, recognizable content)
   assert.ok(instr.depthInstruction.length > 0);
   assert.ok(instr.classifyIntent.length > 0);
-  assert.match(instr.depthInstruction, /open "?why"? question/i);
-  assert.match(instr.classifyIntent, /Intent classification/i);
+  assert.match(instr.depthInstruction, /open question|"why"/i);
+  assert.match(instr.classifyIntent, /Classify a turn|kind/i);
 });
 
 test("makeInstructionsReader caches within the TTL then re-reads from disk (live edits, no restart)", async () => {

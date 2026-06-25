@@ -19,6 +19,17 @@ import {
   skipPending,
   isDemoted,
   orderPending,
+  createTheme,
+  getTheme,
+  getThemeByName,
+  addClusterToTheme,
+  removeClusterFromTheme,
+  dropClusterFromAllThemes,
+  effectiveThemeAnswer,
+  markThemePending,
+  clearThemePending,
+  skipThemePending,
+  orderThemePending,
 } from "../src/corpus/identity.ts";
 import { emptyCorpus, emptyEvidenceStore, type Corpus, type EvidenceStore } from "../src/corpus/types.ts";
 
@@ -453,4 +464,147 @@ test("splitAlias splits a representative subject WHEN a replacement is supplied 
   assert.equal(lookupClusterId(c, "after-error", "rgb value"), newId);
   // no dangling aliases
   for (const id of Object.values(c.aliases)) assert.ok(getCluster(c, id), "no dangling alias");
+});
+
+// ── TIER 2: themes (non-destructive overlay) ──────────────────────────────────────────────────
+
+/** A corpus with three clusters; returns their ids. */
+function threeClusters(): { c: Corpus; a: string; b: string; d: string } {
+  const c = fresh();
+  const a = resolveOrCreateCluster(c, "after-error", "abbreviated names", "x").clusterId;
+  const b = resolveOrCreateCluster(c, "after-error", "mocks in prod", "y").clusterId;
+  const d = resolveOrCreateCluster(c, "after-error", "stale docs", "z").clusterId;
+  return { c, a, b, d };
+}
+
+test("createTheme groups clusters non-destructively; clusters keep their identity", () => {
+  const { c, a, b } = threeClusters();
+  // give a member an answer to prove it is untouched by theming
+  getCluster(c, a)!.answers.push({ source: "user", text: "descriptive names", ts: now });
+  const t = createTheme(c, "code tells the truth", [a, b], now);
+  assert.match(t.themeId, UUID_RE);
+  assert.deepEqual(t.memberClusterIds, [a, b]);
+  assert.deepEqual(t.answers, []);
+  assert.equal(t.firstSeen, now);
+  // member cluster is unchanged (its answer is intact; it is NOT removed)
+  assert.equal(getCluster(c, a)!.answers.length, 1);
+  assert.equal(c.clusters.length, 3, "theming does not fuse or remove clusters");
+});
+
+test("createTheme dedups members and REFUSES a non-existent clusterId (poisoning guard)", () => {
+  const { c, a } = threeClusters();
+  const t = createTheme(c, "dup", [a, a], now);
+  assert.deepEqual(t.memberClusterIds, [a], "duplicate members collapse");
+  assert.throws(() => createTheme(c, "bad", ["no-such-cluster"]), /non-existent clusterId/);
+});
+
+test("addClusterToTheme is idempotent and a cluster MAY belong to multiple themes", () => {
+  const { c, a, b, d } = threeClusters();
+  const t1 = createTheme(c, "theme one", [a], now);
+  const t2 = createTheme(c, "theme two", [b], now);
+  // add a to t2 as well -> a is now in BOTH themes
+  assert.equal(addClusterToTheme(c, t2.themeId, a, now), true);
+  assert.ok(getTheme(c, t1.themeId)!.memberClusterIds.includes(a));
+  assert.ok(getTheme(c, t2.themeId)!.memberClusterIds.includes(a));
+  // idempotent: adding a again is a no-op
+  assert.equal(addClusterToTheme(c, t2.themeId, a, now), false);
+  assert.equal(getTheme(c, t2.themeId)!.memberClusterIds.filter((id) => id === a).length, 1);
+  // poisoning guard + unknown theme
+  assert.throws(() => addClusterToTheme(c, t1.themeId, "nope", now), /non-existent clusterId/);
+  assert.throws(() => addClusterToTheme(c, "no-theme", d, now), /no theme/);
+});
+
+test("removeClusterFromTheme is reversible regrouping (no cluster data lost)", () => {
+  const { c, a, b } = threeClusters();
+  getCluster(c, a)!.answers.push({ source: "user", text: "keep", ts: now });
+  const t = createTheme(c, "t", [a, b], now);
+  assert.equal(removeClusterFromTheme(c, t.themeId, a, now), true);
+  assert.deepEqual(getTheme(c, t.themeId)!.memberClusterIds, [b]);
+  // the cluster + its answer survive (themes are an overlay, not ownership)
+  assert.equal(getCluster(c, a)!.answers.length, 1);
+  // removing a non-member returns false
+  assert.equal(removeClusterFromTheme(c, t.themeId, a, now), false);
+  assert.throws(() => removeClusterFromTheme(c, "no-theme", b, now), /no theme/);
+});
+
+test("getThemeByName finds a theme for group_theme's extend-by-name path", () => {
+  const { c, a } = threeClusters();
+  const t = createTheme(c, "named theme", [a], now);
+  assert.equal(getThemeByName(c, "named theme")!.themeId, t.themeId);
+  assert.equal(getThemeByName(c, "missing"), undefined);
+});
+
+test("merge_clusters REWRITES theme member ids from->into (no dangling), deduping", () => {
+  const { c, e, aId, bId } = twoClusterFixture();
+  // a third cluster so the theme has a stable member to keep
+  const keep = resolveOrCreateCluster(c, "after-error", "keep me", "k").clusterId;
+  // theme1 has BOTH a and b -> after merging a INTO b, it should collapse to [b, keep] (deduped)
+  const t1 = createTheme(c, "both", [aId, bId, keep], now);
+  // theme2 has only a -> after merge it must become [b] (the survivor), never dangling at a
+  const t2 = createTheme(c, "only a", [aId], now);
+
+  mergeClusters(c, aId, bId, e); // merge a INTO b
+
+  const m1 = getTheme(c, t1.themeId)!.memberClusterIds;
+  assert.deepEqual(m1, [bId, keep], "from-id replaced by into-id and deduped (no double b)");
+  const m2 = getTheme(c, t2.themeId)!.memberClusterIds;
+  assert.deepEqual(m2, [bId], "lone from-member rewritten to the survivor");
+  // INVARIANT: no theme member id is dangling after the merge
+  for (const theme of c.themes) {
+    for (const id of theme.memberClusterIds) assert.ok(getCluster(c, id), `dangling theme member ${id}`);
+  }
+});
+
+test("dropClusterFromAllThemes removes a cluster id from every theme that referenced it", () => {
+  const { c, a, b } = threeClusters();
+  const t1 = createTheme(c, "t1", [a, b], now);
+  const t2 = createTheme(c, "t2", [a], now);
+  const touched = dropClusterFromAllThemes(c, a, now);
+  assert.equal(touched, 2);
+  assert.deepEqual(getTheme(c, t1.themeId)!.memberClusterIds, [b]);
+  assert.deepEqual(getTheme(c, t2.themeId)!.memberClusterIds, []);
+});
+
+test("theme answers: effectiveThemeAnswer has user outrank inferred (mirrors clusters)", () => {
+  const { c, a } = threeClusters();
+  const t = createTheme(c, "t", [a], now);
+  t.answers.push({ source: "inferred", text: "guess", ts: "2026-06-25T10:00:00.000Z" });
+  t.answers.push({ source: "user", text: "ground truth", ts: "2026-06-25T01:00:00.000Z" });
+  assert.equal(effectiveThemeAnswer(t)!.source, "user");
+  assert.equal(effectiveThemeAnswer(t)!.text, "ground truth");
+});
+
+test("theme pending lifecycle: mark (idempotent) / skip (demote at K) / clear", () => {
+  const { c, a } = threeClusters();
+  const t = createTheme(c, "t", [a], now);
+  const p = markThemePending(c, t.themeId, "2026-01-01T00:00:00.000Z");
+  assert.equal(p.forwardedAt, "2026-01-01T00:00:00.000Z");
+  // re-mark does not reset
+  assert.equal(markThemePending(c, t.themeId, "2026-09-09T00:00:00.000Z").forwardedAt, "2026-01-01T00:00:00.000Z");
+  skipThemePending(c, t.themeId, now);
+  skipThemePending(c, t.themeId, now);
+  assert.equal(isDemoted(getTheme(c, t.themeId)!.pending!), false, "2 skips: not demoted");
+  const p3 = skipThemePending(c, t.themeId, now);
+  assert.equal(p3.skipCount, 3);
+  assert.equal(isDemoted(p3), true, "3 skips: demoted");
+  // clear removes it
+  assert.equal(clearThemePending(c, t.themeId), true);
+  assert.equal(getTheme(c, t.themeId)!.pending, undefined);
+  assert.equal(clearThemePending(c, t.themeId), false);
+  // skip on a non-pending theme throws
+  assert.throws(() => skipThemePending(c, t.themeId, now), /not pending/);
+  assert.throws(() => markThemePending(c, "no-theme", now), /no theme/);
+});
+
+test("orderThemePending: non-demoted before demoted, oldest forwardedAt first within band", () => {
+  const { c, a, b, d } = threeClusters();
+  const t1 = createTheme(c, "t1", [a], "2026-01-01T00:00:00.000Z");
+  const t2 = createTheme(c, "t2", [b], "2026-02-01T00:00:00.000Z");
+  const t3 = createTheme(c, "t3", [d], "2026-03-01T00:00:00.000Z");
+  markThemePending(c, t1.themeId, "2026-01-01T00:00:00.000Z"); // oldest, will demote
+  markThemePending(c, t2.themeId, "2026-03-01T00:00:00.000Z");
+  markThemePending(c, t3.themeId, "2026-02-01T00:00:00.000Z");
+  for (let i = 0; i < 3; i++) skipThemePending(c, t1.themeId, now); // demote t1
+  const ordered = orderThemePending(c).map((t) => t.themeId);
+  assert.deepEqual(ordered, [t3.themeId, t2.themeId, t1.themeId]);
 });
