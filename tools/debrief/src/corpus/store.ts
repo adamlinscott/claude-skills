@@ -273,6 +273,11 @@ export function serializeCorpus(corpus: Corpus, now: string = corpus.generatedAt
       evidenceIds: c.evidenceIds.slice(),
       ...(c.question !== undefined ? { question: c.question } : {}),
       ...(c.merged === true ? { merged: true } : {}),
+      // Pending-question state survives the save/load round-trip (cross-session re-surfacing).
+      // Deep-copied so the serialized object shares no reference with the live cluster.
+      ...(c.pending !== undefined ? { pending: { ...c.pending } } : {}),
+      ...(c.firstSeen !== undefined ? { firstSeen: c.firstSeen } : {}),
+      ...(c.lastActivityAt !== undefined ? { lastActivityAt: c.lastActivityAt } : {}),
       answers: c.answers.map((a) => ({ ...a })),
     })),
     aliases: { ...corpus.aliases },

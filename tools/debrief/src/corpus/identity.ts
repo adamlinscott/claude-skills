@@ -15,7 +15,14 @@
  */
 
 import { randomUUID, createHash } from "node:crypto";
-import type { Corpus, Cluster, EvidenceItem, EvidenceStore } from "./types.js";
+import type { Corpus, Cluster, EvidenceItem, EvidenceStore, Pending } from "./types.js";
+import { SKIP_DEMOTE_THRESHOLD } from "./types.js";
+
+/** Pick the later of two optional ISO timestamps as a `{ lastSurfacedAt }` spread, or `{}`. */
+function maxLastSurfaced(a?: string, b?: string): { lastSurfacedAt?: string } {
+  const later = a !== undefined && b !== undefined ? (a >= b ? a : b) : (a ?? b);
+  return later !== undefined ? { lastSurfacedAt: later } : {};
+}
 
 /**
  * Number of DISTINCT sessions across a set of evidenceIds, read from the sidecar. Lives here
@@ -107,6 +114,7 @@ export function resolveOrCreateCluster(
   detector: string,
   normalizedSubject: string,
   summary: string,
+  now: string = new Date().toISOString(),
 ): Cluster {
   const existingId = lookupClusterId(corpus, detector, normalizedSubject);
   if (existingId) {
@@ -126,6 +134,8 @@ export function resolveOrCreateCluster(
       sessionCount: 0,
       evidenceIds: [],
       answers: [],
+      firstSeen: now,
+      lastActivityAt: now,
     };
     corpus.clusters.push(recreated);
     return recreated;
@@ -140,6 +150,10 @@ export function resolveOrCreateCluster(
     sessionCount: 0,
     evidenceIds: [],
     answers: [],
+    // Stable creation timestamp + initial activity stamp. firstSeen is the oldest-first
+    // surfacing tiebreak; lastActivityAt advances as the cluster is touched.
+    firstSeen: now,
+    lastActivityAt: now,
   };
   corpus.clusters.push(cluster);
   corpus.aliases[aliasKey(detector, normalizedSubject)] = clusterId;
@@ -200,6 +214,7 @@ export function mergeClusters(
   fromClusterId: string,
   intoClusterId: string,
   evidence: EvidenceStore,
+  now: string = new Date().toISOString(),
 ): MergeClustersResult {
   if (fromClusterId === intoClusterId) {
     throw new Error(`mergeClusters: cannot merge a cluster into itself (${fromClusterId})`);
@@ -238,6 +253,30 @@ export function mergeClusters(
   into.count = into.evidenceIds.length;
   into.sessionCount = countSessions(into.evidenceIds, evidence);
   into.merged = true;
+
+  // firstSeen is STABLE: the surviving cluster keeps the EARLIER of the two creation stamps so
+  // an absorbed older cluster's age is preserved for the oldest-first tiebreak. lastActivityAt
+  // advances (a merge IS activity). If either firstSeen is absent (legacy corpus), prefer the
+  // one that exists.
+  const candidates = [into.firstSeen, from.firstSeen].filter((t): t is string => typeof t === "string");
+  if (candidates.length > 0) into.firstSeen = candidates.reduce((a, b) => (a <= b ? a : b));
+  into.lastActivityAt = now;
+
+  // Pending state: if EITHER cluster had an outstanding forwarded question, the merged cluster
+  // is still pending. Keep the EARLIER forwardedAt (oldest-first), the MAX skipCount (so a
+  // demoted question stays demoted through a merge), and the later lastSurfacedAt.
+  const fromP = from.pending;
+  const intoP = into.pending;
+  if (fromP && intoP) {
+    into.pending = {
+      forwardedAt: fromP.forwardedAt <= intoP.forwardedAt ? fromP.forwardedAt : intoP.forwardedAt,
+      skipCount: Math.max(fromP.skipCount, intoP.skipCount),
+      ...maxLastSurfaced(fromP.lastSurfacedAt, intoP.lastSurfacedAt),
+    };
+  } else if (fromP && !intoP) {
+    into.pending = { ...fromP };
+  }
+  // (intoP && !fromP) -> into.pending already correct; (!fromP && !intoP) -> stays absent.
 
   // Remove the absorbed cluster object.
   corpus.clusters = corpus.clusters.filter((c) => c.clusterId !== fromClusterId);
@@ -431,4 +470,104 @@ export function effectiveAnswer(cluster: Cluster): Cluster["answers"][number] | 
     else if (aRank === bestRank && a.ts >= best.ts) best = a;
   }
   return best;
+}
+
+// ── Pending-question lifecycle (design "Interaction states" — orphaned pending questions) ──────
+
+/**
+ * MARK a cluster pending: a question for it was forwarded to the user (answer_open_question
+ * mode:'user'). Idempotent on re-forward: if already pending, the original forwardedAt and the
+ * accumulated skipCount are PRESERVED (a re-forward must not reset the queue position or undo a
+ * demotion). Sets forwardedAt only when newly pending. Returns the resulting Pending record.
+ * Throws if the cluster does not exist (no phantom pending state).
+ */
+export function markPending(
+  corpus: Corpus,
+  clusterId: string,
+  now: string = new Date().toISOString(),
+): Pending {
+  const cluster = getCluster(corpus, clusterId);
+  if (!cluster) throw new Error(`markPending: no cluster ${clusterId}`);
+  if (!cluster.pending) {
+    cluster.pending = { forwardedAt: now, skipCount: 0 };
+  }
+  // (already pending) -> keep forwardedAt + skipCount; a re-forward is not a reset.
+  return cluster.pending;
+}
+
+/**
+ * CLEAR a cluster's pending state (a confirmed source:user answer resolved it). Removes the
+ * pending field entirely. Returns true if a pending record was present and cleared, false if
+ * the cluster had none. Throws if the cluster does not exist.
+ */
+export function clearPending(corpus: Corpus, clusterId: string): boolean {
+  const cluster = getCluster(corpus, clusterId);
+  if (!cluster) throw new Error(`clearPending: no cluster ${clusterId}`);
+  if (!cluster.pending) return false;
+  delete cluster.pending;
+  return true;
+}
+
+/**
+ * SKIP a pending question: increment its skipCount and stamp lastSurfacedAt. A cluster skipped
+ * SKIP_DEMOTE_THRESHOLD (K) or more times is DEMOTED in surfacing order (it sorts after
+ * non-demoted), not removed and not nagging. Pending NEVER expires. Returns the updated Pending.
+ * Throws if the cluster does not exist OR is not currently pending (you cannot skip a question
+ * that was never forwarded).
+ */
+export function skipPending(
+  corpus: Corpus,
+  clusterId: string,
+  now: string = new Date().toISOString(),
+): Pending {
+  const cluster = getCluster(corpus, clusterId);
+  if (!cluster) throw new Error(`skipPending: no cluster ${clusterId}`);
+  if (!cluster.pending) throw new Error(`skipPending: cluster ${clusterId} is not pending`);
+  cluster.pending.skipCount += 1;
+  cluster.pending.lastSurfacedAt = now;
+  return cluster.pending;
+}
+
+/** True iff a pending record is DEMOTED (skipped at/above the demote threshold K). */
+export function isDemoted(pending: Pending, threshold: number = SKIP_DEMOTE_THRESHOLD): boolean {
+  return pending.skipCount >= threshold;
+}
+
+/**
+ * Surfacing order for PENDING clusters (design: "oldest-unanswered first", with skipped-K-times
+ * DEMOTED to sort after non-demoted). Returns a NEW array of the corpus's pending clusters,
+ * ordered: oldest forwardedAt, then oldest firstSeen, then clusterId. Concretely: non-demoted
+ * before demoted; within each band oldest forwardedAt first; on a forwardedAt collision, oldest
+ * firstSeen first (a stable, meaningful cluster-age tiebreak — mirrors get_patterns, replacing the
+ * arbitrary clusterId fallback); clusterId only as the last legacy guard for clusters lacking
+ * firstSeen. Does NOT mutate. Used by get_pending_questions.
+ */
+export function orderPending(
+  corpus: Corpus,
+  threshold: number = SKIP_DEMOTE_THRESHOLD,
+): Cluster[] {
+  return corpus.clusters
+    .filter((c): c is Cluster & { pending: Pending } => c.pending !== undefined)
+    .sort((a, b) => {
+      const aDem = isDemoted(a.pending, threshold) ? 1 : 0;
+      const bDem = isDemoted(b.pending, threshold) ? 1 : 0;
+      if (aDem !== bDem) return aDem - bDem; // non-demoted (0) before demoted (1)
+      // oldest forwardedAt first
+      if (a.pending.forwardedAt !== b.pending.forwardedAt) {
+        return a.pending.forwardedAt < b.pending.forwardedAt ? -1 : 1;
+      }
+      // oldest firstSeen first (stable cluster age). Clusters WITH a firstSeen sort before those
+      // without; among those with one, earlier wins. Mirrors get_patterns' meaningful tiebreak.
+      const af = a.firstSeen;
+      const bf = b.firstSeen;
+      if (af !== undefined && bf !== undefined) {
+        if (af !== bf) return af < bf ? -1 : 1;
+      } else if (af !== undefined) {
+        return -1;
+      } else if (bf !== undefined) {
+        return 1;
+      }
+      // last legacy guard for clusters lacking firstSeen
+      return a.clusterId < b.clusterId ? -1 : a.clusterId > b.clusterId ? 1 : 0;
+    });
 }

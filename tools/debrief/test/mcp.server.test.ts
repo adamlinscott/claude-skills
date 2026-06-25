@@ -54,7 +54,7 @@ function payload(res: unknown): any {
   return JSON.parse(content[0].text);
 }
 
-test("MCP server exposes all eight tools", async () => {
+test("MCP server exposes all ten tools", async () => {
   const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
   const { corpusPath } = await seedCorpus(dir);
   const client = await connect(corpusPath);
@@ -66,8 +66,10 @@ test("MCP server exposes all eight tools", async () => {
     "export_rules_file",
     "get_evidence",
     "get_patterns",
+    "get_pending_questions",
     "merge_clusters",
     "record_protocol",
+    "skip_question",
     "submit_answer",
   ]);
   await client.close();
@@ -270,6 +272,104 @@ test("get_patterns minCount over the wire filters below the bar", async () => {
   const barred = payload(await client.callTool({ name: "get_patterns", arguments: { minCount: 2 } }));
   assert.equal(barred.patterns.length, 1, "only the count-3 cluster clears a minCount:2 bar");
   assert.equal(barred.patterns[0].count, 3);
+
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("pending lifecycle over the wire: forward persists pending; survives reconnect (cross-session); user answer clears", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+
+  // Session 1: forward a question to the user (mode:'user') -> marks + PERSISTS pending.
+  {
+    const client = await connect(corpusPath);
+    const res = payload(
+      await client.callTool({ name: "answer_open_question", arguments: { clusterId: clusterIds[0], mode: "user" } }),
+    );
+    assert.equal(res.status, "pending-user");
+    assert.ok(res.pending && typeof res.pending.forwardedAt === "string", "result echoes the pending record");
+    assert.equal(res.pending.skipCount, 0);
+    await client.close();
+  }
+
+  // It is on disk (persisted) so it survives across sessions.
+  const hot1 = JSON.parse(await readFile(corpusPath, "utf8"));
+  const cl1 = hot1.clusters.find((c: { clusterId: string }) => c.clusterId === clusterIds[0]);
+  assert.ok(cl1.pending, "pending persisted to disk");
+
+  // Session 2 (a FRESH server reading the same file): get_pending_questions surfaces it.
+  {
+    const client = await connect(corpusPath);
+    const pend = payload(await client.callTool({ name: "get_pending_questions", arguments: {} }));
+    assert.equal(pend.totalPending, 1);
+    assert.equal(pend.pending.length, 1);
+    assert.equal(pend.pending[0].clusterId, clusterIds[0]);
+    assert.equal(pend.pending[0].demoted, false);
+    assert.equal(JSON.stringify(pend).includes(SENTINEL), false, "pending list is evidence-free");
+
+    // Defer it once via skip_question -> persists an incremented skipCount.
+    const sk = payload(await client.callTool({ name: "skip_question", arguments: { clusterId: clusterIds[0] } }));
+    assert.equal(sk.skipCount, 1);
+    await client.close();
+  }
+  const hot2 = JSON.parse(await readFile(corpusPath, "utf8"));
+  const cl2 = hot2.clusters.find((c: { clusterId: string }) => c.clusterId === clusterIds[0]);
+  assert.equal(cl2.pending.skipCount, 1, "skip persisted");
+
+  // Session 3: a confirmed source:user answer RESOLVES it -> pending cleared on disk.
+  {
+    const client = await connect(corpusPath);
+    const r = payload(
+      await client.callTool({ name: "submit_answer", arguments: { clusterId: clusterIds[0], text: "real answer", source: "user", confirmed: true } }),
+    );
+    assert.equal(r.source, "user");
+    const pend = payload(await client.callTool({ name: "get_pending_questions", arguments: {} }));
+    assert.equal(pend.totalPending, 0, "user answer cleared the pending question");
+    await client.close();
+  }
+  const hot3 = JSON.parse(await readFile(corpusPath, "utf8"));
+  const cl3 = hot3.clusters.find((c: { clusterId: string }) => c.clusterId === clusterIds[0]);
+  assert.equal(cl3.pending, undefined, "pending cleared on disk");
+
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("skip_question over the wire surfaces unknown/not-pending as a recoverable error", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+
+  const unknown = (await client.callTool({ name: "skip_question", arguments: { clusterId: "nope" } })) as { isError?: boolean; content: Array<{ text: string }> };
+  assert.equal(unknown.isError, true);
+  assert.match(unknown.content[0].text, /no cluster/);
+
+  // a real but not-pending cluster also errors (you can't skip what was never forwarded)
+  const notPending = (await client.callTool({ name: "skip_question", arguments: { clusterId: clusterIds[0] } })) as { isError?: boolean; content: Array<{ text: string }> };
+  assert.equal(notPending.isError, true);
+  assert.match(notPending.content[0].text, /not pending/);
+
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("get_patterns answeredBy:'inferred' over the wire lists only inferred-only clusters", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+
+  // cluster[0] gets a user answer; cluster[1] gets an inferred-only answer.
+  await client.callTool({ name: "submit_answer", arguments: { clusterId: clusterIds[0], text: "u", source: "user", confirmed: true } });
+  await client.callTool({ name: "submit_answer", arguments: { clusterId: clusterIds[1], text: "i" } }); // inferred
+
+  const inferred = payload(await client.callTool({ name: "get_patterns", arguments: { answeredBy: "inferred" } }));
+  assert.equal(inferred.patterns.length, 1);
+  assert.equal(inferred.patterns[0].clusterId, clusterIds[1]);
+  assert.equal(inferred.patterns[0].answerSource, "inferred");
+
+  const userGrounded = payload(await client.callTool({ name: "get_patterns", arguments: { answeredBy: "user" } }));
+  assert.equal(userGrounded.patterns.length, 1);
+  assert.equal(userGrounded.patterns[0].clusterId, clusterIds[0]);
 
   await client.close();
   await rm(dir, { recursive: true, force: true });

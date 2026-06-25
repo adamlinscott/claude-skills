@@ -91,7 +91,7 @@ for (const cmd of ["serve", "mcp"] as const) {
       const corpusPath = await seedCorpus(dir);
       const { stdout, stderr } = await driveServer(cmd, corpusPath);
 
-      // (a) stdout is pure JSON-RPC and lists the five tool names.
+      // (a) stdout is pure JSON-RPC and lists the registered tool names.
       const msgs = frames(stdout);
       const toolList = msgs.find((m) => m.id === 2);
       assert.ok(toolList, "expected a tools/list response (id 2) on stdout");
@@ -102,8 +102,10 @@ for (const cmd of ["serve", "mcp"] as const) {
         "export_rules_file",
         "get_evidence",
         "get_patterns",
+        "get_pending_questions",
         "merge_clusters",
         "record_protocol",
+        "skip_question",
         "submit_answer",
       ]);
 

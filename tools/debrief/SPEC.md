@@ -119,6 +119,56 @@ independently keyed).
 - **Question text is NOT persisted.** It is an ephemeral rendering the connected LLM
   reproduces on demand. The stable artifact is the answer, keyed by `clusterId`. (`question`
   is an optional cache slot, normally absent.)
+- **Inferred answers are reviewable.** Because inferred answers can be silently wrong, the
+  agent can list the inferred-only clusters (those whose effective answer is `source:inferred`,
+  i.e. no `user` answer yet) via `get_patterns({ answeredBy: "inferred" })` and re-confirm them
+  with the user ("I previously inferred X — still right?"). `answeredBy` also takes `"user"`
+  (user-grounded) and `"none"` (unanswered).
+
+## Cluster timestamps (surfacing order)
+
+- **`firstSeen`** (optional ISO-8601) is the cluster's creation time, set ONCE and never
+  changed. On a `mergeClusters` the surviving cluster keeps the EARLIER of the two `firstSeen`
+  values (an absorbed older cluster's age is preserved). It is the deterministic **oldest-first
+  tiebreak** for surfacing order.
+- **`lastActivityAt`** (optional ISO-8601) advances whenever the cluster is touched (creation,
+  new evidence merged in via `mergeCandidates`, or a `mergeClusters`). Volatile.
+- Both are optional for backward-compat with pre-`firstSeen` corpora; readers MUST tolerate
+  their absence.
+- **`get_patterns` surfacing order:** frequency (`count`) descending, then
+  unanswered-before-answered, then oldest-first by `firstSeen` (clusters lacking `firstSeen`
+  sort last within that band, then `clusterId` as a final deterministic guard). Evidence-free
+  and paginated.
+
+## Pending questions (forwarded-but-unanswered)
+
+A question forwarded to the user (`answer_open_question` mode `"user"`) becomes **pending** and
+re-surfaces across sessions until answered. It is carried on the cluster as an OPTIONAL
+`pending` record `{ forwardedAt, skipCount, lastSurfacedAt? }`:
+
+- **`forwardedAt`** — when the question was first forwarded (the oldest-first sort key).
+- **`skipCount`** — times the pending question has been skipped (deferred).
+- **`lastSurfacedAt`** — when it was last surfaced/skipped, if ever.
+
+Lifecycle (design "Interaction states" — orphaned pending questions):
+
+- **Mark.** `answer_open_question` mode `"user"` MARKS the cluster pending (sets `forwardedAt`
+  if new). Re-forwarding is idempotent: it PRESERVES the original `forwardedAt` and the
+  accumulated `skipCount` (no reset, no undo of demotion progress).
+- **Never expires.** Pending is still valid until answered; only its visibility is bounded.
+- **Surface (capped).** `get_pending_questions({ limit? })` returns at most **N** pending
+  clusters (default `MAX_PENDING_SURFACED` = 5), OLDEST `forwardedAt` first, evidence-free
+  (summary + a pointer to `get_evidence`). The queue can't overwhelm even though pending never
+  expires.
+- **Demote.** A pending question skipped **K** (`SKIP_DEMOTE_THRESHOLD` = 3) or more times is
+  DEMOTED in surfacing order (sorts AFTER non-demoted), not removed and not nagging.
+  `skip_question({ clusterId })` increments `skipCount` + stamps `lastSurfacedAt`; it throws if
+  the cluster is unknown or not currently pending.
+- **Resolve.** A confirmed `source:user` answer (`submit_answer` with `source:"user"` +
+  `confirmed:true`) CLEARS the pending state (removes the field). An `inferred` answer does NOT
+  clear pending — the forwarded question still awaits genuine user ground truth.
+- **Merge.** If either merged cluster was pending, the surviving cluster stays pending with the
+  EARLIER `forwardedAt` and the MAX `skipCount` (a demotion survives a merge).
 
 ## Standing protocols (deepens over time)
 

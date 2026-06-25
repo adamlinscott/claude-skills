@@ -9,6 +9,8 @@ import {
   mergeClusters,
   addAlias,
   recordProtocol,
+  getPendingQuestions,
+  skipQuestion,
   UNTRUSTED_CORPUS_NOTICE,
 } from "../src/mcp/handlers.ts";
 import { resolveOrCreateCluster, getCluster, lookupClusterId, effectiveAnswer } from "../src/corpus/identity.ts";
@@ -305,4 +307,156 @@ test("record_protocol updates an existing protocol by protocolId (no duplicate)"
   assert.equal(corpus.protocols.length, 1, "update must not append a duplicate");
   assert.equal(corpus.protocols[0].hypothesis, "v2 refined");
   assert.equal(corpus.protocols[0].confidence, 0.9);
+});
+
+// ── pending-question lifecycle ────────────────────────────────────────────────────────────────
+
+test("answer_open_question mode:user MARKS the cluster pending (forwardedAt set, skipCount 0)", () => {
+  const { corpus, evidence, ids } = fixture(1);
+  assert.equal(corpus.clusters[0].pending, undefined, "not pending before forward");
+  const res = answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[0], mode: "user" }, now)!;
+  assert.equal(res.status, "pending-user");
+  assert.ok(res.pending, "result echoes the pending record");
+  assert.equal(res.pending!.forwardedAt, now);
+  assert.equal(res.pending!.skipCount, 0);
+  // it actually mutated the cluster
+  assert.ok(corpus.clusters[0].pending, "cluster marked pending");
+  assert.equal(corpus.clusters[0].pending!.forwardedAt, now);
+});
+
+test("re-forwarding does NOT reset forwardedAt or skipCount (idempotent on re-forward)", () => {
+  const { corpus, evidence, ids } = fixture(1);
+  answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[0], mode: "user" }, "2026-01-01T00:00:00.000Z");
+  skipQuestion(corpus, { clusterId: ids[0] }, now); // skipCount -> 1
+  const later = answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[0], mode: "user" }, "2026-12-31T00:00:00.000Z")!;
+  assert.equal(later.pending!.forwardedAt, "2026-01-01T00:00:00.000Z", "forwardedAt preserved");
+  assert.equal(later.pending!.skipCount, 1, "skipCount preserved (no reset/undo of demotion progress)");
+});
+
+test("submit_answer with confirmed source:user CLEARS pending; inferred does NOT", () => {
+  const { corpus, evidence, ids } = fixture(2);
+  answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[0], mode: "user" }, now);
+  answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[1], mode: "user" }, now);
+
+  // an INFERRED answer must not resolve the forwarded question
+  submitAnswer(corpus, { clusterId: ids[1], text: "guess" });
+  assert.ok(corpus.clusters[1].pending, "inferred answer leaves pending intact");
+
+  // a confirmed USER answer resolves it
+  submitAnswer(corpus, { clusterId: ids[0], text: "real", source: "user", confirmed: true });
+  assert.equal(corpus.clusters[0].pending, undefined, "confirmed user answer clears pending");
+});
+
+test("get_pending_questions returns oldest-first and caps at N (default 5)", () => {
+  const { corpus, evidence, ids } = fixture(7);
+  // forward all 7, with increasing forwardedAt so order is observable (i=0 oldest)
+  for (let i = 0; i < 7; i++) {
+    const ts = `2026-06-2${i}T00:00:00.000Z`;
+    answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[i], mode: "user" }, ts);
+  }
+  const res = getPendingQuestions(corpus);
+  assert.equal(res.totalPending, 7, "all 7 are pending");
+  assert.equal(res.pending.length, 5, "capped at N=5 per call");
+  // oldest-first: the first five are ids[0..4] in order
+  assert.deepEqual(res.pending.map((p) => p.clusterId), ids.slice(0, 5));
+  // explicit smaller limit honored
+  assert.equal(getPendingQuestions(corpus, { limit: 2 }).pending.length, 2);
+});
+
+test("get_pending_questions DEMOTES a question skipped K (3) times: it sorts after non-demoted", () => {
+  const { corpus, evidence, ids } = fixture(2);
+  // ids[0] is OLDER (would normally sort first)...
+  answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[0], mode: "user" }, "2026-01-01T00:00:00.000Z");
+  answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[1], mode: "user" }, "2026-02-01T00:00:00.000Z");
+
+  // skip the older one to the demote threshold K=3
+  skipQuestion(corpus, { clusterId: ids[0] }, now);
+  skipQuestion(corpus, { clusterId: ids[0] }, now);
+  const third = skipQuestion(corpus, { clusterId: ids[0] }, now);
+  assert.equal(third.skipCount, 3);
+  assert.equal(third.demoted, true, "K=3 skips marks it demoted");
+
+  const res = getPendingQuestions(corpus);
+  // even though ids[0] is older, being demoted pushes it AFTER the non-demoted ids[1]
+  assert.deepEqual(res.pending.map((p) => p.clusterId), [ids[1], ids[0]]);
+  assert.equal(res.pending[0].demoted, false);
+  assert.equal(res.pending[1].demoted, true);
+});
+
+test("get_pending_questions is evidence-free (no snippets leak)", () => {
+  const { corpus, evidence, ids } = fixture(1);
+  answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[0], mode: "user" }, now);
+  const res = getPendingQuestions(corpus);
+  assert.equal(JSON.stringify(res).includes(SENTINEL), false, "pending list must not contain raw snippets");
+  assert.equal(res.notice, UNTRUSTED_CORPUS_NOTICE);
+});
+
+test("skip_question throws for unknown and for not-pending clusters", () => {
+  const { corpus, ids } = fixture(1);
+  assert.throws(() => skipQuestion(corpus, { clusterId: "nope" }), /no cluster/);
+  assert.throws(() => skipQuestion(corpus, { clusterId: ids[0] }), /not pending/);
+});
+
+// ── inferred-only review (answeredBy filter) ──────────────────────────────────────────────────
+
+test("get_patterns answeredBy filter partitions user / inferred-only / none", () => {
+  const { corpus, ids } = fixture(3);
+  // ids[0] -> user (outranks); ids[1] -> inferred only; ids[2] -> no answer
+  submitAnswer(corpus, { clusterId: ids[0], text: "u", source: "user", confirmed: true });
+  submitAnswer(corpus, { clusterId: ids[1], text: "i" }); // inferred
+
+  const inferredOnly = getPatterns(corpus, { answeredBy: "inferred" });
+  assert.deepEqual(inferredOnly.patterns.map((p) => p.clusterId), [ids[1]]);
+  assert.equal(inferredOnly.patterns[0].answerSource, "inferred");
+
+  const userGrounded = getPatterns(corpus, { answeredBy: "user" });
+  assert.deepEqual(userGrounded.patterns.map((p) => p.clusterId), [ids[0]]);
+
+  const none = getPatterns(corpus, { answeredBy: "none" });
+  assert.deepEqual(none.patterns.map((p) => p.clusterId), [ids[2]]);
+});
+
+test("get_patterns answeredBy:'inferred' EXCLUDES a cluster once it has a user answer (re-confirmed)", () => {
+  const { corpus, ids } = fixture(1);
+  submitAnswer(corpus, { clusterId: ids[0], text: "i" }); // inferred only -> listed
+  assert.equal(getPatterns(corpus, { answeredBy: "inferred" }).patterns.length, 1);
+  // user re-confirms -> user outranks inferred -> no longer inferred-only
+  submitAnswer(corpus, { clusterId: ids[0], text: "confirmed", source: "user", confirmed: true });
+  assert.equal(getPatterns(corpus, { answeredBy: "inferred" }).patterns.length, 0, "now user-grounded, not inferred-only");
+});
+
+test("get_patterns surfaces a pending flag for forwarded clusters", () => {
+  const { corpus, evidence, ids } = fixture(2);
+  answerOpenQuestion(corpus, evidence, INSTRUCTIONS, { clusterId: ids[0], mode: "user" }, now);
+  const res = getPatterns(corpus);
+  const p0 = res.patterns.find((p) => p.clusterId === ids[0])!;
+  const p1 = res.patterns.find((p) => p.clusterId === ids[1])!;
+  assert.equal(p0.pending, true, "forwarded cluster reports pending:true");
+  assert.equal(p1.pending, undefined, "non-forwarded cluster omits the pending flag");
+});
+
+// ── get_patterns surfacing order (firstSeen tiebreak) ─────────────────────────────────────────
+
+test("get_patterns oldest-first (firstSeen) tiebreak among equal-count clusters", () => {
+  const corpus = emptyCorpus(now);
+  // three clusters, SAME count, distinct firstSeen out of clusterId order
+  const a = resolveOrCreateCluster(corpus, "after-error", "a", "sa", "2026-03-01T00:00:00.000Z");
+  const b = resolveOrCreateCluster(corpus, "after-error", "b", "sb", "2026-01-01T00:00:00.000Z");
+  const c = resolveOrCreateCluster(corpus, "after-error", "c", "sc", "2026-02-01T00:00:00.000Z");
+  for (const cl of [a, b, c]) cl.count = 5;
+  const res = getPatterns(corpus);
+  // equal count -> oldest firstSeen first: b (Jan) < c (Feb) < a (Mar)
+  assert.deepEqual(res.patterns.map((p) => p.clusterId), [b.clusterId, c.clusterId, a.clusterId]);
+});
+
+test("get_patterns orders unanswered before answered within equal count", () => {
+  const corpus = emptyCorpus(now);
+  const a = resolveOrCreateCluster(corpus, "after-error", "a", "sa", "2026-01-01T00:00:00.000Z");
+  const b = resolveOrCreateCluster(corpus, "after-error", "b", "sb", "2026-02-01T00:00:00.000Z");
+  a.count = 5;
+  b.count = 5;
+  // answer the OLDER one (a). Despite being older, an answered cluster sorts after an unanswered one.
+  submitAnswer(corpus, { clusterId: a.clusterId, text: "x", source: "user", confirmed: true });
+  const res = getPatterns(corpus);
+  assert.deepEqual(res.patterns.map((p) => p.clusterId), [b.clusterId, a.clusterId]);
 });

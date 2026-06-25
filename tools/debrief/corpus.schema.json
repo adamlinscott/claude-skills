@@ -109,9 +109,46 @@
           "description": "True iff this cluster is the target of an agent-driven semantic merge (merge_clusters) — it absorbed another cluster's aliases + evidence + answers. Absent on raw (CLI-coarse) clusters.",
           "type": "boolean"
         },
+        "pending": {
+          "description": "Pending-question state. Present iff a question was forwarded to the user (answer_open_question mode:'user') and not yet resolved by a confirmed source:user answer. Re-surfaces across sessions; never expires; cleared when the user answers. Absent on clusters with no outstanding forwarded question.",
+          "$ref": "#/definitions/Pending"
+        },
+        "firstSeen": {
+          "description": "ISO-8601 timestamp the cluster was first created. Stable — set once, never changed (a merge keeps the earlier of the two). The deterministic oldest-first tiebreak for surfacing order. Optional for backward-compat.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastActivityAt": {
+          "description": "ISO-8601 timestamp of the last activity touching this cluster (creation, new evidence merged, or a merge). Volatile. Optional for backward-compat.",
+          "type": "string",
+          "format": "date-time"
+        },
         "answers": {
           "type": "array",
           "items": { "$ref": "#/definitions/Answer" }
+        }
+      }
+    },
+    "Pending": {
+      "description": "Pending-question state for a cluster.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["forwardedAt", "skipCount"],
+      "properties": {
+        "forwardedAt": {
+          "description": "ISO-8601 timestamp the question was first forwarded to the user. The oldest-first sort key.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "skipCount": {
+          "description": "Times this pending question has been skipped (surfaced but deferred). At or above the skip threshold (K) the question is demoted in surfacing priority.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastSurfacedAt": {
+          "description": "ISO-8601 timestamp it was last skipped (via skip_question), if ever. Stamped only on skip; surfacing via get_pending_questions is a lock-free read that does not stamp it.",
+          "type": "string",
+          "format": "date-time"
         }
       }
     },
