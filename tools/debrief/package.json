@@ -15,7 +15,10 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "zod": "^3.25.0 || ^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
