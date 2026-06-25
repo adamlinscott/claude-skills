@@ -26,8 +26,12 @@ instruction and borrows the connected agent's reasoning.
    the privacy-clean portable shape. Reads take no writer lock.
 3. Identity = **opaque surrogate `clusterId` (UUID)**; `(detector, normalizedSubject)`
    is a lookup index, never the identity. (No content-hash patternId.)
-4. Detector = high-recall candidates + **redirect-vs-continue valence** + agent confirm.
-   Valence is a primary spike: "now add tests" / "ship it" are continuation, not correction.
+4. **Intent is the LLM's job, never hardcoded.** The CLI emits high-recall candidates by
+   STRUCTURE only (a human turn after an assistant completion/tool_use; `tool_result.is_error`)
+   and the **connected LLM classifies intent** (correction / bug-report / approval / question)
+   and generates the "why" questions. No keyword/regex/valence matching, not even a first
+   draft — the T2 spike proved lexical intent-matching fails (31-51% unclassifiable, broken
+   by curly apostrophes). `src/extract/parse.ts` is structural-only; it reads no intent.
 5. Corpus carries **standing-protocol state** (hypotheses + open contradictions) so depth
    compounds across sessions instead of re-litigating questions.
 
