@@ -22,6 +22,14 @@ standard shape *by construction*. The single serialization choke point (`seriali
 strips any stray snippet a malformed cluster might carry, so a hot file can never leak a raw
 snippet even if an upstream bug attaches one to a cluster.
 
+> **Caveat — before enabling sharing (E4):** the cluster `normalizedSubject` is a *bounded*
+> coarse label (normalize + cap to the first N tokens of a turn), not a hash, so a short
+> label CAN still contain a secret or path typed in a turn's opening words. This is accepted
+> for v1 because the hot file is local and sharing is deferred. **Before the sharing feature
+> ships, tighten this** — make labels prose-free (opaque/hashed + agent-assigned clean topics)
+> or run a secret/path scrubber over them. Until then, do not treat the hot file as safe to
+> publish unreviewed.
+
 ## Versioning
 
 - `schemaVersion` (hot file) and `schemaVersion` (sidecar) are independent integers, both
