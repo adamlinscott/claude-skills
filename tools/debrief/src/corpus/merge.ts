@@ -14,7 +14,7 @@
  */
 
 import type { Corpus, EvidenceStore, CandidateCluster, EvidenceItem } from "./types.js";
-import { resolveOrCreateCluster, makeEvidenceItem, countSessions } from "./identity.js";
+import { resolveOrCreateCluster, makeEvidenceItem, countSessions, computeRelational } from "./identity.js";
 
 /** Summary of one merge pass (for CLI progress / tests). */
 export interface MergeResult {
@@ -62,6 +62,9 @@ export function mergeCandidates(
     // Recompute counts from the deduped union so a re-merge of the same session is idempotent.
     cluster.count = cluster.evidenceIds.length;
     cluster.sessionCount = countSessions(cluster.evidenceIds, evidence);
+    // Recompute the objective relational FACTS (T7) from the deduped union — distinctRepos/branches/
+    // sessions + firstTs/lastTs stay correct as evidence is added on re-extraction. Facts only.
+    cluster.relational = computeRelational(cluster.evidenceIds, evidence);
 
     // Advance lastActivityAt when NEW evidence actually landed (re-merging the same session,
     // which adds nothing, is not "activity"). firstSeen was set at create and is left stable.

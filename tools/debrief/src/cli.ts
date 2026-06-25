@@ -12,7 +12,7 @@
  *   serve   [corpus.json]                   start the MCP stdio server (alias: mcp)
  */
 import { candidatesFromFile, type Candidate } from "./extract/candidates.js";
-import { makeEvidenceItem, normalizeSubject } from "./corpus/identity.js";
+import { makeEvidenceItem, coarseSubject } from "./corpus/identity.js";
 import { loadCorpus, loadEvidence, saveCorpus, saveEvidence, CorpusReadError } from "./corpus/store.js";
 import { mergeCandidates } from "./corpus/merge.js";
 import type { CandidateCluster } from "./corpus/types.js";
@@ -32,10 +32,13 @@ const DEFAULT_CORPUS = "corpus.json";
  * 1 and clustering never happened. The coarse label lands turns that differ only in
  * case/whitespace/punctuation in ONE cluster, restoring meaningful counts.
  *
- * normalizedSubject is an EVIDENCE-FREE hot-file field by design (a coarse label, not a raw
- * snippet). The raw turn text still goes ONLY into the sidecar snippet (makeEvidenceItem
- * below); the hot file never receives it. The connected agent later refines / semantically
- * merges subjects via the alias map.
+ * normalizedSubject is a BOUNDED coarse hot-file LABEL by design (coarseSubject: normalize + cap
+ * to the first MAX_SUBJECT_TOKENS tokens), NOT the whole turn and NOT a raw verbatim snippet. The
+ * cap is the privacy bound — without it the entire user message (and any typed absolute path, with
+ * slashes folded to spaces) would be copied onto the supposedly snippet-free surface. The raw turn
+ * text still goes ONLY into the sidecar snippet (makeEvidenceItem below); the hot file gets only the
+ * bounded label. Note: the label is derived from prose, so it is NOT counts-only — see coarseSubject.
+ * The connected agent later refines / semantically merges subjects via the alias map.
  */
 function candidatesToClusters(cands: Candidate[]): CandidateCluster[] {
   const byKey = new Map<string, CandidateCluster>();
@@ -48,8 +51,9 @@ function candidatesToClusters(cands: Candidate[]): CandidateCluster[] {
           ? "turn-after-completion"
           : "unprompted-turn";
     if (!c.turn.text.trim()) continue;
-    // Coarse deterministic subject label (evidence-free); raw prose stays in the sidecar.
-    const normalizedSubject = normalizeSubject(c.turn.text);
+    // Bounded coarse deterministic subject label (capped to MAX_SUBJECT_TOKENS); raw prose stays in
+    // the sidecar. The cap stops the whole turn (and typed absolute paths) leaking onto the hot file.
+    const normalizedSubject = coarseSubject(c.turn.text);
     const key = detector + " " + normalizedSubject;
     let bucket = byKey.get(key);
     if (!bucket) {
@@ -62,6 +66,11 @@ function candidatesToClusters(cands: Candidate[]): CandidateCluster[] {
       makeEvidenceItem({
         sessionId: c.turn.sessionId ?? "unknown-session",
         ts: c.turn.timestamp,
+        // cwd / gitBranch are captured onto the SIDECAR evidence item ONLY (they are
+        // privacy-sensitive absolute paths / branch names). They never reach the hot file; the
+        // hot file's relational facts carry only COUNTS derived from them (T7).
+        cwd: c.turn.cwd,
+        gitBranch: c.turn.gitBranch,
         snippet: c.turn.text,
       }),
     );
