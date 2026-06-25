@@ -7,8 +7,9 @@ rebuild, and (because the MCP server reads them live per call) no server restart
 
 | File | What it controls | When to edit |
 |------|------------------|--------------|
-| `classify-intent.md` | How the LLM labels each candidate turn (correction / bug-report / approval / question) | If classifications feel wrong, sharpen this |
-| `depth-instruction.md` | How the LLM turns a pattern + evidence into an open "why" question | If questions feel generic, deepen this |
+| `classify-intent.md` | How the LLM tags each turn: a primary + optional secondary kind (redirect / observed / continue / query), and names the turn's narrow topic | If tags or topics feel wrong, sharpen this |
+| `group-themes.md` | The tidy-up pass: how the LLM fuses true-duplicate topics (conservative) and groups related ones into broad, non-destructive themes for deeper questions | If themes are too fragmented or too lumpy, tune this |
+| `depth-instruction.md` | How the LLM turns a theme (or single cluster) + evidence into an open "why" question | If questions feel generic, deepen this |
 
 These are validated against your labeled eval set
 (`~/.gstack/projects/adamlinscott-claude-skills/t2-valence-labeling.md`): change a prompt,
