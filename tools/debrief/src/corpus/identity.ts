@@ -15,7 +15,7 @@
  */
 
 import { randomUUID, createHash } from "node:crypto";
-import type { Corpus, Cluster, EvidenceItem, EvidenceStore, Pending } from "./types.js";
+import type { Corpus, Cluster, EvidenceItem, EvidenceStore, Pending, Theme } from "./types.js";
 import { SKIP_DEMOTE_THRESHOLD } from "./types.js";
 
 /** Pick the later of two optional ISO timestamps as a `{ lastSurfacedAt }` spread, or `{}`. */
@@ -278,6 +278,20 @@ export function mergeClusters(
   }
   // (intoP && !fromP) -> into.pending already correct; (!fromP && !intoP) -> stays absent.
 
+  // TIER 2 referential integrity: every theme that referenced the absorbed `from` cluster must
+  // replace it with the surviving `into` (deduped). No theme may keep a dangling member id after a
+  // merge. A theme that already contained both ends up with one membership (the union dedups).
+  for (const theme of corpus.themes) {
+    if (!theme.memberClusterIds.includes(fromClusterId)) continue;
+    const rewritten: string[] = [];
+    for (const id of theme.memberClusterIds) {
+      const mapped = id === fromClusterId ? intoClusterId : id;
+      if (!rewritten.includes(mapped)) rewritten.push(mapped);
+    }
+    theme.memberClusterIds = rewritten;
+    theme.lastActivityAt = now;
+  }
+
   // Remove the absorbed cluster object.
   corpus.clusters = corpus.clusters.filter((c) => c.clusterId !== fromClusterId);
 
@@ -458,8 +472,17 @@ export function makeEvidenceItem(
  * same source, the most recent (by ts) wins.
  */
 export function effectiveAnswer(cluster: Cluster): Cluster["answers"][number] | undefined {
+  return effectiveAnswerOf(cluster.answers);
+}
+
+/**
+ * Read-time precedence over a raw answers[] (shared by clusters AND themes, which carry the same
+ * answer shape): a user answer OUTRANKS any inferred answer; among same-source answers the most
+ * recent (by ts) wins. Returns undefined when there are no answers.
+ */
+export function effectiveAnswerOf(answers: Cluster["answers"]): Cluster["answers"][number] | undefined {
   let best: Cluster["answers"][number] | undefined;
-  for (const a of cluster.answers) {
+  for (const a of answers) {
     if (!best) {
       best = a;
       continue;
@@ -569,5 +592,187 @@ export function orderPending(
       }
       // last legacy guard for clusters lacking firstSeen
       return a.clusterId < b.clusterId ? -1 : a.clusterId > b.clusterId ? 1 : 0;
+    });
+}
+
+// ── TIER 2: themes (non-destructive overlay grouping related clusters) ─────────────────────────
+
+/** Find a theme by its surrogate id. */
+export function getTheme(corpus: Corpus, themeId: string): Theme | undefined {
+  return corpus.themes.find((t) => t.themeId === themeId);
+}
+
+/** Find a theme by exact name (case-sensitive), for group_theme's "extend by name". */
+export function getThemeByName(corpus: Corpus, name: string): Theme | undefined {
+  return corpus.themes.find((t) => t.name === name);
+}
+
+/**
+ * CREATE a new theme grouping the given clusters (non-destructive — member clusters are
+ * unchanged; a cluster may also belong to other themes). The member set is deduped and validated:
+ * a clusterId with no cluster object is REFUSED (no dangling member ids ever — the corpus is
+ * untrusted, so a poisoned create cannot manufacture phantom members). Mints a fresh themeId.
+ */
+export function createTheme(
+  corpus: Corpus,
+  name: string,
+  clusterIds: string[],
+  now: string = new Date().toISOString(),
+): Theme {
+  const members: string[] = [];
+  for (const id of clusterIds) {
+    if (!getCluster(corpus, id)) {
+      throw new Error(`createTheme: refusing to add non-existent clusterId ${id}`);
+    }
+    if (!members.includes(id)) members.push(id);
+  }
+  const theme: Theme = {
+    themeId: randomUUID(),
+    name,
+    memberClusterIds: members,
+    answers: [],
+    firstSeen: now,
+    lastActivityAt: now,
+  };
+  corpus.themes.push(theme);
+  return theme;
+}
+
+/**
+ * ADD a cluster to a theme (idempotent — a cluster already in the theme is a no-op; a cluster MAY
+ * belong to multiple themes). Refuses a non-existent clusterId (poisoning guard) or unknown
+ * themeId. Returns true iff the membership set changed.
+ */
+export function addClusterToTheme(
+  corpus: Corpus,
+  themeId: string,
+  clusterId: string,
+  now: string = new Date().toISOString(),
+): boolean {
+  const theme = getTheme(corpus, themeId);
+  if (!theme) throw new Error(`addClusterToTheme: no theme ${themeId}`);
+  if (!getCluster(corpus, clusterId)) {
+    throw new Error(`addClusterToTheme: refusing to add non-existent clusterId ${clusterId}`);
+  }
+  if (theme.memberClusterIds.includes(clusterId)) return false; // idempotent
+  theme.memberClusterIds.push(clusterId);
+  theme.lastActivityAt = now;
+  return true;
+}
+
+/**
+ * REMOVE a cluster from a theme (regrouping is free — themes are reversible). Returns true iff the
+ * cluster was a member and was dropped. Throws on unknown theme.
+ */
+export function removeClusterFromTheme(
+  corpus: Corpus,
+  themeId: string,
+  clusterId: string,
+  now: string = new Date().toISOString(),
+): boolean {
+  const theme = getTheme(corpus, themeId);
+  if (!theme) throw new Error(`removeClusterFromTheme: no theme ${themeId}`);
+  const before = theme.memberClusterIds.length;
+  theme.memberClusterIds = theme.memberClusterIds.filter((id) => id !== clusterId);
+  if (theme.memberClusterIds.length === before) return false;
+  theme.lastActivityAt = now;
+  return true;
+}
+
+/**
+ * Drop a clusterId from EVERY theme that references it (the cleanup for a cluster removed outright,
+ * NOT via merge — merge rewrites the id to the survivor instead). Keeps the no-dangling-member-ids
+ * invariant. Returns the number of themes touched.
+ *
+ * NOTE: this is a FORWARD-LOOKING invariant guard with NO current production caller. v1 has no
+ * "delete a cluster outright" flow: the only path that removes a cluster object is mergeClusters()
+ * (which does its own from->survivor rewrite) and splitAlias() only ADDS clusters. So no dangling
+ * member id can arise today; this is the correct cleanup to wire into a future cluster-removal path.
+ * Unit-tested so the invariant it defends is pinned for whoever adds that path.
+ */
+export function dropClusterFromAllThemes(
+  corpus: Corpus,
+  clusterId: string,
+  now: string = new Date().toISOString(),
+): number {
+  let touched = 0;
+  for (const theme of corpus.themes) {
+    if (!theme.memberClusterIds.includes(clusterId)) continue;
+    theme.memberClusterIds = theme.memberClusterIds.filter((id) => id !== clusterId);
+    theme.lastActivityAt = now;
+    touched += 1;
+  }
+  return touched;
+}
+
+/** Read-time precedence for a THEME's answers (user outranks inferred). Mirrors effectiveAnswer. */
+export function effectiveThemeAnswer(theme: Theme): Theme["answers"][number] | undefined {
+  return effectiveAnswerOf(theme.answers);
+}
+
+/**
+ * MARK a theme pending (a theme-level question forwarded to the user). Idempotent on re-forward:
+ * preserves forwardedAt + skipCount. Mirrors markPending for clusters. Throws on unknown theme.
+ */
+export function markThemePending(
+  corpus: Corpus,
+  themeId: string,
+  now: string = new Date().toISOString(),
+): Pending {
+  const theme = getTheme(corpus, themeId);
+  if (!theme) throw new Error(`markThemePending: no theme ${themeId}`);
+  if (!theme.pending) {
+    theme.pending = { forwardedAt: now, skipCount: 0 };
+  }
+  theme.lastActivityAt = now;
+  return theme.pending;
+}
+
+/** CLEAR a theme's pending state (a confirmed user answer resolved it). Mirrors clearPending. */
+export function clearThemePending(corpus: Corpus, themeId: string): boolean {
+  const theme = getTheme(corpus, themeId);
+  if (!theme) throw new Error(`clearThemePending: no theme ${themeId}`);
+  if (!theme.pending) return false;
+  delete theme.pending;
+  return true;
+}
+
+/**
+ * SKIP a theme's pending question (increment skipCount + stamp lastSurfacedAt; demotes after K).
+ * Mirrors skipPending. Throws on unknown theme OR a theme that is not currently pending.
+ */
+export function skipThemePending(
+  corpus: Corpus,
+  themeId: string,
+  now: string = new Date().toISOString(),
+): Pending {
+  const theme = getTheme(corpus, themeId);
+  if (!theme) throw new Error(`skipThemePending: no theme ${themeId}`);
+  if (!theme.pending) throw new Error(`skipThemePending: theme ${themeId} is not pending`);
+  theme.pending.skipCount += 1;
+  theme.pending.lastSurfacedAt = now;
+  return theme.pending;
+}
+
+/**
+ * Surfacing order for PENDING themes (parallels orderPending for clusters): non-demoted before
+ * demoted; within a band oldest forwardedAt first; firstSeen as the stable age tiebreak; themeId
+ * as the final guard. Does NOT mutate.
+ */
+export function orderThemePending(
+  corpus: Corpus,
+  threshold: number = SKIP_DEMOTE_THRESHOLD,
+): Theme[] {
+  return corpus.themes
+    .filter((t): t is Theme & { pending: Pending } => t.pending !== undefined)
+    .sort((a, b) => {
+      const aDem = isDemoted(a.pending, threshold) ? 1 : 0;
+      const bDem = isDemoted(b.pending, threshold) ? 1 : 0;
+      if (aDem !== bDem) return aDem - bDem;
+      if (a.pending.forwardedAt !== b.pending.forwardedAt) {
+        return a.pending.forwardedAt < b.pending.forwardedAt ? -1 : 1;
+      }
+      if (a.firstSeen !== b.firstSeen) return a.firstSeen < b.firstSeen ? -1 : 1;
+      return a.themeId < b.themeId ? -1 : a.themeId > b.themeId ? 1 : 0;
     });
 }

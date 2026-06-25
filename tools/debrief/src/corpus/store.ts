@@ -180,6 +180,8 @@ export async function loadCorpus(path: string, now: string = new Date().toISOStr
     clusters: Array.isArray(c.clusters) ? c.clusters : [],
     aliases: c.aliases && typeof c.aliases === "object" ? c.aliases : {},
     protocols: Array.isArray(c.protocols) ? c.protocols : [],
+    // themes is optional for backward-compat with pre-themes corpora — default to [] when absent.
+    themes: Array.isArray(c.themes) ? c.themes : [],
   };
 
   // Hardening (P3): validate the coerced corpus against the published JSON Schema so a malformed
@@ -266,6 +268,8 @@ export function serializeCorpus(corpus: Corpus, now: string = corpus.generatedAt
       detector: c.detector,
       normalizedSubject: c.normalizedSubject,
       summary: c.summary,
+      ...(c.primaryKind !== undefined ? { primaryKind: c.primaryKind } : {}),
+      ...(c.secondaryKind !== undefined ? { secondaryKind: c.secondaryKind } : {}),
       count: c.count,
       sessionCount: c.sessionCount,
       // Deep-copy the evidenceIds + answers so the serialized object never shares array/object
@@ -285,6 +289,18 @@ export function serializeCorpus(corpus: Corpus, now: string = corpus.generatedAt
       ...p,
       openContradictions: p.openContradictions.slice(),
       supportingClusterIds: p.supportingClusterIds.slice(),
+    })),
+    // Themes (Tier 2) are EVIDENCE-FREE by construction: we project ONLY the allowed fields
+    // (memberClusterIds + answers + pending + timestamps), deep-copied so the serialized object
+    // shares no reference with the live theme — the same privacy/aliasing discipline as clusters.
+    themes: corpus.themes.map((t) => ({
+      themeId: t.themeId,
+      name: t.name,
+      memberClusterIds: t.memberClusterIds.slice(),
+      answers: t.answers.map((a) => ({ ...a })),
+      ...(t.pending !== undefined ? { pending: { ...t.pending } } : {}),
+      firstSeen: t.firstSeen,
+      lastActivityAt: t.lastActivityAt,
     })),
   };
 }

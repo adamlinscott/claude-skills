@@ -5,7 +5,7 @@
   "description": "The portable, evidence-free hot file for the debrief developer-context corpus. Carries patterns (clusters), accumulated answers, the alias index, standing-protocol state, and ingestion sources. Raw evidence snippets live ONLY in the separate evidence sidecar (corpus.evidence.json), never here.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "generatedAt", "sources", "clusters", "aliases", "protocols"],
+  "required": ["schemaVersion", "generatedAt", "sources", "clusters", "aliases", "protocols", "themes"],
   "properties": {
     "schemaVersion": {
       "description": "Hot-file schema version. Bumped on any breaking shape change.",
@@ -35,6 +35,11 @@
       "description": "Standing-protocol hypotheses about how the developer works.",
       "type": "array",
       "items": { "$ref": "#/definitions/StandingProtocol" }
+    },
+    "themes": {
+      "description": "Tier 2 — broad themes: a non-destructive overlay grouping related clusters under abstract, question-able themes. Evidence-free (memberClusterIds + answers only).",
+      "type": "array",
+      "items": { "$ref": "#/definitions/Theme" }
     }
   },
   "definitions": {
@@ -42,6 +47,11 @@
       "description": "Provenance of an answer. 'user' (human-confirmed ground truth) outranks 'inferred' (agent-reasoned).",
       "type": "string",
       "enum": ["user", "inferred"]
+    },
+    "Kind": {
+      "description": "R/O/C/Q/X intent taxonomy: R=redirect, O=observed, C=continue, Q=query, X=not-a-real-turn. The connected agent's classification, never the CLI's.",
+      "type": "string",
+      "enum": ["R", "O", "C", "Q", "X"]
     },
     "Answer": {
       "type": "object",
@@ -85,6 +95,14 @@
         "summary": {
           "description": "Short human-readable description of the behavior.",
           "type": "string"
+        },
+        "primaryKind": {
+          "description": "Primary R/O/C/Q/X kind (the connected agent's classification). Optional — absent until tagged via set_cluster_kind.",
+          "$ref": "#/definitions/Kind"
+        },
+        "secondaryKind": {
+          "description": "Optional secondary R/O/C/Q/X kind, set only when the turn genuinely does two things.",
+          "$ref": "#/definitions/Kind"
         },
         "count": {
           "description": "Total occurrences (distinct evidence) across all sessions. Volatile; grows on re-extraction.",
@@ -170,6 +188,46 @@
         "openContradictions": { "type": "array", "items": { "type": "string" } },
         "supportingClusterIds": { "type": "array", "items": { "type": "string" } },
         "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Theme": {
+      "description": "Tier 2 — a broad theme grouping related clusters non-destructively. Evidence-free: holds only memberClusterIds + answers (never snippets). Carries its own answers + pending (question-able at the abstract level).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["themeId", "name", "memberClusterIds", "answers", "firstSeen", "lastActivityAt"],
+      "properties": {
+        "themeId": {
+          "description": "Opaque surrogate UUID. The theme's answer-bearing identity.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Short human-readable theme name.",
+          "type": "string"
+        },
+        "memberClusterIds": {
+          "description": "The clusters grouped under this theme. A non-destructive reference set; a cluster may belong to multiple themes. Every id MUST reference an existing cluster.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "answers": {
+          "description": "Accumulated theme-level answers (user outranks inferred at read time).",
+          "type": "array",
+          "items": { "$ref": "#/definitions/Answer" }
+        },
+        "pending": {
+          "description": "Theme-level pending-question state (mirrors a cluster's). Present iff a theme question was forwarded to the user and not yet resolved.",
+          "$ref": "#/definitions/Pending"
+        },
+        "firstSeen": {
+          "description": "ISO-8601 timestamp the theme was created. Stable; oldest-first surfacing tiebreak.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastActivityAt": {
+          "description": "ISO-8601 timestamp of the last activity touching this theme (create, regroup, answer).",
+          "type": "string",
+          "format": "date-time"
+        }
       }
     },
     "Source": {

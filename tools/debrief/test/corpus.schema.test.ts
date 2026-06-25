@@ -110,6 +110,51 @@ test("schema REJECTS a pending record missing required forwardedAt", async () =>
   assert.equal(validate(bad), false);
 });
 
+test("a corpus with THEMES + cluster KIND tags validates against corpus.schema.json", async () => {
+  const ajv = makeAjv();
+  const validate = ajv.compile(await loadSchema("corpus.schema.json"));
+  const corpus: Corpus = emptyCorpus(now);
+  const evidence: EvidenceStore = emptyEvidenceStore();
+  mergeCandidates(corpus, evidence, [
+    { detector: "after-error", normalizedSubject: "abbreviated names", summary: "s", count: 0, sessionCount: 0, evidence: [] },
+    { detector: "after-error", normalizedSubject: "stale docs", summary: "s2", count: 0, sessionCount: 0, evidence: [] },
+  ]);
+  corpus.clusters[0].primaryKind = "O";
+  corpus.clusters[0].secondaryKind = "C";
+  corpus.themes.push({
+    themeId: "t1",
+    name: "code tells the truth",
+    memberClusterIds: corpus.clusters.map((c) => c.clusterId),
+    answers: [{ source: "user", text: "the code must not lie", ts: now }],
+    pending: { forwardedAt: now, skipCount: 0 },
+    firstSeen: now,
+    lastActivityAt: now,
+  });
+  const ok = validate(serializeCorpus(corpus, now));
+  assert.equal(ok, true, JSON.stringify(validate.errors));
+});
+
+test("schema REJECTS an invalid cluster kind code (not R|O|C|Q|X)", async () => {
+  const ajv = makeAjv();
+  const validate = ajv.compile(await loadSchema("corpus.schema.json"));
+  const corpus: Corpus = emptyCorpus(now);
+  const evidence: EvidenceStore = emptyEvidenceStore();
+  mergeCandidates(corpus, evidence, [
+    { detector: "after-error", normalizedSubject: "s", summary: "s", count: 0, sessionCount: 0, evidence: [] },
+  ]);
+  const bad = serializeCorpus(corpus, now) as unknown as { clusters: Array<Record<string, unknown>> };
+  bad.clusters[0].primaryKind = "Z"; // not a valid kind
+  assert.equal(validate(bad), false);
+});
+
+test("schema REJECTS a theme missing required memberClusterIds", async () => {
+  const ajv = makeAjv();
+  const validate = ajv.compile(await loadSchema("corpus.schema.json"));
+  const corpus = emptyCorpus(now) as unknown as { themes: Array<Record<string, unknown>> };
+  corpus.themes.push({ themeId: "t1", name: "n", answers: [], firstSeen: now, lastActivityAt: now });
+  assert.equal(validate(corpus), false);
+});
+
 test("the evidence sidecar validates against corpus.evidence.schema.json", async () => {
   const ajv = makeAjv();
   const validate = ajv.compile(await loadSchema("corpus.evidence.schema.json"));

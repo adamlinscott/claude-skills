@@ -38,7 +38,7 @@ async function findPromptsDir(): Promise<string> {
 
 /** The two instruction files handed back to the connected agent via answer_open_question. */
 export interface ReturnInstructions {
-  /** prompts/depth-instruction.md — how to turn a pattern + evidence into an open "why" question. */
+  /** prompts/depth-instruction.md — how to turn a pattern/theme + evidence into open questions. */
   depthInstruction: string;
   /** prompts/classify-intent.md — how to classify a candidate turn's intent. */
   classifyIntent: string;
@@ -55,6 +55,17 @@ export async function loadReturnInstructions(): Promise<ReturnInstructions> {
     readFile(join(dir, "classify-intent.md"), "utf8"),
   ]);
   return { depthInstruction, classifyIntent };
+}
+
+/**
+ * Load the tidy-up instruction (prompts/group-themes.md) the connected agent runs to consolidate
+ * the corpus: fuse true-duplicate clusters (merge_clusters/add_alias) and form broad themes
+ * (group_theme). Same disk-loaded, live-editable mechanism as the depth/classify instructions —
+ * the tool never groups by code; this file IS the grouping logic. Throws if the file is missing.
+ */
+export async function loadGroupThemesInstruction(): Promise<string> {
+  const dir = await findPromptsDir();
+  return readFile(join(dir, "group-themes.md"), "utf8");
 }
 
 /**
@@ -78,6 +89,24 @@ export function makeInstructionsReader(ttlMs = 1000): () => Promise<ReturnInstru
     const now = Date.now();
     if (cache && now - loadedAt < ttlMs) return cache;
     const fresh = await loadReturnInstructions();
+    cache = fresh;
+    loadedAt = now;
+    return fresh;
+  };
+}
+
+/**
+ * A live, fresh-each-call reader of the group-themes tidy-up instruction (same short-TTL caching
+ * and live-edit rationale as makeInstructionsReader). Used by the get_grouping_task tool so a human
+ * editing prompts/group-themes.md changes the tidy-up logic with no rebuild and no server restart.
+ */
+export function makeGroupThemesReader(ttlMs = 1000): () => Promise<string> {
+  let cache: string | undefined;
+  let loadedAt = 0;
+  return async () => {
+    const now = Date.now();
+    if (cache !== undefined && now - loadedAt < ttlMs) return cache;
+    const fresh = await loadGroupThemesInstruction();
     cache = fresh;
     loadedAt = now;
     return fresh;

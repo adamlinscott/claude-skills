@@ -40,6 +40,17 @@ export const SKIP_DEMOTE_THRESHOLD = 3;
 export type AnswerSource = "user" | "inferred";
 
 /**
+ * R/O/C/Q/X intent taxonomy (prompts/classify-intent.md): R=redirect, O=observed,
+ * C=continue, Q=query, X=not-a-real-turn. The CLI never derives this (CORE PRINCIPLE — intent
+ * is the LLM's job); it is the connected agent's classification, stored verbatim. A cluster may
+ * carry a primary kind plus an optional secondary (a turn that genuinely does two things).
+ */
+export type Kind = "R" | "O" | "C" | "Q" | "X";
+
+/** The set of valid kind codes (for runtime validation at the write boundary). */
+export const KINDS: readonly Kind[] = ["R", "O", "C", "Q", "X"] as const;
+
+/**
  * An accumulated answer to a cluster's open question. Question TEXT is never persisted
  * (it is an ephemeral rendering the caller reproduces on demand, design doc); the stable
  * artifact is the answer keyed by clusterId.
@@ -89,6 +100,16 @@ export interface Cluster {
   normalizedSubject: string;
   /** Short human-readable description of the behavior. */
   summary: string;
+  /**
+   * Primary R/O/C/Q/X kind for this cluster (the connected agent's classification, never the
+   * CLI's — CORE PRINCIPLE). OPTIONAL: absent until an agent tags it via set_cluster_kind.
+   */
+  primaryKind?: Kind;
+  /**
+   * Optional SECONDARY kind, set ONLY when the turn(s) genuinely do two things (e.g. C+O:
+   * "looks good, but the login page 403s"). Omitted otherwise.
+   */
+  secondaryKind?: Kind;
   /** Total occurrences across all sessions. Volatile; grows on re-extraction. */
   count: number;
   /** Number of distinct sessions the behavior appeared in. Volatile. */
@@ -129,6 +150,41 @@ export interface Cluster {
    * compat with pre-lastActivityAt corpora.
    */
   lastActivityAt?: string;
+}
+
+/**
+ * TIER 2 — a broad THEME (group-themes.md "broad themes" job). A NON-DESTRUCTIVE overlay that
+ * GROUPS related clusters under an abstract theme WITHOUT fusing them: member clusters keep their
+ * own counts/answers/evidence intact and a cluster MAY belong to MULTIPLE themes. Themes are
+ * reversible (regroup freely; no data loss). A theme is itself QUESTION-ABLE at the abstract
+ * level, so it carries its OWN answers[] + pending (the depth step asks theme-level existential
+ * questions) — mirroring clusters.
+ *
+ * Themes are EVIDENCE-FREE: they hold only memberClusterIds + answers, never snippets. Aggregated
+ * evidence is pulled on demand by walking the member clusters into the sidecar, never stored here.
+ */
+export interface Theme {
+  /** Opaque surrogate UUID (crypto.randomUUID). Stable identity; answers hang off it. */
+  themeId: string;
+  /** Short human-readable theme name (e.g. "insists the code tells the truth"). */
+  name: string;
+  /**
+   * The clusters grouped under this theme. A non-destructive reference set: clusters keep their
+   * own identity/answers/evidence and may also belong to other themes. Deduped; a removed cluster
+   * (merge/removal) is rewritten/dropped here so no member id ever dangles.
+   */
+  memberClusterIds: string[];
+  /** Accumulated theme-level answers (user + inferred). user outranks inferred at read time. */
+  answers: Answer[];
+  /**
+   * Theme-level pending-question state. Present iff a THEME question was forwarded to the user
+   * (answer_open_question mode:'user' on this themeId) and not yet resolved. Mirrors Cluster.pending.
+   */
+  pending?: Pending;
+  /** ISO-8601 timestamp the theme was created. Stable; the oldest-first surfacing tiebreak. */
+  firstSeen: string;
+  /** ISO-8601 timestamp of the last activity touching this theme (create, regroup, answer). */
+  lastActivityAt: string;
 }
 
 /**
@@ -187,6 +243,12 @@ export interface Corpus {
   aliases: Record<string, string>;
   /** Standing-protocol hypotheses (eng decision 7). */
   protocols: StandingProtocol[];
+  /**
+   * TIER 2 — broad THEMES: a non-destructive overlay grouping related clusters (Tier 1) under
+   * abstract, question-able themes. Optional for backward-compat with pre-themes corpora (the
+   * loader defaults it to []); evidence-free by construction (themes carry no snippets).
+   */
+  themes: Theme[];
 }
 
 /** One stored evidence snippet, keyed by id, living only in the sidecar. */
@@ -235,6 +297,7 @@ export function emptyCorpus(now: string): Corpus {
     clusters: [],
     aliases: {},
     protocols: [],
+    themes: [],
   };
 }
 

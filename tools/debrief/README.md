@@ -90,7 +90,7 @@ debrief serve   [corpus.json]                    # start the MCP stdio server (a
 ## MCP server
 
 `debrief serve [corpus.json]` (alias `debrief mcp`) stands up a stdio MCP server over the
-corpus. It speaks JSON-RPC on stdout (startup chatter stays on stderr) and exposes **eight
+corpus. It speaks JSON-RPC on stdout (startup chatter stays on stderr) and exposes **fifteen
 tools**. The tool never calls an LLM — read/return tools hand context + the depth/classify
 instructions back to the connected agent to reason with, and the write tools persist only
 what the agent supplies:
@@ -129,6 +129,29 @@ what the agent supplies:
   what you supply; never generates protocols with an LLM.
 - `export_rules_file()` — returns summaries + answers + a synthesis instruction for the agent
   to author a `CLAUDE.md` (consumer C).
+- `set_cluster_kind({ clusterId, primary, secondary? })` — tag a cluster's R/O/C/Q/X kind
+  (R=redirect, O=observed, C=continue, Q=query, X=not-a-real-turn). Stores the connected agent's
+  classification verbatim (the CLI never derives intent); `get_patterns` surfaces it once tagged.
+- `get_grouping_task({ limit?, clustersCursor?, themesCursor? })` — the tidy-up surface: returns the
+  live `prompts/group-themes.md` instruction PLUS the current evidence-free cluster and theme
+  summaries so the agent can consolidate the corpus. Reports `totalClusters` / `totalThemes` and
+  paging cursors so a >100-item set is never silently truncated.
+
+**Tier-2 themes overlay.** Themes are a NON-DESTRUCTIVE overlay that GROUPS related clusters under
+an abstract theme WITHOUT fusing them — member clusters keep their own counts/answers/evidence and a
+cluster MAY belong to multiple themes, so themes are fully reversible (regroup freely; no data loss).
+A theme is itself QUESTION-ABLE at the abstract level: it carries its own `answers[]` and `pending`,
+so `answer_open_question`, `submit_answer`, `get_pending_questions`, and `skip_question` all accept a
+`themeId` (theme-level existential questions), with the same write-poisoning guard and
+`user`-outranks-`inferred` precedence as clusters.
+
+- `group_theme({ name, clusterIds })` — create a theme grouping related clusters, or EXTEND an
+  existing theme by name (idempotent member add; refuses a non-existent `clusterId`). Returns `themeId`.
+- `ungroup_theme({ themeId, clusterIds })` — the reverse: REMOVE clusters from a theme
+  (non-destructive — the cluster keeps its data and any other theme membership). Combine with
+  `group_theme` to MOVE a cluster between themes. This is what makes "regroup freely" reachable.
+- `get_themes({ limit?, cursor? })` — evidence-free theme summaries (`name`, `memberCount`,
+  `answered?`, `answerSource?`, `pending?`), paginated oldest-first.
 
 Register it with Claude Code:
 
@@ -156,9 +179,10 @@ The two instruction files under `prompts/` are read **live** per `answer_open_qu
 
 Done: `.jsonl` format spike, structural candidate source, corpus identity (T3) + store
 (T4: hot file + evidence sidecar, atomic writes, merge-not-clobber), the versioned format
-(`SPEC.md` + JSON Schema), and the MCP server (`get_patterns` / `get_evidence` /
-`answer_open_question` / `submit_answer` / `export_rules_file` / `merge_clusters` /
-`add_alias` / `record_protocol` / `get_pending_questions` / `skip_question`, via
-`debrief serve`).
+(`SPEC.md` + JSON Schema), the Tier-2 themes overlay (non-destructive grouping), and the MCP
+server (`get_patterns` / `get_evidence` / `answer_open_question` / `submit_answer` /
+`export_rules_file` / `merge_clusters` / `add_alias` / `record_protocol` /
+`get_pending_questions` / `skip_question` / `group_theme` / `ungroup_theme` / `get_themes` /
+`set_cluster_kind` / `get_grouping_task`, via `debrief serve`).
 Next: the corrections metric. Full task list:
 `~/.gstack/projects/adamlinscott-claude-skills/tasks-eng-review-*.jsonl`.

@@ -54,7 +54,7 @@ function payload(res: unknown): any {
   return JSON.parse(content[0].text);
 }
 
-test("MCP server exposes all ten tools", async () => {
+test("MCP server exposes all fifteen tools", async () => {
   const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
   const { corpusPath } = await seedCorpus(dir);
   const client = await connect(corpusPath);
@@ -65,12 +65,17 @@ test("MCP server exposes all ten tools", async () => {
     "answer_open_question",
     "export_rules_file",
     "get_evidence",
+    "get_grouping_task",
     "get_patterns",
     "get_pending_questions",
+    "get_themes",
+    "group_theme",
     "merge_clusters",
     "record_protocol",
+    "set_cluster_kind",
     "skip_question",
     "submit_answer",
+    "ungroup_theme",
   ]);
   await client.close();
   await rm(dir, { recursive: true, force: true });
@@ -370,6 +375,191 @@ test("get_patterns answeredBy:'inferred' over the wire lists only inferred-only 
   const userGrounded = payload(await client.callTool({ name: "get_patterns", arguments: { answeredBy: "user" } }));
   assert.equal(userGrounded.patterns.length, 1);
   assert.equal(userGrounded.patterns[0].clusterId, clusterIds[0]);
+
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("TIER 2 over the wire: group_theme creates+extends, get_themes is evidence-free, persists across reconnect", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+
+  let themeId: string;
+  // Session 1: create a theme grouping both clusters (non-destructive), persisted to disk.
+  {
+    const client = await connect(corpusPath);
+    const res = payload(await client.callTool({ name: "group_theme", arguments: { name: "code tells the truth", clusterIds } }));
+    assert.equal(res.status, "created");
+    assert.equal(res.added, 2);
+    themeId = res.themeId;
+    await client.close();
+  }
+  // both clusters survive on disk (theming fused nothing)
+  const hot1 = JSON.parse(await readFile(corpusPath, "utf8"));
+  assert.equal(hot1.clusters.length, 2, "theming does not fuse/remove clusters");
+  assert.equal(hot1.themes.length, 1, "theme persisted to disk");
+
+  // Session 2 (fresh server): get_themes surfaces it, evidence-free; extend by name is idempotent.
+  {
+    const client = await connect(corpusPath);
+    const themes = payload(await client.callTool({ name: "get_themes", arguments: {} }));
+    assert.equal(themes.themes.length, 1);
+    assert.equal(themes.themes[0].memberCount, 2);
+    assert.equal(JSON.stringify(themes).includes(SENTINEL), false, "theme summaries are evidence-free");
+
+    const ext = payload(await client.callTool({ name: "group_theme", arguments: { name: "code tells the truth", clusterIds: [clusterIds[0]] } }));
+    assert.equal(ext.status, "extended");
+    assert.equal(ext.themeId, themeId, "extend reuses the theme");
+    assert.equal(ext.added, 0, "already a member");
+    await client.close();
+  }
+});
+
+test("ungroup_theme over the wire regroups a cluster between themes (reversible, no data loss)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+
+  // group cluster[0] into theme A, then MOVE it to theme B via ungroup + group.
+  const a = payload(await client.callTool({ name: "group_theme", arguments: { name: "A", clusterIds: [clusterIds[0]] } }));
+  const b = payload(await client.callTool({ name: "group_theme", arguments: { name: "B", clusterIds: [] } }));
+
+  const un = payload(await client.callTool({ name: "ungroup_theme", arguments: { themeId: a.themeId, clusterIds: [clusterIds[0]] } }));
+  assert.equal(un.removed, 1);
+  assert.deepEqual(un.memberClusterIds, [], "cluster left theme A");
+  await client.callTool({ name: "group_theme", arguments: { name: "B", clusterIds: [clusterIds[0]] } });
+
+  // persisted: A is empty, B holds the cluster, and the cluster itself was never destroyed.
+  const hot = JSON.parse(await readFile(corpusPath, "utf8"));
+  const themeA = hot.themes.find((t: { themeId: string }) => t.themeId === a.themeId);
+  const themeB = hot.themes.find((t: { themeId: string }) => t.themeId === b.themeId);
+  assert.deepEqual(themeA.memberClusterIds, []);
+  assert.deepEqual(themeB.memberClusterIds, [clusterIds[0]]);
+  assert.equal(hot.clusters.length, 2, "ungrouping fused/destroyed nothing");
+
+  // unknown theme surfaces as a recoverable error
+  const bad = (await client.callTool({ name: "ungroup_theme", arguments: { themeId: "nope", clusterIds: [clusterIds[0]] } })) as { isError?: boolean; content: Array<{ text: string }> };
+  assert.equal(bad.isError, true);
+  assert.match(bad.content[0].text, /no theme/);
+
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("dual-target tools over the wire reject BOTH clusterId AND themeId (recoverable error)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+  const { themeId } = payload(await client.callTool({ name: "group_theme", arguments: { name: "t", clusterIds } }));
+  const both = { clusterId: clusterIds[0], themeId };
+
+  for (const name of ["answer_open_question", "submit_answer", "get_evidence"] as const) {
+    const args = name === "submit_answer" ? { ...both, text: "x" } : both;
+    const res = (await client.callTool({ name, arguments: args })) as { isError?: boolean; content: Array<{ text: string }> };
+    assert.equal(res.isError, true, `${name} must reject both targets`);
+    assert.match(res.content[0].text, /not both/);
+  }
+
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("answer_open_question(themeId) over the wire returns aggregated theme evidence + instruction, no auto-resolve", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+
+  const { themeId } = payload(await client.callTool({ name: "group_theme", arguments: { name: "broad", clusterIds } }));
+  const res = payload(await client.callTool({ name: "answer_open_question", arguments: { themeId } }));
+  assert.equal(res.target, "theme");
+  assert.equal(res.status, "ready");
+  assert.ok(res.depthInstruction.length > 0);
+  assert.ok(res.themeEvidence && res.themeEvidence.members.length === 2, "aggregated across member clusters");
+  assert.match(JSON.stringify(res.themeEvidence), /UNTRUSTED-EVIDENCE/);
+  // forward mode:user marks the theme pending and persists
+  const fwd = payload(await client.callTool({ name: "answer_open_question", arguments: { themeId, mode: "user" } }));
+  assert.equal(fwd.status, "pending-user");
+
+  const hot = JSON.parse(await readFile(corpusPath, "utf8"));
+  assert.ok(hot.themes[0].pending, "theme pending persisted");
+
+  // get_pending_questions surfaces the pending theme
+  const pend = payload(await client.callTool({ name: "get_pending_questions", arguments: {} }));
+  assert.equal(pend.totalPendingThemes, 1);
+  assert.equal(pend.pendingThemes[0].themeId, themeId);
+
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("get_evidence(themeId) over the wire aggregates member evidence as untrusted data", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+  const { themeId } = payload(await client.callTool({ name: "group_theme", arguments: { name: "t", clusterIds } }));
+  const bundle = payload(await client.callTool({ name: "get_evidence", arguments: { themeId } }));
+  assert.equal(bundle.members.length, 2);
+  assert.match(JSON.stringify(bundle), /UNTRUSTED-EVIDENCE/);
+  assert.ok(JSON.stringify(bundle).includes(`${SENTINEL}-one`));
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("submit_answer(themeId, confirmed) over the wire records user ground truth + clears theme pending", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+  const { themeId } = payload(await client.callTool({ name: "group_theme", arguments: { name: "t", clusterIds } }));
+  await client.callTool({ name: "answer_open_question", arguments: { themeId, mode: "user" } });
+
+  const r = payload(await client.callTool({ name: "submit_answer", arguments: { themeId, text: "the code must not lie", source: "user", confirmed: true } }));
+  assert.equal(r.source, "user");
+  const hot = JSON.parse(await readFile(corpusPath, "utf8"));
+  assert.equal(hot.themes[0].answers.length, 1);
+  assert.equal(hot.themes[0].pending, undefined, "confirmed user theme answer cleared pending on disk");
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("set_cluster_kind over the wire persists the kind and get_patterns surfaces it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath, clusterIds } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+
+  const res = payload(await client.callTool({ name: "set_cluster_kind", arguments: { clusterId: clusterIds[0], primary: "O", secondary: "C" } }));
+  assert.equal(res.primaryKind, "O");
+  assert.equal(res.secondaryKind, "C");
+
+  const hot = JSON.parse(await readFile(corpusPath, "utf8"));
+  const cl = hot.clusters.find((c: { clusterId: string }) => c.clusterId === clusterIds[0]);
+  assert.equal(cl.primaryKind, "O");
+
+  const patterns = payload(await client.callTool({ name: "get_patterns", arguments: {} }));
+  const p0 = patterns.patterns.find((p: { clusterId: string }) => p.clusterId === clusterIds[0]);
+  assert.equal(p0.primaryKind, "O");
+  assert.equal(p0.secondaryKind, "C");
+
+  // invalid kind surfaces as a recoverable error (zod enum rejects it before the handler)
+  const bad = (await client.callTool({ name: "set_cluster_kind", arguments: { clusterId: clusterIds[0], primary: "Z" } })) as { isError?: boolean };
+  assert.equal(bad.isError, true);
+
+  await client.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("get_grouping_task over the wire returns the live group-themes instruction + evidence-free summaries", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-mcp-"));
+  const { corpusPath } = await seedCorpus(dir);
+  const client = await connect(corpusPath);
+
+  const res = payload(await client.callTool({ name: "get_grouping_task", arguments: {} }));
+  // the live prompts/group-themes.md content is returned (loaded from disk)
+  assert.ok(res.groupThemesInstruction.length > 0);
+  assert.match(res.groupThemesInstruction, /theme|merge|group/i);
+  assert.equal(res.clusters.length, 2);
+  assert.ok(Array.isArray(res.themes));
+  assert.match(res.instruction, /merge_clusters|group_theme/);
+  assert.equal(JSON.stringify(res).includes(SENTINEL), false, "grouping task is evidence-free");
 
   await client.close();
   await rm(dir, { recursive: true, force: true });

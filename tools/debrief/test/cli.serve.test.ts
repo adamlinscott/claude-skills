@@ -101,12 +101,17 @@ for (const cmd of ["serve", "mcp"] as const) {
         "answer_open_question",
         "export_rules_file",
         "get_evidence",
+        "get_grouping_task",
         "get_patterns",
         "get_pending_questions",
+        "get_themes",
+        "group_theme",
         "merge_clusters",
         "record_protocol",
+        "set_cluster_kind",
         "skip_question",
         "submit_answer",
+        "ungroup_theme",
       ]);
 
       // (b) the startup banner is on STDERR, never on stdout (stdout must stay clean for JSON-RPC).
