@@ -1,39 +1,38 @@
-<!-- HUMAN-OWNED PROMPT — edit freely. This is given to the connected LLM to classify each
-     candidate turn. The tool does NOT classify intent in code; this file is the classifier.
-     Validate changes against the T2 eval set. -->
+<!-- HUMAN-OWNED PROMPT — edit freely. Given to the connected LLM to read ONE developer chat
+     turn (+ structural context) and tag it. The tool NEVER classifies intent in code; this
+     file is the classifier. Validate changes against the T2 eval set. -->
 
-# Intent classification
+# Classify a turn
 
-You are given a developer's chat turn from a coding session, plus structural context about
-what the AI had just done (tools used, whether a tool call errored, the AI's last message).
-Classify the turn's **primary intent** into exactly one label. Judge meaning, not keywords.
+You are given ONE developer chat turn from a coding session, plus structural context (what
+the AI had just done: tools used, whether a tool call errored, the AI's last message). Read
+the MEANING, not keywords.
 
-## Labels
+## Kind — a PRIMARY label, plus a SECONDARY only if the turn truly does two things
 
-- **R — redirect**: the developer wants the AI to do something differently, undo, or change
-  course. ("rename that", "move it to a repos folder", "I prefer X", "don't do it that way")
-- **O — observed**: the developer reports that reality contradicts the AI — a bug, a failed
-  result, a false claim by the AI, or a stale/incorrect artifact they noticed. This is the
-  developer verifying against the running system. ("I'm seeing a 403", "images aren't
-  rendering on staging", "you said the key is unset but it's been set for ages")
-- **C — continue**: the developer accepts/approves and moves forward, gives a new objective,
-  makes a suggestion, or hands off the next task. ("looks good, keep going", "now add tests",
-  "commit and push", "let's also build X")
-- **Q — query**: a pure information request — the developer is asking a question, not
-  correcting anything. The right response is to answer it. ("does the config handle X?",
-  "is this available yet?")
-- **X — not a real turn**: noise that slipped through (machine text, empty, irrelevant).
+- **R — redirect**: wants the AI to do it differently, undo, or change course.
+- **O — observed**: reports reality contradicting the AI — a bug, a failed result, a false
+  claim by the AI, or a stale/incorrect artifact. (The developer verifying against the running
+  system — this is often the most valuable signal.)
+- **C — continue**: accepts/approves and moves on, gives a new objective, or hands off the
+  next task.
+- **Q — query**: a pure information request; the right response is to answer it, not to treat
+  it as a correction.
+- **X — not a real turn**: noise (machine text, empty, irrelevant).
 
-## Rules
+Many turns do two things at once. "Looks good, but the login page 403s" is primary **C** with
+secondary **O**. Set `secondary` ONLY when a genuine second intent is present; otherwise omit
+it. Pick the label that carries the turn's main weight as `primary`.
 
-- One label per turn, on the **primary** intent. Turns often bundle approval + a note + a
-  task; pick what the turn is mainly doing.
-- "O" is about reality contradicting the AI, even when phrased politely or as a question
-  ("Why do you say the key is a placeholder?"). If it's really asking for info with no
-  implied contradiction, it's "Q".
-- Use the structural context as a hint, not a rule: a turn after a tool error is often "O",
-  a turn after a clean completion is often "C" or "R" — but the text decides.
+## Topic — name what the turn is ABOUT, narrowly and faithfully
+
+Give a short topic label (≈3-6 words) for the concrete thing this turn is about, e.g.
+"abbreviated variable names", "mock data in production", "stale plan status in docs". Keep it
+SPECIFIC to this turn. Do NOT abstract up to grand themes here — a separate tidy-up step
+(see group-themes) groups related topics later. Where two turns are about the same concrete
+thing, prefer the same wording so they pile together naturally.
 
 ## Output
 
-Return JSON: `{ "label": "R|O|C|Q|X", "confidence": 0.0-1.0, "why": "<one sentence>" }`
+JSON:
+`{ "primary": "R|O|C|Q|X", "secondary": "R|O|C|Q|X" (optional), "topic": "<3-6 words>", "confidence": 0.0-1.0, "why": "<one sentence>" }`
