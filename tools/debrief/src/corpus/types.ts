@@ -24,6 +24,18 @@ export const SCHEMA_VERSION = 1 as const;
 /** Current schema version of the evidence sidecar. */
 export const EVIDENCE_SCHEMA_VERSION = 1 as const;
 
+/**
+ * N — default cap on how many PENDING questions get_pending_questions surfaces per call/session
+ * (design "Interaction states": "at most N surfaced per session, oldest-unanswered first").
+ * The queue can't overwhelm; visibility is bounded even though pending never expires.
+ */
+export const MAX_PENDING_SURFACED = 5;
+/**
+ * K — default skip threshold. A pending question skipped K or more times is DEMOTED in surfacing
+ * priority (sorts after non-demoted), not removed and not nagging (design "Interaction states").
+ */
+export const SKIP_DEMOTE_THRESHOLD = 3;
+
 /** Provenance of an answer. A `user` answer outranks any `inferred` answer (eng decision 5). */
 export type AnswerSource = "user" | "inferred";
 
@@ -38,6 +50,30 @@ export interface Answer {
   text: string;
   /** ISO-8601 timestamp this answer was written. */
   ts: string;
+}
+
+/**
+ * Pending-question state for a cluster (design "Interaction states" — orphaned pending
+ * questions). A question forwarded to the user (answer_open_question mode:'user') becomes
+ * PENDING and re-surfaces across sessions; it NEVER expires. A confirmed source:user answer
+ * CLEARS it (the pending field is removed). The record hangs off the cluster (co-located with
+ * answers + evidence) so it travels with the surrogate clusterId like everything else.
+ */
+export interface Pending {
+  /** ISO-8601 timestamp the question was first forwarded to the user. The oldest-first sort key. */
+  forwardedAt: string;
+  /**
+   * Number of times this pending question has been SKIPPED (surfaced but deferred). A cluster
+   * skipped >= K times (SKIP_DEMOTE_THRESHOLD) is DEMOTED in surfacing priority (sorts after
+   * non-demoted), not removed and not nagging.
+   */
+  skipCount: number;
+  /**
+   * ISO-8601 timestamp it was last SKIPPED (via skip_question), if ever. Stamped ONLY on skip —
+   * get_pending_questions surfacing is a lock-free read that does NOT stamp this, so the field
+   * records the last time the question was deferred, never a mere surfacing.
+   */
+  lastSurfacedAt?: string;
 }
 
 /**
@@ -73,6 +109,26 @@ export interface Cluster {
    * (or false) on raw clusters. Merges are revisitable, not append-only-calcified.
    */
   merged?: boolean;
+  /**
+   * Pending-question state. PRESENT iff a question for this cluster has been forwarded to the
+   * user (answer_open_question mode:'user') and not yet resolved by a confirmed source:user
+   * answer. Re-surfaces across sessions (never expires); CLEARED (field removed) when the user
+   * answers. Absent on clusters with no outstanding forwarded question.
+   */
+  pending?: Pending;
+  /**
+   * ISO-8601 timestamp the cluster was first created (minted). STABLE — set once and never
+   * changed, even on merge (the surviving target keeps the EARLIER firstSeen of the two). Used
+   * as the deterministic oldest-first tiebreak in surfacing order (get_patterns), replacing the
+   * arbitrary clusterId tiebreak. Optional for backward-compat with pre-firstSeen corpora.
+   */
+  firstSeen?: string;
+  /**
+   * ISO-8601 timestamp of the last activity that touched this cluster (creation, new evidence
+   * merged in, or a merge). Volatile; advances over the cluster's life. Optional for backward-
+   * compat with pre-lastActivityAt corpora.
+   */
+  lastActivityAt?: string;
 }
 
 /**

@@ -1,9 +1,10 @@
 /**
  * Debrief MCP stdio server (T6 + T7).
  *
- * Exposes the corpus to a connected agent as eight tools (get_patterns, get_evidence,
+ * Exposes the corpus to a connected agent as ten tools (get_patterns, get_evidence,
  * answer_open_question, submit_answer, export_rules_file, merge_clusters, add_alias,
- * record_protocol). The server is THIN: each tool loads the corpus (+ sidecar when needed) fresh,
+ * record_protocol, get_pending_questions, skip_question). The server is THIN: each tool loads the
+ * corpus (+ sidecar when needed) fresh,
  * delegates to the pure handlers in handlers.ts, and persists atomically on writes. Per the store
  * design (eng decision 2) reads take NO writer lock, so this long-running server never blocks the
  * CLI miner and vice versa.
@@ -30,6 +31,8 @@ import {
   mergeClusters,
   addAlias,
   recordProtocol,
+  getPendingQuestions,
+  skipQuestion,
   type AnswerMode,
 } from "./handlers.js";
 
@@ -124,13 +127,15 @@ export async function buildServer(paths: ServerPaths): Promise<McpServer> {
     "get_patterns",
     {
       description:
-        "List recurring-pattern SUMMARIES (clusterId, summary, count, sessionCount, answered, merged) — " +
-        "NO inline evidence (pull that on demand via get_evidence). Paginated: pass back nextCursor as " +
-        "cursor. Pass minCount to apply a minimum-occurrence bar (surface a few sharp patterns, not many " +
-        "noisy ones).",
+        "List recurring-pattern SUMMARIES (clusterId, summary, count, sessionCount, answered, merged, " +
+        "pending) — NO inline evidence (pull that on demand via get_evidence). Paginated: pass back " +
+        "nextCursor as cursor. Pass minCount for a minimum-occurrence bar. Pass answeredBy:'inferred' to " +
+        "list inferred-only clusters you can re-confirm with the user ('I previously inferred X — still " +
+        "right?'); 'user' for user-grounded; 'none' for unanswered.",
       inputSchema: {
         detector: z.string().optional(),
         answered: z.boolean().optional(),
+        answeredBy: z.enum(["user", "inferred", "none"]).optional(),
         minCount: z.number().int().nonnegative().optional(),
         limit: z.number().int().positive().optional(),
         cursor: z.string().optional(),
@@ -199,6 +204,11 @@ export async function buildServer(paths: ServerPaths): Promise<McpServer> {
         mode: args.mode as AnswerMode | undefined,
       });
       if (!res) return errorResult(`no cluster ${args.clusterId}`);
+      // mode:'user' MARKS the cluster pending (a mutation) so the forwarded question re-surfaces
+      // across sessions — persist it. All other modes are read-only (no write).
+      if ((args.mode as AnswerMode | undefined) === "user") {
+        await saveCorpus(corpusPath, loaded.corpus);
+      }
       return jsonResult(res);
     },
   );
@@ -324,6 +334,52 @@ export async function buildServer(paths: ServerPaths): Promise<McpServer> {
       if (!loaded.ok) return loaded.result;
       try {
         const res = recordProtocol(loaded.corpus, args);
+        await saveCorpus(corpusPath, loaded.corpus);
+        return jsonResult(res);
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : String(err));
+      }
+    },
+  );
+
+  // get_pending_questions — forwarded-but-unanswered questions, oldest-first, capped, demote-aware.
+  server.registerTool(
+    "get_pending_questions",
+    {
+      description:
+        "List PENDING questions (forwarded to the user via answer_open_question mode:'user' and not yet " +
+        "answered). OLDEST-first, CAPPED at N (default 5; pass limit), and questions skipped >= K (3) are " +
+        "DEMOTED (sorted last) — never removed, never nagging. Pending NEVER expires. Evidence-FREE: each " +
+        "entry carries a summary + a pointer to get_evidence(clusterId) so YOU regenerate the open " +
+        "question. On the user's answer call submit_answer(confirmed:true) to clear it.",
+      inputSchema: {
+        limit: z.number().int().positive().optional(),
+      },
+    },
+    async (args) => {
+      const loaded = await loadCorpusOrError(corpusPath);
+      if (!loaded.ok) return loaded.result;
+      return jsonResult(getPendingQuestions(loaded.corpus, args));
+    },
+  );
+
+  // skip_question — defer a pending question (increments skipCount, demotes after K). Persisted.
+  server.registerTool(
+    "skip_question",
+    {
+      description:
+        "Defer a PENDING question: increments its skip count and demotes it after K (3) skips so it stops " +
+        "competing for attention WITHOUT being lost (pending never expires). Throws if the cluster is " +
+        "unknown or not currently pending.",
+      inputSchema: {
+        clusterId: z.string(),
+      },
+    },
+    async (args) => {
+      const loaded = await loadCorpusOrError(corpusPath);
+      if (!loaded.ok) return loaded.result;
+      try {
+        const res = skipQuestion(loaded.corpus, args);
         await saveCorpus(corpusPath, loaded.corpus);
         return jsonResult(res);
       } catch (err) {

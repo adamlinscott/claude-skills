@@ -14,6 +14,11 @@ import {
   makeEvidenceItem,
   aliasKey,
   effectiveAnswer,
+  markPending,
+  clearPending,
+  skipPending,
+  isDemoted,
+  orderPending,
 } from "../src/corpus/identity.ts";
 import { emptyCorpus, emptyEvidenceStore, type Corpus, type EvidenceStore } from "../src/corpus/types.ts";
 
@@ -259,6 +264,131 @@ test("mergeClusters throws on unknown cluster and on self-merge", () => {
   assert.throws(() => mergeClusters(c, "nope", bId, e), /no fromClusterId/);
   assert.throws(() => mergeClusters(c, aId, "nope", e), /no intoClusterId/);
   assert.throws(() => mergeClusters(c, aId, aId, e), /into itself/);
+});
+
+// ── firstSeen / lastActivityAt + pending lifecycle ────────────────────────────────────────────
+
+test("resolveOrCreateCluster stamps firstSeen + lastActivityAt; firstSeen stays stable on re-resolve", () => {
+  const c = fresh();
+  const cl = resolveOrCreateCluster(c, "after-error", "subj", "s", "2026-01-01T00:00:00.000Z");
+  assert.equal(cl.firstSeen, "2026-01-01T00:00:00.000Z");
+  assert.equal(cl.lastActivityAt, "2026-01-01T00:00:00.000Z");
+  // re-resolve with a LATER now returns the SAME object; firstSeen must not move
+  const again = resolveOrCreateCluster(c, "after-error", "subj", "s", "2026-09-09T00:00:00.000Z");
+  assert.equal(again.clusterId, cl.clusterId);
+  assert.equal(again.firstSeen, "2026-01-01T00:00:00.000Z", "firstSeen is set once, never reset");
+});
+
+test("mergeClusters keeps the EARLIER firstSeen and advances lastActivityAt", () => {
+  const { c, e, aId, bId } = twoClusterFixture();
+  getCluster(c, aId)!.firstSeen = "2026-01-01T00:00:00.000Z"; // older
+  getCluster(c, bId)!.firstSeen = "2026-05-01T00:00:00.000Z"; // newer target
+  mergeClusters(c, aId, bId, e, "2026-12-31T00:00:00.000Z");
+  const into = getCluster(c, bId)!;
+  assert.equal(into.firstSeen, "2026-01-01T00:00:00.000Z", "surviving cluster keeps the earlier firstSeen");
+  assert.equal(into.lastActivityAt, "2026-12-31T00:00:00.000Z", "merge advances lastActivityAt");
+});
+
+test("markPending sets forwardedAt once; clearPending removes it; re-mark does not reset", () => {
+  const c = fresh();
+  const cl = resolveOrCreateCluster(c, "after-error", "subj", "s", now);
+  const p = markPending(c, cl.clusterId, "2026-01-01T00:00:00.000Z");
+  assert.equal(p.forwardedAt, "2026-01-01T00:00:00.000Z");
+  assert.equal(p.skipCount, 0);
+  // re-mark with a later time must NOT reset forwardedAt
+  const p2 = markPending(c, cl.clusterId, "2026-09-09T00:00:00.000Z");
+  assert.equal(p2.forwardedAt, "2026-01-01T00:00:00.000Z");
+  // clear removes the field
+  assert.equal(clearPending(c, cl.clusterId), true);
+  assert.equal(cl.pending, undefined);
+  assert.equal(clearPending(c, cl.clusterId), false, "clearing a non-pending cluster returns false");
+});
+
+test("markPending/skipPending throw for unknown cluster; skipPending throws if not pending", () => {
+  const c = fresh();
+  const cl = resolveOrCreateCluster(c, "after-error", "subj", "s", now);
+  assert.throws(() => markPending(c, "nope"), /no cluster/);
+  assert.throws(() => skipPending(c, "nope"), /no cluster/);
+  assert.throws(() => skipPending(c, cl.clusterId), /not pending/);
+});
+
+test("skipPending increments skipCount + stamps lastSurfacedAt; isDemoted at K=3", () => {
+  const c = fresh();
+  const cl = resolveOrCreateCluster(c, "after-error", "subj", "s", now);
+  markPending(c, cl.clusterId, now);
+  assert.equal(isDemoted(cl.pending!), false);
+  skipPending(c, cl.clusterId, "2026-02-01T00:00:00.000Z");
+  skipPending(c, cl.clusterId, "2026-02-02T00:00:00.000Z");
+  assert.equal(isDemoted(cl.pending!), false, "2 skips: not yet demoted");
+  const p = skipPending(c, cl.clusterId, "2026-02-03T00:00:00.000Z");
+  assert.equal(p.skipCount, 3);
+  assert.equal(p.lastSurfacedAt, "2026-02-03T00:00:00.000Z");
+  assert.equal(isDemoted(cl.pending!), true, "3 skips (>= K): demoted");
+});
+
+test("orderPending: non-demoted before demoted, oldest forwardedAt first within band", () => {
+  const c = fresh();
+  const a = resolveOrCreateCluster(c, "after-error", "a", "sa", now);
+  const b = resolveOrCreateCluster(c, "after-error", "b", "sb", now);
+  const d = resolveOrCreateCluster(c, "after-error", "d", "sd", now);
+  markPending(c, a.clusterId, "2026-01-01T00:00:00.000Z"); // oldest, but will be demoted
+  markPending(c, b.clusterId, "2026-03-01T00:00:00.000Z");
+  markPending(c, d.clusterId, "2026-02-01T00:00:00.000Z");
+  // demote a
+  skipPending(c, a.clusterId, now);
+  skipPending(c, a.clusterId, now);
+  skipPending(c, a.clusterId, now);
+  const ordered = orderPending(c).map((cl) => cl.clusterId);
+  // non-demoted oldest-first (d=Feb, b=Mar) then demoted a
+  assert.deepEqual(ordered, [d.clusterId, b.clusterId, a.clusterId]);
+});
+
+test("mergeClusters folds pending: keeps earlier forwardedAt + MAX skipCount", () => {
+  const { c, e, aId, bId } = twoClusterFixture();
+  markPending(c, aId, "2026-01-01T00:00:00.000Z");
+  markPending(c, bId, "2026-05-01T00:00:00.000Z");
+  skipPending(c, aId, now);
+  skipPending(c, aId, now); // from has skipCount 2
+  mergeClusters(c, aId, bId, e, now);
+  const into = getCluster(c, bId)!;
+  assert.ok(into.pending, "merged cluster stays pending if either was pending");
+  assert.equal(into.pending!.forwardedAt, "2026-01-01T00:00:00.000Z", "earlier forwardedAt kept");
+  assert.equal(into.pending!.skipCount, 2, "max skipCount kept (demotion survives merge)");
+});
+
+test("mergeClusters fold: still-pending `from` into a RESOLVED `into` => survivor is BOTH pending AND user-answered", () => {
+  // Pins the fromP && !intoP branch: `into` was already resolved by a confirmed user answer
+  // (its pending was cleared, a source:user answer remains), and `from` still carries an
+  // outstanding forwarded question. The merged subject should re-confirm: survivor is pending
+  // (forwardedAt from `from`) AND still carries the user ground truth. A future refactor must
+  // not silently flip this to "a resolved target swallows the pending".
+  const { c, e, aId, bId } = twoClusterFixture();
+  // Resolve `into` (bId): forward then a confirmed user answer clears its pending.
+  markPending(c, bId, "2026-05-01T00:00:00.000Z");
+  getCluster(c, bId)!.answers.push({ source: "user", text: "yes, my preference", ts: now });
+  clearPending(c, bId);
+  assert.equal(getCluster(c, bId)!.pending, undefined, "into is resolved (pending cleared)");
+  // `from` (aId) is still pending (forwarded, never answered).
+  markPending(c, aId, "2026-01-01T00:00:00.000Z");
+
+  mergeClusters(c, aId, bId, e, now);
+  const into = getCluster(c, bId)!;
+  assert.ok(into.pending, "survivor is pending (the from-side open question carries over)");
+  assert.equal(into.pending!.forwardedAt, "2026-01-01T00:00:00.000Z", "forwardedAt from the still-pending `from`");
+  assert.equal(effectiveAnswer(into)!.source, "user", "survivor still carries the user ground truth");
+});
+
+test("orderPending: equal forwardedAt tiebreaks on firstSeen (oldest cluster first), NOT clusterId", () => {
+  const c = fresh();
+  const a = resolveOrCreateCluster(c, "after-error", "a", "sa", "2026-05-01T00:00:00.000Z"); // newer cluster
+  const b = resolveOrCreateCluster(c, "after-error", "b", "sb", "2026-01-01T00:00:00.000Z"); // older cluster
+  // Identical forwardedAt forces the tiebreak.
+  const fwd = "2026-06-01T00:00:00.000Z";
+  markPending(c, a.clusterId, fwd);
+  markPending(c, b.clusterId, fwd);
+  const ordered = orderPending(c).map((cl) => cl.clusterId);
+  // older firstSeen (b) must come first regardless of how the random clusterIds compare.
+  assert.deepEqual(ordered, [b.clusterId, a.clusterId], "older firstSeen wins the forwardedAt tie");
 });
 
 // ── splitAlias hazards (P2) ───────────────────────────────────────────────────────────────────

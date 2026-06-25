@@ -32,19 +32,21 @@ export function mergeCandidates(
   corpus: Corpus,
   evidence: EvidenceStore,
   candidates: CandidateCluster[],
+  now: string = new Date().toISOString(),
 ): MergeResult {
   const result: MergeResult = { clustersTouched: 0, clustersCreated: 0, evidenceAdded: 0 };
   const touched = new Set<string>();
 
   for (const cand of candidates) {
     const before = corpus.clusters.length;
-    const cluster = resolveOrCreateCluster(corpus, cand.detector, cand.normalizedSubject, cand.summary);
+    const cluster = resolveOrCreateCluster(corpus, cand.detector, cand.normalizedSubject, cand.summary, now);
     if (corpus.clusters.length > before) result.clustersCreated += 1;
 
     // Keep a refreshed summary on re-extraction (summary is descriptive, not identity).
     if (cand.summary) cluster.summary = cand.summary;
 
     const existingIds = new Set(cluster.evidenceIds);
+    let addedToThisCluster = 0;
     for (const ev of cand.evidence) {
       const item: EvidenceItem = makeEvidenceItem(ev);
       // Write the snippet to the sidecar (idempotent: same id overwrites with same content).
@@ -53,12 +55,17 @@ export function mergeCandidates(
         cluster.evidenceIds.push(item.id);
         existingIds.add(item.id);
         result.evidenceAdded += 1;
+        addedToThisCluster += 1;
       }
     }
 
     // Recompute counts from the deduped union so a re-merge of the same session is idempotent.
     cluster.count = cluster.evidenceIds.length;
     cluster.sessionCount = countSessions(cluster.evidenceIds, evidence);
+
+    // Advance lastActivityAt when NEW evidence actually landed (re-merging the same session,
+    // which adds nothing, is not "activity"). firstSeen was set at create and is left stable.
+    if (addedToThisCluster > 0) cluster.lastActivityAt = now;
 
     touched.add(cluster.clusterId);
   }

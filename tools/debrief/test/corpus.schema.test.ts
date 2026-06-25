@@ -78,6 +78,38 @@ test("a merged cluster (merged:true) validates against corpus.schema.json", asyn
   assert.equal(ok, true, JSON.stringify(validate.errors));
 });
 
+test("a cluster with pending + firstSeen + lastActivityAt validates against corpus.schema.json", async () => {
+  const ajv = makeAjv();
+  const validate = ajv.compile(await loadSchema("corpus.schema.json"));
+  const corpus: Corpus = emptyCorpus(now);
+  const evidence: EvidenceStore = emptyEvidenceStore();
+  mergeCandidates(
+    corpus,
+    evidence,
+    [{ detector: "after-error", normalizedSubject: "rgb value", summary: "s", count: 0, sessionCount: 0, evidence: [] }],
+    now,
+  );
+  corpus.clusters[0].pending = { forwardedAt: now, skipCount: 2, lastSurfacedAt: now };
+  const ok = validate(serializeCorpus(corpus, now));
+  assert.equal(ok, true, JSON.stringify(validate.errors));
+});
+
+test("schema REJECTS a pending record missing required forwardedAt", async () => {
+  const ajv = makeAjv();
+  const validate = ajv.compile(await loadSchema("corpus.schema.json"));
+  const corpus: Corpus = emptyCorpus(now);
+  const evidence: EvidenceStore = emptyEvidenceStore();
+  mergeCandidates(
+    corpus,
+    evidence,
+    [{ detector: "after-error", normalizedSubject: "s", summary: "s", count: 0, sessionCount: 0, evidence: [] }],
+    now,
+  );
+  const bad = serializeCorpus(corpus, now) as unknown as { clusters: Array<Record<string, unknown>> };
+  bad.clusters[0].pending = { skipCount: 1 }; // missing forwardedAt
+  assert.equal(validate(bad), false);
+});
+
 test("the evidence sidecar validates against corpus.evidence.schema.json", async () => {
   const ajv = makeAjv();
   const validate = ajv.compile(await loadSchema("corpus.evidence.schema.json"));

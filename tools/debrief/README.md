@@ -95,18 +95,30 @@ tools**. The tool never calls an LLM — read/return tools hand context + the de
 instructions back to the connected agent to reason with, and the write tools persist only
 what the agent supplies:
 
-- `get_patterns({ detector?, answered?, minCount?, limit?, cursor? })` — evidence-free pattern
-  summaries, paginated. `minCount` applies a minimum-occurrence bar (surface a few sharp
-  patterns, not many noisy ones). Each summary carries `merged` when the cluster is an
-  agent-merged one.
+- `get_patterns({ detector?, answered?, answeredBy?, minCount?, limit?, cursor? })` —
+  evidence-free pattern summaries, paginated. `minCount` applies a minimum-occurrence bar
+  (surface a few sharp patterns, not many noisy ones). `answeredBy:'inferred'` lists the
+  inferred-only clusters you can re-confirm with the user ("I previously inferred X — still
+  right?"); `'user'` lists user-grounded; `'none'` lists unanswered. Each summary carries
+  `merged` when the cluster is an agent-merged one and `pending` when a question for it has been
+  forwarded to the user. Surfacing order: frequency (count) first, then unanswered-before-answered,
+  then oldest-first by `firstSeen`.
 - `get_evidence({ clusterId })` — full evidence for one cluster; each snippet is wrapped in
   nonce delimiters and labelled untrusted data.
 - `answer_open_question({ clusterId, mode? })` — returns the evidence bundle + the
   depth/classify instructions (loaded live from `prompts/`) + the corpus's `standingProtocols`
   for the agent to reason with. `mode:'user'` forwards (`status: pending-user`) with the same
-  material so the agent can regenerate the open question and surface it.
+  material so the agent can regenerate the open question and surface it — and MARKS the cluster
+  pending so it re-surfaces across sessions (via `get_pending_questions`) until answered.
 - `submit_answer({ clusterId, text, source?, confirmed? })` — writes an answer; `source:user`
-  is honored only with `confirmed:true`, otherwise downgraded to `inferred`.
+  is honored only with `confirmed:true`, otherwise downgraded to `inferred`. A confirmed
+  `source:user` answer CLEARS the cluster's pending state (resolves the forwarded question).
+- `get_pending_questions({ limit? })` — lists forwarded-but-unanswered questions, OLDEST-first,
+  capped at N (default 5), with questions skipped >= K (3) times DEMOTED (sorted last, never
+  removed/nagging). Evidence-free: each entry carries a summary + a pointer to `get_evidence`.
+  Pending never expires.
+- `skip_question({ clusterId })` — defer a pending question (increments its skip count; demotes
+  after K skips). Throws if the cluster is unknown or not currently pending.
 - `merge_clusters({ fromClusterId, intoClusterId })` — agent-driven semantic merge: absorb one
   cluster into another (re-points aliases, unions evidence, moves answers with user still
   outranking inferred, recomputes counts, flags the target `merged:true`).
@@ -146,6 +158,7 @@ Done: `.jsonl` format spike, structural candidate source, corpus identity (T3) +
 (T4: hot file + evidence sidecar, atomic writes, merge-not-clobber), the versioned format
 (`SPEC.md` + JSON Schema), and the MCP server (`get_patterns` / `get_evidence` /
 `answer_open_question` / `submit_answer` / `export_rules_file` / `merge_clusters` /
-`add_alias` / `record_protocol`, via `debrief serve`).
+`add_alias` / `record_protocol` / `get_pending_questions` / `skip_question`, via
+`debrief serve`).
 Next: the corrections metric. Full task list:
 `~/.gstack/projects/adamlinscott-claude-skills/tasks-eng-review-*.jsonl`.
