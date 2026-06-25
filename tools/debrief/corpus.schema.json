@@ -1,0 +1,249 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/adamlinscott/claude-skills/tools/debrief/corpus.schema.json",
+  "title": "debrief corpus (hot file)",
+  "description": "The portable, evidence-free hot file for the debrief developer-context corpus. Carries patterns (clusters), accumulated answers, the alias index, standing-protocol state, and ingestion sources. Raw evidence snippets live ONLY in the separate evidence sidecar (corpus.evidence.json), never here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "sources", "clusters", "aliases", "protocols", "themes"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Hot-file schema version. Bumped on any breaking shape change.",
+      "const": 1
+    },
+    "generatedAt": {
+      "description": "ISO-8601 timestamp of the last write.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "sources": {
+      "description": "Ingestion sources. v1 populates claude-sessions / claude-memory; a 'git' slot is reserved but unpopulated.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/Source" }
+    },
+    "clusters": {
+      "description": "The mined patterns, each identified by an opaque surrogate clusterId.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/Cluster" }
+    },
+    "aliases": {
+      "description": "Lookup index: composite (detector, normalizedSubject) key -> clusterId. NOT the identity; answers hang off clusterId so a remap never orphans them. The key joins detector and normalizedSubject with a NUL (U+0000) byte.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "protocols": {
+      "description": "Standing-protocol hypotheses about how the developer works.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/StandingProtocol" }
+    },
+    "themes": {
+      "description": "Tier 2 — broad themes: a non-destructive overlay grouping related clusters under abstract, question-able themes. Evidence-free (memberClusterIds + answers only).",
+      "type": "array",
+      "items": { "$ref": "#/definitions/Theme" }
+    }
+  },
+  "definitions": {
+    "AnswerSource": {
+      "description": "Provenance of an answer. 'user' (human-confirmed ground truth) outranks 'inferred' (agent-reasoned).",
+      "type": "string",
+      "enum": ["user", "inferred"]
+    },
+    "Kind": {
+      "description": "R/O/C/Q/X intent taxonomy: R=redirect, O=observed, C=continue, Q=query, X=not-a-real-turn. The connected agent's classification, never the CLI's.",
+      "type": "string",
+      "enum": ["R", "O", "C", "Q", "X"]
+    },
+    "Answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "text", "ts"],
+      "properties": {
+        "source": { "$ref": "#/definitions/AnswerSource" },
+        "text": {
+          "description": "Answer text. Part of the portable surface — the caller is responsible for keeping it snippet-free.",
+          "type": "string"
+        },
+        "ts": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clusterId",
+        "detector",
+        "normalizedSubject",
+        "summary",
+        "count",
+        "sessionCount",
+        "evidenceIds",
+        "answers"
+      ],
+      "properties": {
+        "clusterId": {
+          "description": "Opaque surrogate UUID. The answer-bearing identity. Minted once, never derived from content.",
+          "type": "string"
+        },
+        "detector": {
+          "description": "Structural candidate-source label (e.g. 'after-error', 'turn-after-completion'). NOT a lexical/intent matcher.",
+          "type": "string"
+        },
+        "normalizedSubject": {
+          "description": "Coarse deterministic CLI-derived subject. The current index key; may be re-keyed via aliases.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "Short human-readable description of the behavior.",
+          "type": "string"
+        },
+        "primaryKind": {
+          "description": "Primary R/O/C/Q/X kind (the connected agent's classification). Optional — absent until tagged via set_cluster_kind.",
+          "$ref": "#/definitions/Kind"
+        },
+        "secondaryKind": {
+          "description": "Optional secondary R/O/C/Q/X kind, set only when the turn genuinely does two things.",
+          "$ref": "#/definitions/Kind"
+        },
+        "count": {
+          "description": "Total occurrences (distinct evidence) across all sessions. Volatile; grows on re-extraction.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessionCount": {
+          "description": "Number of distinct sessions the behavior appeared in. Volatile.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidenceIds": {
+          "description": "Keys into the evidence sidecar. Snippets themselves live there, NOT here.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "question": {
+          "description": "Optional cached question text. Normally ABSENT — questions are regenerated by the connected LLM.",
+          "type": "string"
+        },
+        "merged": {
+          "description": "True iff this cluster is the target of an agent-driven semantic merge (merge_clusters) — it absorbed another cluster's aliases + evidence + answers. Absent on raw (CLI-coarse) clusters.",
+          "type": "boolean"
+        },
+        "pending": {
+          "description": "Pending-question state. Present iff a question was forwarded to the user (answer_open_question mode:'user') and not yet resolved by a confirmed source:user answer. Re-surfaces across sessions; never expires; cleared when the user answers. Absent on clusters with no outstanding forwarded question.",
+          "$ref": "#/definitions/Pending"
+        },
+        "firstSeen": {
+          "description": "ISO-8601 timestamp the cluster was first created. Stable — set once, never changed (a merge keeps the earlier of the two). The deterministic oldest-first tiebreak for surfacing order. Optional for backward-compat.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastActivityAt": {
+          "description": "ISO-8601 timestamp of the last activity touching this cluster (creation, new evidence merged, or a merge). Volatile. Optional for backward-compat.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "answers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Answer" }
+        }
+      }
+    },
+    "Pending": {
+      "description": "Pending-question state for a cluster.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["forwardedAt", "skipCount"],
+      "properties": {
+        "forwardedAt": {
+          "description": "ISO-8601 timestamp the question was first forwarded to the user. The oldest-first sort key.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "skipCount": {
+          "description": "Times this pending question has been skipped (surfaced but deferred). At or above the skip threshold (K) the question is demoted in surfacing priority.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "lastSurfacedAt": {
+          "description": "ISO-8601 timestamp it was last skipped (via skip_question), if ever. Stamped only on skip; surfacing via get_pending_questions is a lock-free read that does not stamp it.",
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "StandingProtocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolId",
+        "hypothesis",
+        "confidence",
+        "openContradictions",
+        "supportingClusterIds",
+        "updatedAt"
+      ],
+      "properties": {
+        "protocolId": { "type": "string" },
+        "hypothesis": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "openContradictions": { "type": "array", "items": { "type": "string" } },
+        "supportingClusterIds": { "type": "array", "items": { "type": "string" } },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Theme": {
+      "description": "Tier 2 — a broad theme grouping related clusters non-destructively. Evidence-free: holds only memberClusterIds + answers (never snippets). Carries its own answers + pending (question-able at the abstract level).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["themeId", "name", "memberClusterIds", "answers", "firstSeen", "lastActivityAt"],
+      "properties": {
+        "themeId": {
+          "description": "Opaque surrogate UUID. The theme's answer-bearing identity.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Short human-readable theme name.",
+          "type": "string"
+        },
+        "memberClusterIds": {
+          "description": "The clusters grouped under this theme. A non-destructive reference set; a cluster may belong to multiple themes. Every id MUST reference an existing cluster.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "answers": {
+          "description": "Accumulated theme-level answers (user outranks inferred at read time).",
+          "type": "array",
+          "items": { "$ref": "#/definitions/Answer" }
+        },
+        "pending": {
+          "description": "Theme-level pending-question state (mirrors a cluster's). Present iff a theme question was forwarded to the user and not yet resolved.",
+          "$ref": "#/definitions/Pending"
+        },
+        "firstSeen": {
+          "description": "ISO-8601 timestamp the theme was created. Stable; oldest-first surfacing tiebreak.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastActivityAt": {
+          "description": "ISO-8601 timestamp of the last activity touching this theme (create, regroup, answer).",
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "Source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "description": "Source kind, e.g. 'claude-sessions', 'claude-memory', 'git' (reserved).",
+          "type": "string"
+        },
+        "ref": {
+          "description": "Optional free-form locator (path, repo, etc.).",
+          "type": "string"
+        }
+      }
+    }
+  }
+}
