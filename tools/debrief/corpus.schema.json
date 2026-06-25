@@ -141,9 +141,51 @@
           "type": "string",
           "format": "date-time"
         },
+        "relational": {
+          "description": "Objective relational FACTS (T7): COUNTS + TIMESTAMPS recomputed from the cluster's sidecar evidence on every add/merge/split. PRIVACY-CLEAN (no raw paths) and VERDICT-FREE (the agent interprets them). Optional for backward-compat.",
+          "$ref": "#/definitions/RelationalFacts"
+        },
         "answers": {
           "type": "array",
           "items": { "$ref": "#/definitions/Answer" }
+        }
+      }
+    },
+    "RelationalFacts": {
+      "description": "Objective relational FACTS for a cluster (T7). FACTS ONLY — COUNTS + TIMESTAMPS, no verdict/label/threshold. PRIVACY-CLEAN: distinctRepos/distinctBranches are COUNTS of distinct cwd/gitBranch values; the raw paths/branches are NEVER copied to the hot file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distinctSessions", "distinctRepos", "distinctBranches", "occurrences"],
+      "properties": {
+        "distinctSessions": {
+          "description": "Number of distinct sessions the cluster's evidence spans.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "distinctRepos": {
+          "description": "Number of DISTINCT cwd values across the cluster's sidecar evidence. A COUNT — raw paths never copied.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "distinctBranches": {
+          "description": "Number of DISTINCT gitBranch values across the cluster's sidecar evidence. A COUNT — raw branches never copied.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "firstTs": {
+          "description": "Earliest evidence timestamp (ISO-8601), if any evidence carried a ts.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastTs": {
+          "description": "Latest evidence timestamp (ISO-8601), if any evidence carried a ts.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "occurrences": {
+          "description": "Total occurrences = number of distinct evidence items in the cluster (mirrors count).",
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

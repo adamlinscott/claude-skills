@@ -16,7 +16,7 @@
  *  - submit_answer NEVER silently records source:user — that requires confirmed:true (via access.ts).
  */
 
-import type { Corpus, EvidenceStore, StandingProtocol, Pending, Theme, Kind } from "../corpus/types.js";
+import type { Corpus, EvidenceStore, StandingProtocol, Pending, Theme, Kind, RelationalFacts } from "../corpus/types.js";
 import { MAX_PENDING_SURFACED, SKIP_DEMOTE_THRESHOLD, KINDS } from "../corpus/types.js";
 import {
   effectiveAnswer,
@@ -38,6 +38,11 @@ import {
   skipThemePending,
   orderThemePending,
   isDemoted,
+  computeRelational,
+  aggregateThemeRelational,
+  rollupThemeRelationalFromMembers,
+  relationalTimeline,
+  themeRelationalTimeline,
   type MergeClustersResult,
 } from "../corpus/identity.js";
 import { randomUUID } from "node:crypto";
@@ -95,6 +100,13 @@ export interface PatternSummary {
    * Absent on non-pending clusters.
    */
   pending?: boolean;
+  /**
+   * Objective relational FACTS rollup (T7): COUNTS + TIMESTAMPS only (distinctSessions/Repos/
+   * Branches, firstTs/lastTs, occurrences). EVIDENCE-FREE and VERDICT-FREE — the agent interprets
+   * them into relational signals. Surfaced straight from the cluster's stored relational facts;
+   * absent on pre-relational / empty clusters.
+   */
+  relational?: RelationalFacts;
 }
 
 /**
@@ -174,6 +186,8 @@ function toSummary(c: Corpus["clusters"][number]): PatternSummary {
     ...(eff ? { answerSource: eff.source } : {}),
     ...(c.merged === true ? { merged: true } : {}),
     ...(c.pending !== undefined ? { pending: true } : {}),
+    // Surface the cluster's stored relational FACTS (evidence-free counts + timestamps). No verdict.
+    ...(c.relational !== undefined ? { relational: { ...c.relational } } : {}),
   };
 }
 
@@ -289,6 +303,17 @@ export function getEvidence(
  */
 export type AnswerMode = "none" | "self" | "user";
 
+/**
+ * The objective relational FACTS surfaced to the agent by answer_open_question (T7 — facts only,
+ * the agent interprets). The rollup COUNTS + timespan PLUS a `timeline`: the sorted list of
+ * correction timestamps assembled from the sidecar evidence (objective; helps the agent judge
+ * 'recurs after long gaps'). NO verdict text — the code never labels or thresholds the facts.
+ */
+export interface RelationalFactsBundle extends RelationalFacts {
+  /** Sorted (ascending) ISO-8601 correction timestamps from the (cluster or theme-union) evidence. */
+  timeline: string[];
+}
+
 export interface AnswerOpenQuestionArgs {
   /** Tier-1 target: a narrow cluster. Provide EITHER clusterId OR themeId (not both). */
   clusterId?: string;
@@ -335,6 +360,14 @@ export interface AnswerOpenQuestionResult {
    * re-deriving surface questions. Empty array when the corpus carries no protocols yet.
    */
   standingProtocols: StandingProtocol[];
+  /**
+   * Objective relational FACTS (T7): the rollup COUNTS + timespan PLUS the sorted correction
+   * timeline, assembled from the sidecar evidence (for a cluster: that cluster's facts; for a theme:
+   * the aggregated union across member clusters). FACTS ONLY — no verdict/label/threshold; the agent
+   * interprets these into the relational signals when it writes the question SET (the depthInstruction
+   * already references relational signals "when available"). Present for both target types.
+   */
+  relationalFacts: RelationalFactsBundle;
   /**
    * A short directive making the return-instruction contract explicit to the calling agent: the
    * tool did NOT answer; the agent reasons next. NOT an LLM call.
@@ -393,6 +426,12 @@ export function answerOpenQuestion(
     const theme = getTheme(corpus, args.themeId);
     if (!theme) return undefined;
     const themeEvidence = getThemeEvidenceBundle(corpus, evidence, args.themeId);
+    // Objective relational FACTS rolled up across the theme's member clusters (exact union, since we
+    // have the sidecar here), PLUS the sorted correction timeline. Facts only — no verdict.
+    const relationalFacts: RelationalFactsBundle = {
+      ...aggregateThemeRelational(corpus, theme, evidence),
+      timeline: themeRelationalTimeline(corpus, theme, evidence),
+    };
     const base = {
       themeId: args.themeId,
       target: "theme" as const,
@@ -401,6 +440,7 @@ export function answerOpenQuestion(
       depthInstruction: instructions.depthInstruction,
       classifyIntent: instructions.classifyIntent,
       standingProtocols,
+      relationalFacts,
     };
     if (mode === "user") {
       // Forward the THEME-level question to the user; marks the THEME pending (re-surfaces across
@@ -449,6 +489,13 @@ export function answerOpenQuestion(
   const bundle = getEvidenceBundle(corpus, evidence, args.clusterId);
 
   const cluster = getCluster(corpus, args.clusterId);
+  // Objective relational FACTS for this cluster, freshly computed from the sidecar (authoritative
+  // even if the stored cluster.relational is stale), PLUS the sorted correction timeline. Facts only.
+  const clusterEvidenceIds = cluster?.evidenceIds ?? [];
+  const relationalFacts: RelationalFactsBundle = {
+    ...computeRelational(clusterEvidenceIds, evidence),
+    timeline: relationalTimeline(clusterEvidenceIds, evidence),
+  };
   const base = {
     clusterId: args.clusterId,
     target: "cluster" as const,
@@ -457,6 +504,7 @@ export function answerOpenQuestion(
     depthInstruction: instructions.depthInstruction,
     classifyIntent: instructions.classifyIntent,
     standingProtocols,
+    relationalFacts,
   };
 
   if (mode === "user") {
@@ -867,6 +915,23 @@ export interface ThemeSummary {
   answerSource?: "user" | "inferred";
   /** True iff a theme-level question is pending (forwarded, awaiting an answer). */
   pending?: boolean;
+  /**
+   * Objective relational FACTS rollup for the theme (T7), aggregated from members' STORED relational
+   * facts (corpus-only — get_themes is evidence-free, so no sidecar). occurrences/firstTs/lastTs are
+   * exact; the distinct* counts are a MAX-over-members APPROXIMATION (the exact union needs the
+   * sidecar and is available via answer_open_question({ themeId })). Verdict-free. Absent when no
+   * member carries relational facts.
+   */
+  relational?: RelationalFacts;
+  /**
+   * IN-BAND APPROXIMATION MARKER. Present (true) iff `relational` is present, signalling that this
+   * theme rollup's distinct* counts are a MAX-over-members LOWER BOUND, NOT the exact value returned
+   * by get_patterns / answer_open_question. Without it a consuming agent cannot tell the theme
+   * distinct* are approximate (they share the RelationalFacts shape with the exact cluster counts) and
+   * may UNDER-weight cross-domain breadth. The exact union is available via answer_open_question({
+   * themeId }). Absent when `relational` is absent.
+   */
+  relationalApprox?: boolean;
 }
 
 export interface GetThemesArgs {
@@ -882,8 +947,12 @@ export interface GetThemesResult {
   nextCursor?: string;
 }
 
-function toThemeSummary(t: Theme): ThemeSummary {
+function toThemeSummary(corpus: Corpus, t: Theme): ThemeSummary {
   const eff = effectiveThemeAnswer(t);
+  // Corpus-only relational rollup from members' stored facts (no sidecar — get_themes stays
+  // evidence-free). distinct* are a MAX-over-members approximation; the exact union is in
+  // answer_open_question({ themeId }). Omitted when no member carries relational facts.
+  const relational = rollupThemeRelationalFromMembers(corpus, t);
   return {
     themeId: t.themeId,
     name: t.name,
@@ -891,6 +960,9 @@ function toThemeSummary(t: Theme): ThemeSummary {
     answered: t.answers.length > 0,
     ...(eff ? { answerSource: eff.source } : {}),
     ...(t.pending !== undefined ? { pending: true } : {}),
+    // Surface the rollup PLUS an in-band marker that its distinct* are a MAX-over-members floor (the
+    // exact union is in answer_open_question({ themeId })) — so the agent never reads them as exact.
+    ...(relational !== undefined ? { relational, relationalApprox: true } : {}),
   };
 }
 
@@ -908,7 +980,7 @@ export function getThemes(corpus: Corpus, args: GetThemesArgs = {}): GetThemesRe
   const page = themes.slice(start, start + limit);
   const end = start + page.length;
   const result: GetThemesResult = {
-    themes: page.map(toThemeSummary),
+    themes: page.map((t) => toThemeSummary(corpus, t)),
     notice: UNTRUSTED_CORPUS_NOTICE,
   };
   if (end < themes.length) result.nextCursor = String(end);

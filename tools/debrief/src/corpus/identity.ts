@@ -15,7 +15,7 @@
  */
 
 import { randomUUID, createHash } from "node:crypto";
-import type { Corpus, Cluster, EvidenceItem, EvidenceStore, Pending, Theme } from "./types.js";
+import type { Corpus, Cluster, EvidenceItem, EvidenceStore, Pending, Theme, RelationalFacts } from "./types.js";
 import { SKIP_DEMOTE_THRESHOLD } from "./types.js";
 
 /** Pick the later of two optional ISO timestamps as a `{ lastSurfacedAt }` spread, or `{}`. */
@@ -36,6 +36,58 @@ export function countSessions(evidenceIds: string[], evidence: EvidenceStore): n
     if (item) sessions.add(item.sessionId);
   }
   return sessions.size;
+}
+
+/**
+ * Compute the objective relational FACTS (T7) for a set of evidenceIds, read from the sidecar.
+ * FACTS ONLY — COUNTS + TIMESTAMPS, no verdict/label/threshold. Lives here (like countSessions) so
+ * EVERY path that moves evidence between clusters (mergeCandidates / mergeClusters / splitAlias /
+ * corruption-recovery) can recompute it from the deduped union and keep it correct across
+ * re-extraction.
+ *
+ * PRIVACY-CLEAN by construction: distinctRepos / distinctBranches are the SIZES of the distinct-cwd
+ * / distinct-gitBranch sets — the raw cwd / gitBranch strings (privacy-sensitive absolute paths /
+ * branch names) are read from the sidecar to COUNT them but are NEVER returned.
+ *
+ * firstTs / lastTs are the min / max evidence timestamps via LEXICOGRAPHIC string comparison.
+ * PRECONDITION: this is correct ONLY when every evidence ts is a UNIFORM ISO-8601 representation in
+ * UTC 'Z' (which Claude Code emits; parse.ts passes ev.timestamp through verbatim with no
+ * normalization). Mixed precision ('...:00Z' vs '...:00.000Z') or a non-UTC offset ('+02:00') would
+ * misorder equal/near-equal instants. If a future source emits non-uniform timestamps, normalize to
+ * epoch (Date.parse, NaN-guarded) before min/max here and in relationalTimeline.
+ *
+ * occurrences counts only evidence items PRESENT in the sidecar (a dangling evidenceId is skipped),
+ * so it normally mirrors Cluster.count (= evidenceIds.length) but can be LESS if an id dangles (no
+ * sidecar entry). The present-only count is the more correct fact; the divergence is silent + benign.
+ * Missing items are tolerated and skipped, never fatal.
+ */
+export function computeRelational(evidenceIds: string[], evidence: EvidenceStore): RelationalFacts {
+  const sessions = new Set<string>();
+  const repos = new Set<string>();
+  const branches = new Set<string>();
+  let firstTs: string | undefined;
+  let lastTs: string | undefined;
+  let occurrences = 0;
+  for (const id of evidenceIds) {
+    const item = evidence.items[id];
+    if (!item) continue; // tolerate a dangling evidenceId
+    occurrences += 1;
+    sessions.add(item.sessionId);
+    if (typeof item.cwd === "string" && item.cwd.length > 0) repos.add(item.cwd);
+    if (typeof item.gitBranch === "string" && item.gitBranch.length > 0) branches.add(item.gitBranch);
+    if (typeof item.ts === "string" && item.ts.length > 0) {
+      if (firstTs === undefined || item.ts < firstTs) firstTs = item.ts;
+      if (lastTs === undefined || item.ts > lastTs) lastTs = item.ts;
+    }
+  }
+  return {
+    distinctSessions: sessions.size,
+    distinctRepos: repos.size,
+    distinctBranches: branches.size,
+    ...(firstTs !== undefined ? { firstTs } : {}),
+    ...(lastTs !== undefined ? { lastTs } : {}),
+    occurrences,
+  };
 }
 
 /** Mint a fresh opaque cluster identity. Never derived from content — that's the point. */
@@ -64,6 +116,35 @@ export function normalizeSubject(text: string): string {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Max tokens kept in a CLI-derived COARSE subject key. Bounds how much turn-derived prose can land
+ * in the evidence-free hot file: without a cap, normalizeSubject over a whole turn copies the entire
+ * user message (and any typed absolute path, with slashes folded to spaces) into normalizedSubject —
+ * effectively a raw snippet on the supposedly snippet-free surface. A short token cap keeps the hot
+ * file holding a bucket LABEL, not the message; the full prose stays only in the sidecar snippet.
+ */
+export const MAX_SUBJECT_TOKENS = 12;
+
+/**
+ * CLI-derived COARSE subject KEY from a raw turn. normalizeSubject() folds the text (NFKC, lowercase,
+ * strip punctuation, collapse whitespace); this then BOUNDS it to the first `maxTokens` tokens so the
+ * hot file's normalizedSubject is a short coarse bucket label rather than the whole turn (eng decision
+ * 5 intended a coarse subject, not the entire message).
+ *
+ * PRIVACY NOTE — this is the ONLY hot-file field derived from turn prose. It is bounded but NOT
+ * counts-only: a path/username at the very start of a turn can still survive (folded) within the first
+ * `maxTokens` tokens. The literal path SYNTAX never survives (slashes/colons are stripped by
+ * normalizeSubject), so the hot file carries no path-shaped string; the verbatim prose lives only in
+ * the sidecar. Use this (not bare normalizeSubject) when deriving a subject from a whole turn.
+ */
+export function coarseSubject(text: string, maxTokens: number = MAX_SUBJECT_TOKENS): string {
+  const normalized = normalizeSubject(text);
+  if (normalized === "") return "";
+  const tokens = normalized.split(" ");
+  if (tokens.length <= maxTokens) return normalized;
+  return tokens.slice(0, maxTokens).join(" ");
 }
 
 /**
@@ -252,6 +333,9 @@ export function mergeClusters(
   // Recompute volatile counts from the deduped union.
   into.count = into.evidenceIds.length;
   into.sessionCount = countSessions(into.evidenceIds, evidence);
+  // Recompute the objective relational FACTS from the deduped union so distinctRepos/branches/
+  // sessions + firstTs/lastTs stay correct after a merge (T7 — facts only, no verdict).
+  into.relational = computeRelational(into.evidenceIds, evidence);
   into.merged = true;
 
   // firstSeen is STABLE: the surviving cluster keeps the EARLIER of the two creation stamps so
@@ -301,9 +385,12 @@ export function mergeClusters(
 /** Options for splitAlias (P2 hazard fixes). */
 export interface SplitAliasOptions {
   /**
-   * The evidence sidecar. When provided, split recomputes sessionCount (distinct sessions)
-   * for BOTH the new cluster AND every old cluster it migrated evidence off of, so neither
-   * goes stale. Without it, sessionCount is left to the next merge to repair (legacy behavior).
+   * The evidence sidecar. When provided, split recomputes BOTH sessionCount (distinct sessions) AND
+   * the relational FACTS (computeRelational) for the new cluster AND every old cluster it migrated
+   * evidence off of, so neither goes stale. Without it, BOTH sessionCount and relational facts are
+   * left stale on the affected clusters until the next merge repairs them (legacy behavior) — so a
+   * caller that moves evidence SHOULD pass the sidecar. (splitAlias is test-only today; no MCP handler
+   * wires it. Whoever later wires a split handler must pass evidence to keep relational facts correct.)
    */
   evidence?: EvidenceStore;
   /**
@@ -421,12 +508,15 @@ export function splitAlias(
     corpus.aliases[aliasKey(detector, normalizedSubject)] = newId;
   }
 
-  // Recompute sessionCount from the sidecar for the new cluster + every old cluster we moved
-  // evidence off of, so sessionCount never goes stale (P2 hazard a).
+  // Recompute sessionCount + relational FACTS from the sidecar for the new cluster + every old
+  // cluster we moved evidence off of, so neither sessionCount nor the relational facts go stale
+  // (P2 hazard a; T7 facts must stay correct across a split).
   if (options.evidence) {
     newCluster.sessionCount = countSessions(newCluster.evidenceIds, options.evidence);
+    newCluster.relational = computeRelational(newCluster.evidenceIds, options.evidence);
     for (const c of oldClustersTouched) {
       c.sessionCount = countSessions(c.evidenceIds, options.evidence);
+      c.relational = computeRelational(c.evidenceIds, options.evidence);
     }
   }
 
@@ -462,6 +552,10 @@ export function makeEvidenceItem(
     sessionId: partial.sessionId,
     ts: partial.ts,
     turnRange: partial.turnRange,
+    // cwd / gitBranch are PRIVACY-SENSITIVE and live ONLY in the sidecar (never the hot file); they
+    // are carried here so computeRelational can derive the distinctRepos / distinctBranches COUNTS.
+    cwd: partial.cwd,
+    gitBranch: partial.gitBranch,
     snippet: partial.snippet,
   };
 }
@@ -708,6 +802,134 @@ export function dropClusterFromAllThemes(
 /** Read-time precedence for a THEME's answers (user outranks inferred). Mirrors effectiveAnswer. */
 export function effectiveThemeAnswer(theme: Theme): Theme["answers"][number] | undefined {
   return effectiveAnswerOf(theme.answers);
+}
+
+/**
+ * Aggregate the relational FACTS rollup for a THEME across its member clusters (T7 — facts only,
+ * no verdict). The theme is the Tier-2 non-destructive overlay; this rolls the per-cluster facts up
+ * to the abstract altitude the depth step asks theme-level questions at.
+ *
+ * Aggregation rules (design step 3):
+ *  - occurrences = SUM of member occurrences (each cluster's distinct evidence; a cluster may belong
+ *    to multiple themes, but within ONE theme the members are distinct clusters with distinct
+ *    evidence, so summing is correct).
+ *  - firstTs = MIN of member firstTs; lastTs = MAX of member lastTs.
+ *  - distinctSessions / distinctRepos / distinctBranches = the UNION count computed from the
+ *    members' evidenceIds directly against the sidecar (NOT a sum of per-member counts, which would
+ *    double-count a session/repo/branch shared by two members). Computing from the unioned
+ *    evidenceIds is the exact union, derivable here because we have the sidecar — so no approximation
+ *    is needed for v1's theme rollup.
+ *
+ * A missing member cluster (dangling id) is tolerated and skipped, never fatal.
+ */
+export function aggregateThemeRelational(
+  corpus: Corpus,
+  theme: Theme,
+  evidence: EvidenceStore,
+): RelationalFacts {
+  // Union the member evidenceIds (deduped) so distinct* are the exact union counts, not a sum.
+  const unionIds: string[] = [];
+  const seen = new Set<string>();
+  for (const clusterId of theme.memberClusterIds) {
+    const cluster = getCluster(corpus, clusterId);
+    if (!cluster) continue; // dangling member id tolerated
+    for (const eid of cluster.evidenceIds) {
+      if (!seen.has(eid)) {
+        seen.add(eid);
+        unionIds.push(eid);
+      }
+    }
+  }
+  return computeRelational(unionIds, evidence);
+}
+
+/**
+ * Assemble the OBJECTIVE correction TIMELINE for a cluster: the sorted (ascending) list of evidence
+ * timestamps read from the sidecar (T7 — helps the agent judge "recurs after long gaps"). FACTS
+ * ONLY — a sorted list of ISO timestamps, no gap labels/verdicts. Evidence items without a ts are
+ * omitted; missing sidecar entries are tolerated. Sorted by LEXICOGRAPHIC string order — correct
+ * only under the same uniform-UTC-'Z' ts precondition as computeRelational (CC emits UTC; normalize
+ * to epoch first if a future source emits mixed precision / non-UTC offsets).
+ */
+export function relationalTimeline(evidenceIds: string[], evidence: EvidenceStore): string[] {
+  const ts: string[] = [];
+  for (const id of evidenceIds) {
+    const item = evidence.items[id];
+    if (item && typeof item.ts === "string" && item.ts.length > 0) ts.push(item.ts);
+  }
+  ts.sort();
+  return ts;
+}
+
+/**
+ * Roll up a THEME's relational FACTS from its members' STORED relational facts ONLY — i.e. WITHOUT
+ * the sidecar (for get_themes, which is intentionally corpus-only / evidence-free). Facts only.
+ *
+ * APPROXIMATION (documented): occurrences = SUM of member occurrences (exact ONLY when members hold
+ * DISJOINT evidence — true in practice, since a theme's members are distinct clusters; if a manual
+ * split/regroup ever left two members sharing an evidenceId, SUM would over-count. The exact deduped
+ * union is available via aggregateThemeRelational, which has the sidecar); firstTs = MIN; lastTs = MAX
+ * (exact, subject to the same uniform-UTC-Z ts precondition as computeRelational). But distinctSessions
+ * / distinctRepos / distinctBranches are the MAX over members, NOT the true union: without the sidecar
+ * we cannot tell whether two members share a session/repo/branch,
+ * so summing would over-count and unioning is not derivable. MAX is a safe lower bound (the union is
+ * at least as large as the largest member). The EXACT union is available via answer_open_question(
+ * { themeId }), which has the sidecar and uses aggregateThemeRelational. Returns undefined if no
+ * member carries relational facts (so get_themes can omit the field).
+ */
+export function rollupThemeRelationalFromMembers(
+  corpus: Corpus,
+  theme: Theme,
+): RelationalFacts | undefined {
+  let any = false;
+  let occurrences = 0;
+  let distinctSessions = 0;
+  let distinctRepos = 0;
+  let distinctBranches = 0;
+  let firstTs: string | undefined;
+  let lastTs: string | undefined;
+  for (const clusterId of theme.memberClusterIds) {
+    const cluster = getCluster(corpus, clusterId);
+    if (!cluster || !cluster.relational) continue;
+    any = true;
+    const r = cluster.relational;
+    occurrences += r.occurrences;
+    distinctSessions = Math.max(distinctSessions, r.distinctSessions);
+    distinctRepos = Math.max(distinctRepos, r.distinctRepos);
+    distinctBranches = Math.max(distinctBranches, r.distinctBranches);
+    if (r.firstTs !== undefined && (firstTs === undefined || r.firstTs < firstTs)) firstTs = r.firstTs;
+    if (r.lastTs !== undefined && (lastTs === undefined || r.lastTs > lastTs)) lastTs = r.lastTs;
+  }
+  if (!any) return undefined;
+  return {
+    distinctSessions,
+    distinctRepos,
+    distinctBranches,
+    ...(firstTs !== undefined ? { firstTs } : {}),
+    ...(lastTs !== undefined ? { lastTs } : {}),
+    occurrences,
+  };
+}
+
+/** Assemble the objective correction TIMELINE across a THEME's member clusters (sorted, deduped-union). */
+export function themeRelationalTimeline(
+  corpus: Corpus,
+  theme: Theme,
+  evidence: EvidenceStore,
+): string[] {
+  const seen = new Set<string>();
+  const unionIds: string[] = [];
+  for (const clusterId of theme.memberClusterIds) {
+    const cluster = getCluster(corpus, clusterId);
+    if (!cluster) continue;
+    for (const eid of cluster.evidenceIds) {
+      if (!seen.has(eid)) {
+        seen.add(eid);
+        unionIds.push(eid);
+      }
+    }
+  }
+  return relationalTimeline(unionIds, evidence);
 }
 
 /**
