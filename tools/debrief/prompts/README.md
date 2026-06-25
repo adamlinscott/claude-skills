@@ -3,7 +3,7 @@
 These files are **the intelligence of debrief, and they are yours to tune.** The tool never
 hardcodes intent or question logic; it hands these instructions to the connected LLM and
 borrows its reasoning. Editing a file here changes how the tool thinks — no code change, no
-rebuild.
+rebuild, and (because the MCP server reads them live per call) no server restart.
 
 | File | What it controls | When to edit |
 |------|------------------|--------------|

@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/adamlinscott/claude-skills/tools/debrief/corpus.evidence.schema.json",
+  "title": "debrief evidence sidecar",
+  "description": "The bulky evidence sidecar (corpus.evidence.json) holding raw transcript snippets keyed by id. Stays LOCAL; it is NOT part of the portable/standard hot file and is never shared. Loaded only when a question is live (get_evidence).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "items"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Sidecar schema version.",
+      "const": 1
+    },
+    "items": {
+      "description": "Snippets keyed by EvidenceItem.id (the same id stored in Cluster.evidenceIds).",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/EvidenceItem" }
+    }
+  },
+  "definitions": {
+    "EvidenceItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sessionId", "snippet"],
+      "properties": {
+        "id": {
+          "description": "Stable id referenced by Cluster.evidenceIds.",
+          "type": "string"
+        },
+        "sessionId": {
+          "description": "The session this snippet came from.",
+          "type": "string"
+        },
+        "ts": {
+          "description": "ISO-8601 timestamp of the underlying turn, if known.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "turnRange": {
+          "description": "Session-local turn indices [start, end] the snippet spans, if known.",
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "snippet": {
+          "description": "The raw snippet text (bulky; never enters the hot file).",
+          "type": "string"
+        }
+      }
+    }
+  }
+}
