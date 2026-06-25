@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeContent, isHumanTextTurn, extractHumanTurns, type RawEvent } from "../src/extract/parse.ts";
+import { normalizeContent, isHumanTextTurn, isInjectedNoise, extractHumanTurns, type RawEvent } from "../src/extract/parse.ts";
 
 // Fixtures mirror the VERIFIED shapes from the spike against a real CC 2.1.181 session.
 
@@ -45,6 +45,18 @@ test("real array-text turn with absent origin + undefined isMeta IS a human turn
     message: { role: "user", content: [{ type: "text", text: "I'm wondering if it would be cleaner to have the repos alpha and micro" }] },
   };
   assert.equal(isHumanTextTurn(ev), true);
+});
+
+test("injected compaction summary is NOT a human turn (T2 spike finding)", () => {
+  const txt = "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion.";
+  assert.equal(isInjectedNoise(txt), true);
+  const ev: RawEvent = { type: "user", message: { role: "user", content: [{ type: "text", text: txt }] } };
+  assert.equal(isHumanTextTurn(ev), false);
+});
+
+test("interrupt marker is NOT a human turn", () => {
+  const ev: RawEvent = { type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } };
+  assert.equal(isHumanTextTurn(ev), false);
 });
 
 test("extractHumanTurns keeps only the 3 real turns from a mixed stream", () => {
