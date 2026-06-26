@@ -40,6 +40,38 @@ export const SKIP_DEMOTE_THRESHOLD = 3;
 export type AnswerSource = "user" | "inferred";
 
 /**
+ * Objective relational FACTS for a cluster (T7 — relational signals). FACTS ONLY, NO VERDICT:
+ * the CLI computes COUNTS + TIMESTAMPS and hands them to the connected agent, which interprets
+ * them into the relational signals when it writes questions (design "FACTS ONLY, AGENT
+ * INTERPRETS"). The code renders no label/threshold ("trust earned", "cross-domain: yes") — that
+ * is the LLM's job downstream.
+ *
+ * PRIVACY-CLEAN by construction: every field is a COUNT or a TIMESTAMP. distinctRepos /
+ * distinctBranches are the NUMBER of distinct cwd / gitBranch values seen across the cluster's
+ * sidecar evidence — the raw cwd / gitBranch values (which are absolute paths / branch names, and
+ * therefore privacy-sensitive) are NEVER copied to the hot file. The count is safe to share; the
+ * raw path is not.
+ */
+export interface RelationalFacts {
+  /** Number of distinct sessions the cluster's evidence spans (mirrors sessionCount, recomputed here). */
+  distinctSessions: number;
+  /** Number of DISTINCT cwd values across the cluster's sidecar evidence. A COUNT — raw paths never copied. */
+  distinctRepos: number;
+  /** Number of DISTINCT gitBranch values across the cluster's sidecar evidence. A COUNT — raw branches never copied. */
+  distinctBranches: number;
+  /** Earliest evidence timestamp (ISO-8601), or undefined if no evidence carried a ts. */
+  firstTs?: string;
+  /** Latest evidence timestamp (ISO-8601), or undefined if no evidence carried a ts. */
+  lastTs?: string;
+  /**
+   * Total occurrences = number of evidence items PRESENT in the sidecar for the cluster. Normally
+   * mirrors `count` (= evidenceIds.length), but can be LESS if an evidenceId dangles (no sidecar
+   * entry), since computeRelational skips dangling ids. The present-only value is the more correct fact.
+   */
+  occurrences: number;
+}
+
+/**
  * R/O/C/Q/X intent taxonomy (prompts/classify-intent.md): R=redirect, O=observed,
  * C=continue, Q=query, X=not-a-real-turn. The CLI never derives this (CORE PRINCIPLE — intent
  * is the LLM's job); it is the connected agent's classification, stored verbatim. A cluster may
@@ -150,6 +182,13 @@ export interface Cluster {
    * compat with pre-lastActivityAt corpora.
    */
   lastActivityAt?: string;
+  /**
+   * Objective relational FACTS (T7): COUNTS + TIMESTAMPS recomputed from the cluster's sidecar
+   * evidence whenever evidence is added/merged/split. PRIVACY-CLEAN (no raw paths/snippets — see
+   * RelationalFacts) and VERDICT-FREE (the agent interprets them). Optional for backward-compat
+   * with pre-relational corpora; the loader tolerates its absence.
+   */
+  relational?: RelationalFacts;
 }
 
 /**
@@ -261,6 +300,18 @@ export interface EvidenceItem {
   ts?: string;
   /** Session-local turn indices [start, end] the snippet spans, if known. */
   turnRange?: [number, number];
+  /**
+   * The turn's working directory (the Claude Code `cwd`), if known. PRIVACY-SENSITIVE (it is an
+   * absolute path that leaks the user's home dir / username) — it lives ONLY in the sidecar and is
+   * NEVER copied to the hot file. The hot file's RelationalFacts.distinctRepos is a COUNT derived
+   * from these, not the raw values. Used to compute distinctRepos (T7 relational facts).
+   */
+  cwd?: string;
+  /**
+   * The turn's git branch (the Claude Code `gitBranch`), if known. Also PRIVACY-SENSITIVE / sidecar-
+   * only; the hot file carries only the distinctBranches COUNT derived from it (T7 relational facts).
+   */
+  gitBranch?: string;
   /** The raw snippet text (bulky; never enters the hot file). */
   snippet: string;
 }

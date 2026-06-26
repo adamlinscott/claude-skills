@@ -109,6 +109,77 @@ test("CLI corpus: re-extraction is idempotent (merge-not-clobber, no double coun
   await rm(dir, { recursive: true, force: true });
 });
 
+test("CLI corpus: captures cwd/gitBranch into the SIDECAR only (NOT the hot file); hot file carries relational COUNTS", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-cli-"));
+  const sessionPath = join(dir, "session.jsonl");
+  const corpusPath = join(dir, "corpus.json");
+  const evidencePath = join(dir, "corpus.evidence.json");
+
+  // Privacy-sensitive absolute path + branch on each turn event. They must land in the sidecar
+  // ONLY; the hot file must carry only the distinctRepos/distinctBranches COUNTS.
+  const ABS_PATH = "C:/Users/adamr/Projects/PRIVATE-REPO-4242";
+  const BRANCH = "feature/SECRET-BRANCH-4242";
+  const relSession =
+    [
+      JSON.stringify({ type: "assistant", sessionId: "s1", message: { role: "assistant", content: [{ type: "text", text: "Done." }] } }),
+      JSON.stringify({ type: "user", sessionId: "s1", uuid: "h1", timestamp: "2026-06-25T00:00:00Z", cwd: ABS_PATH, gitBranch: BRANCH, message: { content: [{ type: "text", text: `please rename ${SENTINEL} the value` }] } }),
+    ].join("\n") + "\n";
+  await writeFile(sessionPath, relSession, "utf8");
+
+  await tsx(["corpus", sessionPath, corpusPath]);
+
+  const hotText = await readFile(corpusPath, "utf8");
+  const sideText = await readFile(evidencePath, "utf8");
+
+  // PRIVACY: the raw absolute path + branch live ONLY in the sidecar.
+  assert.equal(hotText.includes(ABS_PATH), false, "hot file must NOT contain the absolute cwd path");
+  assert.equal(hotText.includes(BRANCH), false, "hot file must NOT contain the git branch");
+  assert.equal(sideText.includes(ABS_PATH), true, "sidecar must hold the raw cwd");
+  assert.equal(sideText.includes(BRANCH), true, "sidecar must hold the raw gitBranch");
+
+  // The hot file carries the privacy-clean relational COUNTS.
+  const hot = JSON.parse(hotText);
+  const cl = hot.clusters[0];
+  assert.ok(cl.relational, "hot-file cluster carries relational facts");
+  assert.equal(cl.relational.distinctRepos, 1, "one distinct cwd -> distinctRepos 1");
+  assert.equal(cl.relational.distinctBranches, 1, "one distinct branch -> distinctBranches 1");
+  assert.equal(cl.relational.occurrences, 1);
+
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("CLI corpus: an absolute path TYPED INTO A TURN does not leak path-syntax into the hot file", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "debrief-cli-"));
+  const sessionPath = join(dir, "session.jsonl");
+  const corpusPath = join(dir, "corpus.json");
+  const evidencePath = join(dir, "corpus.evidence.json");
+
+  // The user types an absolute path in the turn TEXT itself (not the cwd field). normalizedSubject is
+  // derived from this prose via coarseSubject — it must hold a bounded, path-syntax-free label, with
+  // the verbatim path surviving ONLY in the sidecar snippet.
+  const TYPED_PATH = "C:/Users/adamr/Projects/secret/file.ts";
+  const pathSession =
+    [
+      JSON.stringify({ type: "assistant", sessionId: "s1", message: { role: "assistant", content: [{ type: "text", text: "Done." }] } }),
+      JSON.stringify({ type: "user", sessionId: "s1", uuid: "h1", timestamp: "2026-06-25T00:00:00Z", message: { content: [{ type: "text", text: `please look at ${TYPED_PATH} and fix it` }] } }),
+    ].join("\n") + "\n";
+  await writeFile(sessionPath, pathSession, "utf8");
+
+  await tsx(["corpus", sessionPath, corpusPath]);
+
+  const hotText = await readFile(corpusPath, "utf8");
+  const sideText = await readFile(evidencePath, "utf8");
+
+  // GENERIC path-syntax scan over the hot file: no Windows-drive or POSIX home path shape may survive.
+  assert.equal(/[A-Za-z]:[\\/]/.test(hotText), false, "no drive-letter path syntax in the hot file");
+  assert.equal(/\/(Users|home)\//i.test(hotText), false, "no POSIX home path syntax in the hot file");
+  // The verbatim typed path survives ONLY in the sidecar snippet.
+  assert.equal(hotText.includes(TYPED_PATH), false, "the typed path must not appear verbatim in the hot file");
+  assert.equal(sideText.includes(TYPED_PATH), true, "the sidecar snippet holds the typed path verbatim");
+
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("CLI corpus: refuses to overwrite a CORRUPT corpus (recoverable, exit 1)", async () => {
   const dir = await mkdtemp(join(tmpdir(), "debrief-cli-"));
   const sessionPath = join(dir, "session.jsonl");

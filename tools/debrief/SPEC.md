@@ -14,13 +14,37 @@ are kept byte-for-byte consistent with it and a test validates a corpus against 
 
 | File | Contents | Portable? |
 |------|----------|-----------|
-| `corpus.json` (hot file) | patterns (clusters) + themes + accumulated answers + alias index + standing-protocol state + sources | **Yes.** Evidence-free by construction — carries only `evidenceIds`, never snippets. Sharing it leaks no transcript. |
-| `corpus.evidence.json` (sidecar) | raw transcript snippets keyed by id | **No.** Stays local. Loaded only when a question is live (`get_evidence`). |
+| `corpus.json` (hot file) | patterns (clusters) + themes + accumulated answers + alias index + standing-protocol state + sources | **Yes.** Evidence-free by construction — carries only `evidenceIds`, never raw snippets, and the relational facts are COUNTS, never raw paths. (One caveat: `normalizedSubject` is a bounded coarse label *derived* from turn prose — see the Identity model — so it is not strictly counts-only, though path syntax never survives it.) |
+| `corpus.evidence.json` (sidecar) | raw transcript snippets + each turn's privacy-sensitive `cwd` / `gitBranch`, keyed by id | **No.** Stays local. Loaded only when a question is live (`get_evidence`) or to compute relational facts. |
 
 This split is a privacy invariant, not a convenience: the evidence-free hot file is the
 standard shape *by construction*. The single serialization choke point (`serializeCorpus`)
 strips any stray snippet a malformed cluster might carry, so a hot file can never leak a raw
 snippet even if an upstream bug attaches one to a cluster.
+
+> **Caveat — before enabling sharing (E4):** the cluster `normalizedSubject` is a *bounded*
+> coarse label (normalize + cap to the first N tokens of a turn), not a hash, so a short
+> label CAN still contain a secret or path typed in a turn's opening words. This is accepted
+> for v1 because the hot file is local and sharing is deferred. **Before the sharing feature
+> ships, tighten this** — make labels prose-free (opaque/hashed + agent-assigned clean topics)
+> or run a secret/path scrubber over them. Until then, do not treat the hot file as safe to
+> publish unreviewed.
+
+## Corpus locations (zero-config discovery)
+
+The reference CLI/MCP resolve the corpus with NO path required (`src/discover.ts`):
+
+- **Per-project (default):** `~/.debrief/projects/<project-slug>/corpus.json`, where `<project-slug>`
+  is the sanitized (lowercased, non-alphanumerics collapsed to `-`) absolute project root from
+  `git rev-parse --show-toplevel` (falling back to the cwd).
+- **Global (`--global`):** `~/.debrief/global/corpus.json` — the cross-project roll-up.
+- The evidence sidecar always lives beside the hot file (`corpus.evidence.json`).
+- An explicit path argument or `--corpus <path>` overrides discovery (back-compat).
+
+Session discovery scans `~/.claude/projects/*/*.jsonl`. For the per-project scope it keeps sessions
+whose first recorded `cwd` is INSIDE the project root (path-normalized; case-insensitive on win32);
+`--global` keeps all. These locations are a property of the reference implementation, not the
+portable format — the `corpus.json` *shape* below is the contract, wherever the file lives.
 
 ## Versioning
 
@@ -73,8 +97,17 @@ non-identifying.
   `turn-after-completion`), never a lexical/intent matcher. Intent classification is the
   connected LLM's job, never the CLI's.
 - **`normalizedSubject`** is a cheap, deterministic, coarse CLI rule (Unicode NFKC fold,
-  lowercase, strip non-alphanumerics, collapse whitespace). Semantic merges are agent-driven
-  and persisted as additional aliases.
+  lowercase, strip non-alphanumerics, collapse whitespace). When derived from a whole turn the CLI
+  additionally **BOUNDS it to the first `MAX_SUBJECT_TOKENS` (12) tokens** (`coarseSubject`) so the
+  hot file holds a short bucket LABEL, not the entire message. Semantic merges are agent-driven and
+  persisted as additional aliases.
+  - **Privacy caveat (it is derived prose, not counts).** `normalizedSubject` is the ONE hot-file
+    field derived from turn text, so — unlike the relational COUNTS — it is not snippet-free in the
+    strict sense: a path/username at the very start of a turn can survive (folded) within the first
+    12 tokens. What is guaranteed is that the literal path SYNTAX never survives (`coarseSubject`
+    strips slashes/colons), so the hot file carries no path-SHAPED string, and the verbatim turn text
+    (and full path) lives only in the sidecar snippet. Treat `normalizedSubject` as a bounded coarse
+    label, not as a counts-only field.
 - **Re-normalize / merge / split are all index remaps.** Because answers key off
   `clusterId`, improving the normalizer (the inevitable "normalizer churn") never orphans an
   accumulated answer.
@@ -262,6 +295,83 @@ Re-running the extractor must preserve accumulated answers. `mergeCandidates`:
 - without a `turnRange`: `"<sessionId>:h<16-hex-of-sha256(snippet)>"` — a content hash, so
   two distinct no-range snippets from one session do NOT collide (which would silently drop
   one on merge).
+
+## Evidence item — privacy-sensitive context (`cwd` / `gitBranch`)
+
+Each sidecar `EvidenceItem` carries `{ id, sessionId, ts?, turnRange?, cwd?, gitBranch?, snippet }`.
+
+- **`cwd`** (optional) — the turn's working directory (the Claude Code `cwd`). It is an absolute
+  path that leaks the user's home directory / username, so it is **PRIVACY-SENSITIVE**.
+- **`gitBranch`** (optional) — the turn's git branch (the Claude Code `gitBranch`). Also
+  privacy-sensitive (a branch name can reveal a feature/ticket).
+
+Both live **ONLY in the sidecar** and are **NEVER copied to the hot file**. The hot file carries
+only the privacy-clean COUNTS derived from them (`Cluster.relational.distinctRepos` /
+`distinctBranches`). The CLI captures them from the session events onto the sidecar evidence item;
+they never transit the portable surface.
+
+## Relational facts (objective signals — facts only, no verdict)
+
+A cluster carries an OPTIONAL `relational` rollup — objective relational FACTS the connected agent
+interprets into the relational signals when it writes questions (the depth instruction references
+relational signals "when available"). **The code renders NO verdict/label/threshold** ("trust
+earned", "cross-domain: yes" are the LLM's calls, never the code's). It is COUNTS + TIMESTAMPS only:
+
+```jsonc
+"relational": {
+  "distinctSessions": 9,   // distinct sessions the cluster's evidence spans
+  "distinctRepos": 3,      // COUNT of distinct cwd values (raw paths NEVER copied to the hot file)
+  "distinctBranches": 4,   // COUNT of distinct gitBranch values (raw branches NEVER copied)
+  "firstTs": "<iso>",      // earliest evidence timestamp (omitted if no evidence carried a ts)
+  "lastTs": "<iso>",       // latest evidence timestamp
+  "occurrences": 14        // distinct evidence items (mirrors count)
+}
+```
+
+- **Privacy-clean by construction.** `distinctRepos` / `distinctBranches` are the SIZES of the
+  distinct-`cwd` / distinct-`gitBranch` sets; the raw values are read from the sidecar to count them
+  but are never written to the hot file. So the portable hot file never leaks an absolute path.
+- **Recomputed, never stale.** `computeRelational(evidenceIds, evidence)` recomputes the rollup from
+  the deduped evidence union on every `mergeCandidates` (re-extraction), `mergeClusters`, and
+  `splitAlias` (when given the sidecar), so the facts stay correct as evidence accumulates.
+- **`firstTs` / `lastTs`** are the min / max evidence timestamps via LEXICOGRAPHIC comparison.
+  PRECONDITION: this is correct only when every evidence `ts` is a UNIFORM ISO-8601 representation in
+  UTC `Z` — which Claude Code emits and the parser passes through verbatim (no normalization). Mixed
+  precision or a non-UTC offset would misorder near-equal instants; a future source emitting those
+  must normalize to epoch before min/max. Optional — omitted when no evidence carried a `ts`. The
+  whole `relational` field is optional for backward-compat (the loader tolerates its absence).
+- **`occurrences`** counts only evidence items PRESENT in the sidecar (a dangling `evidenceId` is
+  skipped), so it normally mirrors `count` but can be slightly LESS if an id dangles.
+
+#### v1 scope (which T1 relational signals the facts cover)
+
+T1 (design doc, finding 2) named THREE relational signals needed to clear "uncanny": (a)
+cross-domain breadth, (b) trust-over-time, (c) counterfactual/principle acceptance. **v1's
+relational facts cover cross-domain breadth + recurrence timing only** (`distinctRepos` /
+`distinctBranches` + the `timeline`). **Trust-over-time and counterfactual-acceptance are
+DEFERRED** — no fact is computed for them yet (the depth prompt asks for them "when available" and
+tolerates their absence). Follow-up facts to compute: an assistant-reliability run-length before a
+re-verify (trust-over-time), and an accepted-vs-rejected outcome on evidence (counterfactual). This
+gap is tracked here rather than left silent.
+
+### How the facts are surfaced (this is the point — the agent interprets them)
+
+- **`get_patterns`** includes each cluster's stored `relational` rollup in the (evidence-free)
+  summary.
+- **`get_themes`** includes a THEME-level `relational` rollup aggregated from members' STORED
+  relational facts (corpus-only, no sidecar): `occurrences` is the SUM, `firstTs`/`lastTs` the
+  MIN/MAX; the `distinct*` counts are a **MAX-over-members APPROXIMATION** (without the sidecar the
+  exact union — whether two members share a session/repo/branch — is not derivable; MAX is a safe
+  lower bound). Because the rollup shares the `RelationalFacts` shape with the EXACT counts returned
+  elsewhere, the summary carries an **in-band `relationalApprox: true`** marker (present whenever
+  `relational` is) so a consuming agent treats the theme `distinct*` as a floor, not an exact value.
+  The **exact union** is available via `answer_open_question({ themeId })`.
+- **`answer_open_question`** (cluster OR theme) returns a `relationalFacts` object: the rollup
+  COUNTS + timespan PLUS a **`timeline`** — the sorted (ascending) list of correction timestamps
+  assembled from the sidecar evidence (objective; helps the agent judge "recurs after long gaps").
+  For a cluster these are that cluster's facts; for a theme they are the **EXACT union** across the
+  member clusters (aggregated directly from the unioned `evidenceIds` against the sidecar, so no
+  approximation). NO verdict text.
 
 ## Security model (v1) — the corpus is untrusted
 
