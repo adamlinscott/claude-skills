@@ -43,6 +43,14 @@
           "minItems": 2,
           "maxItems": 2
         },
+        "cwd": {
+          "description": "The turn's working directory (Claude Code cwd), if known. PRIVACY-SENSITIVE (absolute path) — lives ONLY in this sidecar, NEVER the hot file. Used to compute the hot file's RelationalFacts.distinctRepos COUNT.",
+          "type": "string"
+        },
+        "gitBranch": {
+          "description": "The turn's git branch (Claude Code gitBranch), if known. PRIVACY-SENSITIVE / sidecar-only; the hot file carries only the distinctBranches COUNT derived from it.",
+          "type": "string"
+        },
         "snippet": {
           "description": "The raw snippet text (bulky; never enters the hot file).",
           "type": "string"

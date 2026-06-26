@@ -282,6 +282,10 @@ export function serializeCorpus(corpus: Corpus, now: string = corpus.generatedAt
       ...(c.pending !== undefined ? { pending: { ...c.pending } } : {}),
       ...(c.firstSeen !== undefined ? { firstSeen: c.firstSeen } : {}),
       ...(c.lastActivityAt !== undefined ? { lastActivityAt: c.lastActivityAt } : {}),
+      // Relational FACTS (T7): COUNTS + TIMESTAMPS only — PRIVACY-CLEAN by construction (no raw
+      // cwd/gitBranch paths). Deep-copied so the serialized object shares no reference with the
+      // live cluster. Omitted on clusters with no relational facts (pre-relational / empty).
+      ...(c.relational !== undefined ? { relational: { ...c.relational } } : {}),
       answers: c.answers.map((a) => ({ ...a })),
     })),
     aliases: { ...corpus.aliases },
