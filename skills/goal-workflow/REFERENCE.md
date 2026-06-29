@@ -3,34 +3,38 @@
 Gate message, contract template, loop details, and closeout text for the
 [SKILL.md](SKILL.md) workflow.
 
-## Step 0 — gate message (keyword missing)
+## Step 0 — gate message (`--confirm` missing)
 
-When `ARGUMENTS` lacks the literal one-word `ultracode` (or contains only the two-word
-`ultra code`), STOP and send this, then wait for re-invocation. Modify nothing.
+When `ARGUMENTS` lacks the literal flag `--confirm`, STOP and send this, then wait for
+re-invocation. Modify nothing.
 
-> **Goal Workflow needs ultracode — and you have to type it.**
+> **Before Goal Workflow runs, set up two things — I can't do them for you.**
 >
-> This skill runs a long autonomous build loop. It only works under ultracode (xhigh
-> reasoning + automatic workflow orchestration), and a skill can't enable or detect that
-> — only your typed input can. So re-invoke with the keyword:
+> This skill runs a long, autonomous, expensive build loop. It needs ultracode effort and
+> autonomous permissions, and a skill can neither set nor detect either one. So do these,
+> then re-invoke with `--confirm`:
 >
-> `/goal-workflow ultracode`
->
-> (one word, `ultracode` — not "ultra code". You don't need to restate the goal — I'll
-> read it from our conversation and any planning docs from this session. Add words only if
-> you want to steer or narrow it.)
+> 1. **Set effort:** run `/effort ultracode` — turns on xhigh reasoning + workflow
+>    orchestration. (Passing the word "ultracode" as an argument does *not* do this; only
+>    the `/effort` command does.)
+> 2. **Go autonomous:** press **Shift+Tab** to cycle to **auto-accept mode**, so I don't
+>    stop for permission on every step of the loop.
+> 3. **Re-invoke:** `/goal-workflow --confirm` — you don't need to restate the goal; I'll
+>    read it from our conversation and any planning docs from this session. Add words only
+>    to steer or narrow it.
 >
 > Heads up before you do:
-> - **This takes a while.** Time scales with how complex the goal is; large goals have
->   run ~1 hour.
-> - **It's expensive.** ultracode burns tokens fast. Start it when you mean to commit to
->   a full implementation pass, not for a quick change.
+> - **This takes a while.** Time scales with goal complexity; large goals have run ~1 hour.
+> - **It's expensive.** ultracode burns tokens fast. Start it only when you mean to commit
+>   to a full implementation pass, not for a quick change.
 >
-> Add `ultracode` and send again, and I'll start.
+> Once both are set, send `/goal-workflow --confirm` and I'll start.
 
-Why gate on the argument: typing `ultracode` in the invoking message is the one action
-that actually switches the session into ultracode, *and* it is the only signal the skill
-can observe. Checking the arg therefore confirms both intent and that the mode is on.
+Why gate on a flag rather than the keyword: the `ultracode` keyword only enables the mode
+when the *user* types it as plain input, and it does not reliably fire from a slash-command
+argument — so the skill cannot rely on it. Effort and permission mode are also unreadable
+from inside a run. `--confirm` is therefore an explicit user assertion that the manual setup
+is done; it is the only signal available, so trust it but never self-enable in its place.
 
 ## Step 4 — completion-invariant contract template
 
