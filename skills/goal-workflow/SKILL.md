@@ -1,6 +1,6 @@
 ---
 name: goal-workflow
-description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (build, commit at intervals, verify at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on the user invoking it with the literal keyword `ultracode`, which both enables xhigh + workflow orchestration and confirms intent. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill — or whenever the user says goal-workflow.
+description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (build, commit at intervals, verify at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on a `--confirm` flag that asserts the user has manually set ultracode effort and enabled auto-accept mode (a skill can set neither); without the flag it stops and tells the user exactly what to run. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill — or whenever the user says goal-workflow.
 ---
 
 # Goal Workflow
@@ -18,22 +18,27 @@ verification anchors to a bar set in writing, not to the implementer's memory of
 
 Run the steps in order. Step 0 is a hard gate; do not skip it.
 
-## 0. Gate on the `ultracode` keyword (FIRST — before anything else)
+## 0. Confirmation gate (FIRST — before anything else)
 
-A skill cannot enable or even detect ultracode (it is a session setting, exposed in no
-env var, file, or status output). The only signal available is the keyword in the user's
-own invoking message — which is also what actually turns the mode on. So gate on it.
+This skill runs a long, expensive, autonomous loop, and it depends on two session settings
+a skill **cannot** set or detect for itself: **ultracode effort** (xhigh + workflow
+orchestration) and **auto-accept mode** (so the loop's agents run without a permission
+prompt on every action). Passing the keyword `ultracode` as an argument does **not** turn
+effort on — only the user can, manually. So gate on an explicit `--confirm` flag that
+asserts the user has done the setup.
 
-- Inspect this invocation's `ARGUMENTS` for the literal single token `ultracode`.
-- **Present and one word** → ultracode is active for this run. Proceed to step 1.
-- **Absent, or only the two-word form `ultra code`** → STOP. Modify nothing. Tell the user:
-  - Re-invoke as `/goal-workflow ultracode` (the keyword is the only required argument; the
-    goal is read from context in step 1, so it need not be restated).
-  - Why: typing `ultracode` is the only way to enable xhigh + workflow orchestration — the
-    skill can't do it for you — and it confirms you mean to start a long run.
+- Inspect this invocation's `ARGUMENTS` for the literal flag `--confirm`.
+- **Present** → the user has confirmed setup. Proceed to step 1.
+- **Absent** → STOP. Modify nothing. Tell the user to do these, then re-invoke:
+  1. Run `/effort ultracode` — enables xhigh reasoning + workflow orchestration. The skill
+     can't set effort; you must.
+  2. Press **Shift+Tab** to cycle to **auto-accept mode**, so agents work autonomously
+     without stopping for permission on each step.
+  3. Re-invoke as `/goal-workflow --confirm` (the goal is read from context in step 1, so it
+     need not be restated).
   - **Warn plainly:** this runs autonomously and can take a long time, scaling with goal
     complexity (runs have gone ~1 hour). It is **expensive and consumes tokens fast.**
-  - Then stop and wait for re-invocation. Do not proceed on a missing keyword.
+  - Then stop and wait. Do not proceed without `--confirm`.
 
 See [REFERENCE.md](REFERENCE.md) for the exact gate message.
 
@@ -42,7 +47,7 @@ See [REFERENCE.md](REFERENCE.md) for the exact gate message.
 The goal is **not** passed as an argument — derive it. Read the conversation above plus any
 plan / ADR / spec / doc files written this session, and infer what the user wants built.
 State the derived goal back in one sentence and confirm it before proceeding. Any extra
-words the user added after `ultracode` are steering hints, not the whole goal.
+words the user added alongside `--confirm` are steering hints, not the whole goal.
 
 **Clarity gate.** Before continuing, judge one thing only: *is there a clear, concrete goal
 here that can actually be implemented?* This is narrow on purpose — it is **not** a check on
@@ -101,14 +106,16 @@ Gaps from verification → fix → re-verify, with a round cap (mirror `/fresh-e
 ## 8. Closeout
 
 Final `/fresh-eyes` pass against the full contract. Report each invariant as met or unmet,
-do the final commit and push, and `/goal clear`. **Then remind the user:** they are likely
-still in ultracode effort, and can lower it (`/effort high` or below) for the rest of the
-conversation until the next complex run, to avoid spending xhigh tokens on ordinary turns.
+do the final commit and push, and `/goal clear`. **Then remind the user to undo the setup
+from step 0:** they are likely still in ultracode effort and auto-accept mode. Suggest
+lowering effort (`/effort high` or below) and pressing **Shift+Tab** to leave auto-accept,
+so ordinary turns don't run at xhigh or act without prompting until the next big run.
 
 ## Guardrails
 
-- **Never proceed past step 0 without the typed keyword.** The gate is the only guarantee
-  the run is actually under ultracode; a skill cannot self-enable or detect it.
+- **Never proceed past step 0 without `--confirm`.** A skill cannot set or detect effort or
+  permission mode, so the flag is the only assertion the user has actually enabled ultracode
+  and auto-accept. Trust it, but never substitute for it by self-enabling.
 - **The contract precedes the code.** Verification checks the written invariants, never the
   implementer's recollection — that is what keeps the proof honest.
 - **fresh-eyes stays a reviewer.** Do not fold its verification into the build mindset; its
