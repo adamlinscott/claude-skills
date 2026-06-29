@@ -24,22 +24,40 @@ code block so the user can copy it cleanly.
 >
 > **A — Managed run (simpler).** Re-invoke `/goal-workflow --confirm`. I drive the lifecycle
 > myself: terrain map → completion contract → build with explicit subagent fan-out → verify
-> with `/fresh-eyes` → close out. Deterministic, bounded to what a skill can orchestrate.
+> with `/fresh-eyes` → close out. Deterministic, bounded to what a skill can orchestrate. Add
+> `--commit` to let me commit at intervals and push at milestones; without it I touch no git.
 >
 > **B — Full native orchestration (most powerful).** Paste the command below. Because *you*
 > run it, it hands the work to native `/goal` plus ultracode's own workflow orchestration —
-> the fullest fan-out — with my best-practice directive baked in:
->
-> ```
-> /goal Determine the goal from this conversation and any plan, ADR, spec, or documentation
-> files written this session, then implement it to completion. First commit and push any
-> outstanding documentation, then build directly from it. Use a workflow to orchestrate the
-> work and parallelise independent parts. Commit to the current feature branch at logical
-> intervals. Use the fresh-eyes skill at logical milestones to verify each task is complete
-> and to surface bugs, oversights, and spec gaps, then fix what it finds. Keep working until
-> the implementation fully satisfies the plan and all checks pass.
-> ```
->
+> the fullest fan-out — with my best-practice directive baked in.
+
+Then emit **one** of the two `/goal` variants below, chosen by whether `--commit` was passed
+to this gate invocation. They differ only in the version-control clause.
+
+**With `--commit`** — auto-commits during the run:
+
+```
+/goal Determine the goal from this conversation and any plan, ADR, spec, or documentation
+files written this session, then implement it to completion. First commit and push any
+outstanding documentation, then build directly from it. Use a workflow to orchestrate the
+work and parallelise independent parts. Commit to the current feature branch at logical
+intervals and push at milestones. Use the fresh-eyes skill at logical milestones to verify
+each task is complete and to surface bugs, oversights, and spec gaps, then fix what it finds.
+Keep working until the implementation fully satisfies the plan and all checks pass.
+```
+
+**Without `--commit` (default)** — leaves version control to the user:
+
+```
+/goal Determine the goal from this conversation and any plan, ADR, spec, or documentation
+files written this session, then implement it to completion, building directly from that
+documentation. Use a workflow to orchestrate the work and parallelise independent parts. Do
+NOT commit or push anything — leave all version control to me. Use the fresh-eyes skill at
+logical milestones to verify each task is complete and to surface bugs, oversights, and spec
+gaps, then fix what it finds. Keep working until the implementation fully satisfies the plan
+and all checks pass.
+```
+
 > Heads up either way:
 > - **This takes a while.** Time scales with goal complexity; large goals have run ~1 hour.
 > - **It's expensive.** ultracode burns tokens fast. Start it only when you mean to commit
@@ -47,8 +65,9 @@ code block so the user can copy it cleanly.
 
 The `/goal` command is intentionally **generic** — it tells Claude to derive the goal from
 context and docs rather than hard-coding one, so the same text works for any session. It is
-modelled on the proven manual invocations: commit docs first, build from them, run as a
-workflow, commit at intervals, verify iteratively with fresh-eyes.
+modelled on the proven manual invocations: build from the written docs, run as a workflow,
+verify iteratively with fresh-eyes, and (when `--commit` is on) commit docs first then commit
+at intervals.
 
 Why gate on a flag rather than the keyword: the `ultracode` keyword only enables the mode
 when the *user* types it as plain input, and it does not reliably fire from a slash-command
@@ -101,9 +120,11 @@ invariants → continue, until all pass or a blocker needs the user. (For the fu
 fan-out, the user is better served by **path B** from the step-0 gate, which starts from
 `/goal` and runs as a workflow from the outset.)
 
-**Commit cadence:** WIP commits to the feature branch at logical units (a coherent change, a
-passing module). Push only at verified milestones (after a clean `/fresh-eyes` pass) and at
-closeout — not on every commit.
+**Commit cadence (only when `--commit` was passed):** WIP commits to the feature branch at
+logical units (a coherent change, a passing module); push only at verified milestones (after
+a clean `/fresh-eyes` pass) and at closeout — not on every commit. **Without `--commit`,
+make no commits or pushes at all** — build in the working tree and tell the user at closeout
+that the changes are uncommitted.
 
 ## Step 7 — fix-loop bound
 
