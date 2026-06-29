@@ -22,7 +22,7 @@ order — though most are useful on their own, too.
 |---|---|
 | Any planning command, skill, or process | **Plan.** Start with a planning session — however you prefer to do it — and write the plan and any supporting docs to files. |
 | `/assumption-inventory` | **Ground the plan in reality.** Verify what the plan assumes about the project itself: which files actually exist, what may be edited, what must not be touched — the technical terrain, not just the goals. |
-| `/goal-workflow` | **Build.** The long, expensive bulk of the work — an autonomous loop that implements the plan to a written contract, committing and verifying as it goes, until the invariants hold. (Run it as-is the first time; it will stop and walk you through the one-time setup it needs.) |
+| `/goal-workflow` | **Build.** The long, expensive bulk of the work — an autonomous loop that implements the plan to a written contract, verifying as it goes, until the invariants hold. (Run it as-is the first time; it will stop and walk you through the one-time setup it needs.) |
 | `/fresh-eyes` | **Verify.** Confirm the build actually completed to spec, and surface any bugs or oversights that slipped in, via a blind reconciliation against the intent. |
 | `/reground` | **Recover (as needed).** On longer follow-on sessions, if you start drifting from the main task, halt and re-anchor to codebase evidence before continuing. |
 
@@ -40,12 +40,13 @@ before shipping.
 ### `/goal-workflow`
 
 An autonomous build loop for a settled plan. Writes a checkable completion contract before
-any code, then loops — build with explicit subagent fan-out, commit, verify at milestones
-with `/fresh-eyes` — until the contract holds. Gated on a `--confirm` flag asserting you've
-set ultracode effort (`/effort ultracode`) and auto-accept mode (Shift+Tab). Without it the
+any code, then loops — build with explicit subagent fan-out, verify at milestones with
+`/fresh-eyes` — until the contract holds. Gated on a `--confirm` flag asserting you've set
+ultracode effort (`/effort ultracode`) and auto-accept mode (Shift+Tab). Without it the
 skill stops, gives the setup steps, and offers two paths: a managed `--confirm` run, or a
 copy-pasteable `/goal` command that hands the work to native goal + workflow orchestration
-for the fullest fan-out.
+for the fullest fan-out. An optional `--commit` flag (default off) turns on commit-at-
+intervals and push-at-milestones in either path; without it, version control stays with you.
 
 **When to use:** a plan is settled and you want Claude to implement it end-to-end. Invoke
 as `/goal-workflow --confirm`; the goal is read from context, so you don't restate it.

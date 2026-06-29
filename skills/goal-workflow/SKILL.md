@@ -1,6 +1,6 @@
 ---
 name: goal-workflow
-description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (building with explicit Agent-tool fan-out, committing at intervals, verifying at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on a `--confirm` flag asserting the user has manually set ultracode effort and auto-accept mode (a skill can set neither); without the flag it stops, gives the setup steps, and offers two paths — a managed `--confirm` run, or a copy-pasteable `/goal` command that hands the work to native goal + workflow orchestration. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill — or whenever the user says goal-workflow.
+description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (building with explicit Agent-tool fan-out, committing at intervals, verifying at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on a `--confirm` flag asserting the user has manually set ultracode effort and auto-accept mode (a skill can set neither); without the flag it stops, gives the setup steps, and offers two paths — a managed `--confirm` run, or a copy-pasteable `/goal` command that hands the work to native goal + workflow orchestration. An optional `--commit` flag (default off) enables commit-at-intervals and push-at-milestones in both the managed run and the generated command; without it, nothing is committed. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill — or whenever the user says goal-workflow.
 ---
 
 # Goal Workflow
@@ -29,10 +29,15 @@ prompt on every action). Passing the keyword `ultracode` as an argument does **n
 effort on — only the user can, manually. So gate on an explicit `--confirm` flag that
 asserts the user has done the setup.
 
-- Inspect this invocation's `ARGUMENTS` for the literal flag `--confirm`.
-- **Present** → the user has confirmed setup. Proceed to step 1.
-- **Absent** → STOP. Modify nothing. Output the gate message: the **setup** plus **two ways
-  to proceed**, then wait. Do not proceed without `--confirm`.
+- Inspect this invocation's `ARGUMENTS` for two flags:
+  - `--confirm` — **required to run.** Asserts the setup below is done.
+  - `--commit` — **optional, default OFF.** Governs all commit/push behavior for the run.
+    Present → the skill commits at logical intervals and pushes at milestones. Absent →
+    **the skill makes no commits or pushes**; version control stays entirely with the user.
+- **`--confirm` present** → setup confirmed. Record whether `--commit` is also present (it
+  governs steps 5 and 8), then proceed to step 1.
+- **`--confirm` absent** → STOP. Modify nothing. Output the gate message: the **setup** plus
+  **two ways to proceed**, then wait. Do not proceed without `--confirm`.
 
   **Setup (do both first):**
   1. Run `/effort ultracode` — enables xhigh reasoning + workflow orchestration. The skill
@@ -43,18 +48,19 @@ asserts the user has done the setup.
   **Then pick one:**
   - **A — Managed run.** Re-invoke `/goal-workflow --confirm`. The skill drives the lifecycle
     itself (terrain → contract → Agent-tool fan-out → fresh-eyes → closeout). Deterministic,
-    but bounded to what a skill can orchestrate.
+    but bounded to what a skill can orchestrate. Add `--commit` to let it commit at intervals
+    and push at milestones; without it, nothing is committed and git stays with you.
   - **B — Full native orchestration.** Paste the generated `/goal …` command (see
     [REFERENCE.md](REFERENCE.md)). Because *you* run it, it hands the work to native `/goal`
     plus ultracode's workflow orchestration — the fullest fan-out — with the skill's
-    best-practice directive (derive the goal from context + docs, run as a workflow, commit
-    at intervals, verify with fresh-eyes) baked in.
+    best-practice directive baked in. **Tailor the command to the flags:** include the
+    commit-at-intervals clause only if `--commit` was passed; otherwise generate the variant
+    that tells Claude not to commit.
 
   **Warn plainly:** either path runs autonomously and can take a long time, scaling with goal
   complexity (runs have gone ~1 hour). It is **expensive and consumes tokens fast.**
 
-See [REFERENCE.md](REFERENCE.md) for the exact gate message and the copy-pasteable `/goal`
-command.
+See [REFERENCE.md](REFERENCE.md) for the exact gate message and both `/goal` command variants.
 
 ## 1. Lock the goal
 
@@ -105,8 +111,14 @@ template.
 Drive the build yourself; do not wait for ultracode to author a workflow — it may not.
 **Fan out explicitly with the Agent tool** for independent workstreams (separate modules,
 test suites, services), then integrate — this is the orchestration the skill actually
-controls. Build toward the contract, iterating until every invariant holds. **Commit WIP to
-the feature branch at logical intervals; push at verified milestones**, not on every commit.
+controls. Build toward the contract, iterating until every invariant holds.
+
+**Commit behavior is gated on `--commit` (from step 0):**
+- **`--commit` set** → commit WIP to the feature branch at logical intervals; push at
+  verified milestones, not on every commit.
+- **`--commit` not set (default)** → make **no commits or pushes.** Build in the working
+  tree and leave all version control to the user; note at closeout that changes are
+  uncommitted.
 
 For cross-turn persistence (so the run auto-continues across turns), the skill can hand the
 user a ready-to-paste `/goal …` command pointing at the contract file — but `/goal` is
@@ -126,10 +138,11 @@ Gaps from verification → fix → re-verify, with a round cap (mirror `/fresh-e
 
 ## 8. Closeout
 
-Final `/fresh-eyes` pass against the full contract. Report each invariant as met or unmet,
-do the final commit and push, and remind the user to run `/goal clear` if they set a goal.
-**Then remind the user to undo the setup from step 0:** they are likely still in ultracode
-effort and auto-accept mode. Suggest
+Final `/fresh-eyes` pass against the full contract. Report each invariant as met or unmet.
+Then handle git per `--commit`: if set, do the final commit and push; if not, state plainly
+that **all changes are uncommitted in the working tree** and leave committing to the user.
+Remind the user to run `/goal clear` if they set a goal. **Then remind the user to undo the
+setup from step 0:** they are likely still in ultracode effort and auto-accept mode. Suggest
 lowering effort (`/effort high` or below) and pressing **Shift+Tab** to leave auto-accept,
 so ordinary turns don't run at xhigh or act without prompting until the next big run.
 
