@@ -40,10 +40,12 @@ before shipping.
 ### `/goal-workflow`
 
 An autonomous build loop for a settled plan. Writes a checkable completion contract before
-any code, then loops — build, commit, verify at milestones with `/fresh-eyes` — until the
-contract holds. Wraps native `/goal`. Gated on a `--confirm` flag asserting you've set
-ultracode effort (`/effort ultracode`) and auto-accept mode (Shift+Tab) — without it, the
-skill stops and tells you exactly what to run.
+any code, then loops — build with explicit subagent fan-out, commit, verify at milestones
+with `/fresh-eyes` — until the contract holds. Gated on a `--confirm` flag asserting you've
+set ultracode effort (`/effort ultracode`) and auto-accept mode (Shift+Tab). Without it the
+skill stops, gives the setup steps, and offers two paths: a managed `--confirm` run, or a
+copy-pasteable `/goal` command that hands the work to native goal + workflow orchestration
+for the fullest fan-out.
 
 **When to use:** a plan is settled and you want Claude to implement it end-to-end. Invoke
 as `/goal-workflow --confirm`; the goal is read from context, so you don't restate it.
