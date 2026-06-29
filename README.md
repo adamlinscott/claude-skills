@@ -74,8 +74,9 @@ intent; a missing keyword stops the skill with instructions. The implementation-
 member of the set with `/assumption-inventory`, `/reground`, and `/fresh-eyes`.
 
 **When to use:** a plan is settled and you want Claude to implement it end-to-end on its
-own, typically after a planning skill like `/autoplan`. Invoke as
-`/goal-workflow <goal> ultracode`.
+own, typically after a planning skill like `/autoplan`. Invoke as `/goal-workflow
+ultracode` — the goal is read from the conversation and any planning docs written this
+session, so you don't restate it; add words only to steer or narrow it.
 
 ## Install
 
