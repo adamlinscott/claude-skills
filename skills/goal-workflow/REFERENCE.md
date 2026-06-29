@@ -6,41 +6,61 @@ Gate message, contract template, loop details, and closeout text for the
 ## Step 0 — gate message (`--confirm` missing)
 
 When `ARGUMENTS` lacks the literal flag `--confirm`, STOP and send this, then wait for
-re-invocation. Modify nothing.
+re-invocation. Modify nothing. Emit the copy-pasteable `/goal` block verbatim as a fenced
+code block so the user can copy it cleanly.
 
 > **Before Goal Workflow runs, set up two things — I can't do them for you.**
 >
-> This skill runs a long, autonomous, expensive build loop. It needs ultracode effort and
-> autonomous permissions, and a skill can neither set nor detect either one. So do these,
-> then re-invoke with `--confirm`:
+> This runs a long, autonomous, expensive build loop. It needs ultracode effort and
+> autonomous permissions, and a skill can neither set nor detect either. So first:
 >
 > 1. **Set effort:** run `/effort ultracode` — turns on xhigh reasoning + workflow
->    orchestration. (Passing the word "ultracode" as an argument does *not* do this; only
->    the `/effort` command does.)
+>    orchestration. (Passing "ultracode" as an argument does *not* do this; only the
+>    `/effort` command does.)
 > 2. **Go autonomous:** press **Shift+Tab** to cycle to **auto-accept mode**, so I don't
->    stop for permission on every step of the loop.
-> 3. **Re-invoke:** `/goal-workflow --confirm` — you don't need to restate the goal; I'll
->    read it from our conversation and any planning docs from this session. Add words only
->    to steer or narrow it.
+>    stop for permission on every step.
 >
-> Heads up before you do:
+> Then choose how to run it:
+>
+> **A — Managed run (simpler).** Re-invoke `/goal-workflow --confirm`. I drive the lifecycle
+> myself: terrain map → completion contract → build with explicit subagent fan-out → verify
+> with `/fresh-eyes` → close out. Deterministic, bounded to what a skill can orchestrate.
+>
+> **B — Full native orchestration (most powerful).** Paste the command below. Because *you*
+> run it, it hands the work to native `/goal` plus ultracode's own workflow orchestration —
+> the fullest fan-out — with my best-practice directive baked in:
+>
+> ```
+> /goal Determine the goal from this conversation and any plan, ADR, spec, or documentation
+> files written this session, then implement it to completion. First commit and push any
+> outstanding documentation, then build directly from it. Use a workflow to orchestrate the
+> work and parallelise independent parts. Commit to the current feature branch at logical
+> intervals. Use the fresh-eyes skill at logical milestones to verify each task is complete
+> and to surface bugs, oversights, and spec gaps, then fix what it finds. Keep working until
+> the implementation fully satisfies the plan and all checks pass.
+> ```
+>
+> Heads up either way:
 > - **This takes a while.** Time scales with goal complexity; large goals have run ~1 hour.
 > - **It's expensive.** ultracode burns tokens fast. Start it only when you mean to commit
->   to a full implementation pass, not for a quick change.
->
-> Once both are set, send `/goal-workflow --confirm` and I'll start.
+>   to a full implementation pass, not a quick change.
+
+The `/goal` command is intentionally **generic** — it tells Claude to derive the goal from
+context and docs rather than hard-coding one, so the same text works for any session. It is
+modelled on the proven manual invocations: commit docs first, build from them, run as a
+workflow, commit at intervals, verify iteratively with fresh-eyes.
 
 Why gate on a flag rather than the keyword: the `ultracode` keyword only enables the mode
 when the *user* types it as plain input, and it does not reliably fire from a slash-command
-argument — so the skill cannot rely on it. Effort and permission mode are also unreadable
-from inside a run. `--confirm` is therefore an explicit user assertion that the manual setup
-is done; it is the only signal available, so trust it but never self-enable in its place.
+argument. Effort, permission mode, and `/goal` are all user-only and unreadable from inside
+a run. `--confirm` is therefore an explicit user assertion that the manual setup is done —
+the only signal available — so trust it but never self-enable in its place.
 
 ## Step 4 — completion-invariant contract template
 
 Write to a file so it survives compaction. Each invariant is binary and checkable —
-something `/fresh-eyes` can later confirm or deny, and something the `/goal` condition can
-reference. Avoid soft language ("should work", "looks right").
+something `/fresh-eyes` can later confirm or deny, and something a user-run `/goal` condition
+can point at. Avoid soft language ("should work", "looks right").
 
 ```markdown
 # Goal: <one-sentence goal>
@@ -65,17 +85,25 @@ Good invariants name a concrete, observable condition and how it is checked. Bad
 restate the goal ("email feature works"). When in doubt, ask: *could a blind reviewer mark
 this true or false by reading the code?* If not, sharpen it.
 
-## Step 5 — the `/goal` handoff
+## Step 5 — orchestration and the loop
 
-- Set the condition from the contract, e.g.
-  `/goal all invariants in GOAL-INVARIANTS.md hold and the test suite is green`.
-- Native `/goal` re-evaluates each turn with a fast model and keeps Claude working until
-  the condition holds or `/goal clear` is run.
-- If `/goal` is unavailable, loop inline: build → check invariants → continue, until all
-  pass or a blocker needs the user.
-- Commit cadence: WIP commits to the feature branch at logical units (a coherent change,
-  a passing module). Push only at verified milestones (after a clean `/fresh-eyes` pass)
-  and at closeout — not on every commit.
+**Orchestrate explicitly — do not wait for ultracode.** ultracode authoring a workflow is
+model-discretion; it often won't, which is why `/workflows` can stay empty. The mechanism a
+skill actually controls is the **Agent tool**: spawn subagents for independent workstreams
+(separate modules, services, test suites), let them run in parallel, then integrate their
+results. That is the deterministic fan-out; use it rather than hoping for auto-orchestration.
+
+**Cross-turn persistence is user-only.** A skill cannot set `/goal`. If the user wants the
+run to auto-continue across turns, hand them a ready-to-paste line pointing at the contract,
+e.g. `/goal every invariant in GOAL-INVARIANTS.md holds and the test suite is green` — they
+run it; the skill never does. Otherwise the skill loops within its own run: build → check
+invariants → continue, until all pass or a blocker needs the user. (For the fullest native
+fan-out, the user is better served by **path B** from the step-0 gate, which starts from
+`/goal` and runs as a workflow from the outset.)
+
+**Commit cadence:** WIP commits to the feature branch at logical units (a coherent change, a
+passing module). Push only at verified milestones (after a clean `/fresh-eyes` pass) and at
+closeout — not on every commit.
 
 ## Step 7 — fix-loop bound
 

@@ -1,6 +1,6 @@
 ---
 name: goal-workflow
-description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (build, commit at intervals, verify at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on a `--confirm` flag that asserts the user has manually set ultracode effort and enabled auto-accept mode (a skill can set neither); without the flag it stops and tells the user exactly what to run. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill — or whenever the user says goal-workflow.
+description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (building with explicit Agent-tool fan-out, committing at intervals, verifying at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on a `--confirm` flag asserting the user has manually set ultracode effort and auto-accept mode (a skill can set neither); without the flag it stops, gives the setup steps, and offers two paths — a managed `--confirm` run, or a copy-pasteable `/goal` command that hands the work to native goal + workflow orchestration. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill — or whenever the user says goal-workflow.
 ---
 
 # Goal Workflow
@@ -9,9 +9,11 @@ Turn a settled goal into a **bounded implementation loop, then force proof, then
 close.** This is the implementation-phase sibling to `assumption-inventory` (before),
 `reground` (mid-drift), and `fresh-eyes` (after).
 
-It does not reinvent looping, effort, or verification — it **composes three primitives**
-and supplies the connective tissue they lack: native `/goal` is the loop engine,
-`/effort ultracode` is the effort+orchestration mode, and `/fresh-eyes` is the
+The orchestration engine is **explicit subagent fan-out via the Agent tool** — the only
+multi-agent mechanism a skill can reliably drive. Native `/goal` and ultracode's automatic
+workflow orchestration are **user-only and discretionary** (a skill cannot set `/goal`, and
+ultracode decides for itself whether to author a workflow), so this skill does not depend on
+them — it offers them as an optional fast path the user can run. `/fresh-eyes` is the
 independent verifier. The skill's own job is to lock the goal, front-load decisions, map
 terrain, and — the load-bearing step — **write a checkable contract before any code, so
 verification anchors to a bar set in writing, not to the implementer's memory of intent.**
@@ -29,18 +31,30 @@ asserts the user has done the setup.
 
 - Inspect this invocation's `ARGUMENTS` for the literal flag `--confirm`.
 - **Present** → the user has confirmed setup. Proceed to step 1.
-- **Absent** → STOP. Modify nothing. Tell the user to do these, then re-invoke:
+- **Absent** → STOP. Modify nothing. Output the gate message: the **setup** plus **two ways
+  to proceed**, then wait. Do not proceed without `--confirm`.
+
+  **Setup (do both first):**
   1. Run `/effort ultracode` — enables xhigh reasoning + workflow orchestration. The skill
      can't set effort; you must.
   2. Press **Shift+Tab** to cycle to **auto-accept mode**, so agents work autonomously
      without stopping for permission on each step.
-  3. Re-invoke as `/goal-workflow --confirm` (the goal is read from context in step 1, so it
-     need not be restated).
-  - **Warn plainly:** this runs autonomously and can take a long time, scaling with goal
-    complexity (runs have gone ~1 hour). It is **expensive and consumes tokens fast.**
-  - Then stop and wait. Do not proceed without `--confirm`.
 
-See [REFERENCE.md](REFERENCE.md) for the exact gate message.
+  **Then pick one:**
+  - **A — Managed run.** Re-invoke `/goal-workflow --confirm`. The skill drives the lifecycle
+    itself (terrain → contract → Agent-tool fan-out → fresh-eyes → closeout). Deterministic,
+    but bounded to what a skill can orchestrate.
+  - **B — Full native orchestration.** Paste the generated `/goal …` command (see
+    [REFERENCE.md](REFERENCE.md)). Because *you* run it, it hands the work to native `/goal`
+    plus ultracode's workflow orchestration — the fullest fan-out — with the skill's
+    best-practice directive (derive the goal from context + docs, run as a workflow, commit
+    at intervals, verify with fresh-eyes) baked in.
+
+  **Warn plainly:** either path runs autonomously and can take a long time, scaling with goal
+  complexity (runs have gone ~1 hour). It is **expensive and consumes tokens fast.**
+
+See [REFERENCE.md](REFERENCE.md) for the exact gate message and the copy-pasteable `/goal`
+command.
 
 ## 1. Lock the goal
 
@@ -81,16 +95,23 @@ prior planning step already produced this map; say so if you skip.
 ## 4. Write the completion-invariant contract (BEFORE any code)
 
 Write concrete, checkable invariants to a file (e.g. `GOAL-INVARIANTS.md` or the plan
-file). Each is a binary, verifiable claim — not "we'll test it later." This file is both
-the `/fresh-eyes` checklist and the basis for the `/goal` condition, and it survives
-context compaction during a long run. See [REFERENCE.md](REFERENCE.md) for the template.
+file). Each is a binary, verifiable claim — not "we'll test it later." This file is the
+`/fresh-eyes` checklist, it survives context compaction during a long run, and it is what
+an optional user-run `/goal` condition points at. See [REFERENCE.md](REFERENCE.md) for the
+template.
 
 ## 5. Run the loop
 
-Set `/goal` to the invariant condition so Claude keeps working across turns until it
-holds (fall back to an inline loop if `/goal` is unavailable). Build toward the contract.
-**Commit WIP to the feature branch at logical intervals; push at verified milestones**,
-not on every commit.
+Drive the build yourself; do not wait for ultracode to author a workflow — it may not.
+**Fan out explicitly with the Agent tool** for independent workstreams (separate modules,
+test suites, services), then integrate — this is the orchestration the skill actually
+controls. Build toward the contract, iterating until every invariant holds. **Commit WIP to
+the feature branch at logical intervals; push at verified milestones**, not on every commit.
+
+For cross-turn persistence (so the run auto-continues across turns), the skill can hand the
+user a ready-to-paste `/goal …` command pointing at the contract file — but `/goal` is
+**user-only**, so the skill writes it and the user runs it; the skill never sets it itself.
+See [REFERENCE.md](REFERENCE.md).
 
 ## 6. Verify at milestones with fresh-eyes
 
@@ -106,8 +127,9 @@ Gaps from verification → fix → re-verify, with a round cap (mirror `/fresh-e
 ## 8. Closeout
 
 Final `/fresh-eyes` pass against the full contract. Report each invariant as met or unmet,
-do the final commit and push, and `/goal clear`. **Then remind the user to undo the setup
-from step 0:** they are likely still in ultracode effort and auto-accept mode. Suggest
+do the final commit and push, and remind the user to run `/goal clear` if they set a goal.
+**Then remind the user to undo the setup from step 0:** they are likely still in ultracode
+effort and auto-accept mode. Suggest
 lowering effort (`/effort high` or below) and pressing **Shift+Tab** to leave auto-accept,
 so ordinary turns don't run at xhigh or act without prompting until the next big run.
 
