@@ -47,6 +47,36 @@ prompt. Nothing is edited without a flag or your approval.
 **When to use:** a chunk of work is complete and you want unbiased confirmation that
 nothing was missed and scope is fully covered before moving on or shipping.
 
+### `/assumption-inventory`
+
+A preflight for the start of a long or expensive task. Surfaces the assumptions the
+work rests on — goal, root and platform scope, what may be edited, what is off-limits,
+what "done" means, and open questions — and separates what can be cited from what is
+being guessed. Load-bearing guesses are gated on evidence or your confirmation before
+the run starts, so bad direction is caught before time is burned. It plans, it does not
+build. Front end of the triad with `/reground` (mid-drift) and `/fresh-eyes` (after).
+
+**When to use:** you're about to commit to a multi-step or high-cost run, you're
+resuming ambiguous or handed-off work, or the target isn't crisply stated.
+
+### `/goal-workflow`
+
+Runs a settled implementation goal as a bounded autonomous build loop. Locks the goal
+from the conversation and any docs written this session, front-loads every decision,
+maps the terrain, and — the load-bearing step — writes a checkable completion-invariant
+contract *before* any code, so verification anchors to a bar set in writing rather than
+the implementer's memory. Then it loops: build, commit at intervals, push and verify at
+milestones with `/fresh-eyes` against the contract, fix, and close out. It composes the
+native primitives instead of reinventing them — `/goal` is the loop engine, `/fresh-eyes`
+the independent verifier. Gated on the literal keyword `ultracode` in the invoking
+message, which both enables xhigh + workflow orchestration (a skill can't) and confirms
+intent; a missing keyword stops the skill with instructions. The implementation-phase
+member of the set with `/assumption-inventory`, `/reground`, and `/fresh-eyes`.
+
+**When to use:** a plan is settled and you want Claude to implement it end-to-end on its
+own, typically after a planning skill like `/autoplan`. Invoke as
+`/goal-workflow <goal> ultracode`.
+
 ## Install
 
 Requires [Node.js](https://nodejs.org/). Clone, then run the installer:
