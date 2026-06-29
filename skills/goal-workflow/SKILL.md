@@ -1,6 +1,6 @@
 ---
 name: goal-workflow
-description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (build, commit at intervals, verify at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on the user invoking it with the literal keyword `ultracode`, which both enables xhigh + workflow orchestration and confirms intent. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill like /autoplan — or whenever the user says goal-workflow.
+description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (build, commit at intervals, verify at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on the user invoking it with the literal keyword `ultracode`, which both enables xhigh + workflow orchestration and confirms intent. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill — or whenever the user says goal-workflow.
 ---
 
 # Goal Workflow

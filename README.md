@@ -5,7 +5,58 @@ Each lives under `skills/<name>/SKILL.md` and is the single source of truth; an 
 script links them into the global skills directory (`~/.claude/skills/`) so Claude loads
 them in every session, on every machine.
 
+These are **not** meant to replace other skill collections — they work best alongside
+them. I run them next to [Matt Pocock's skills](https://github.com/mattpocock/skills) and
+[Garry Tan's gstack](https://github.com/garrytan/gstack); those bring the planning,
+review, and engineering-discipline workflows, and the skills here add lifecycle gates
+(plan-ahead, build, verify, recover) that slot in around them. See [A workflow to
+try](#a-workflow-to-try) below for how they fit together.
+
 ## Skills
+
+### `/fresh-eyes`
+
+Audits a finished change with fresh eyes using double-blind reconciliation: a subagent
+with zero conversation history reads the diff blind and reports what it thinks the change
+does, how complete it is, and any oversights — then the main context reconciles that
+blind read against the work's stated intent. The divergence is the signal. Falls back to
+the current session's changes when there's no git diff. Report-only by default; after the
+report it asks whether to apply fixes or iterate, and `--fix` / `--iterate` flags skip the
+prompt. Nothing is edited without a flag or your approval.
+
+**When to use:** a chunk of work is complete and you want unbiased confirmation that
+nothing was missed and scope is fully covered before moving on or shipping.
+
+### `/goal-workflow`
+
+Runs a settled implementation goal as a bounded autonomous build loop. Locks the goal
+from the conversation and any docs written this session, front-loads every decision,
+maps the terrain, and — the load-bearing step — writes a checkable completion-invariant
+contract *before* any code, so verification anchors to a bar set in writing rather than
+the implementer's memory. Then it loops: build, commit at intervals, push and verify at
+milestones with `/fresh-eyes` against the contract, fix, and close out. It composes the
+native primitives instead of reinventing them — `/goal` is the loop engine, `/fresh-eyes`
+the independent verifier. Gated on the literal keyword `ultracode` in the invoking
+message, which both enables xhigh + workflow orchestration (a skill can't) and confirms
+intent; a missing keyword stops the skill with instructions. The implementation-phase
+member of the set with `/assumption-inventory`, `/reground`, and `/fresh-eyes`.
+
+**When to use:** a plan is settled and you want Claude to implement it end-to-end on its
+own, typically after a planning skill. Invoke as `/goal-workflow
+ultracode` — the goal is read from the conversation and any planning docs written this
+session, so you don't restate it; add words only to steer or narrow it.
+
+### `/assumption-inventory`
+
+A preflight for the start of a long or expensive task. Surfaces the assumptions the
+work rests on — goal, root and platform scope, what may be edited, what is off-limits,
+what "done" means, and open questions — and separates what can be cited from what is
+being guessed. Load-bearing guesses are gated on evidence or your confirmation before
+the run starts, so bad direction is caught before time is burned. It plans, it does not
+build. Front end of the triad with `/reground` (mid-drift) and `/fresh-eyes` (after).
+
+**When to use:** you're about to commit to a multi-step or high-cost run, you're
+resuming ambiguous or handed-off work, or the target isn't crisply stated.
 
 ### `/reground`
 
@@ -34,49 +85,19 @@ structural smells). Report only; it never edits, renames, or deletes a memory fi
 **When to use:** you suspect memory has gone stale or cluttered, or you want a readable
 overview of what Claude remembers about a project.
 
-### `/fresh-eyes`
+## A workflow to try
 
-Audits a finished change with fresh eyes using double-blind reconciliation: a subagent
-with zero conversation history reads the diff blind and reports what it thinks the change
-does, how complete it is, and any oversights — then the main context reconciles that
-blind read against the work's stated intent. The divergence is the signal. Falls back to
-the current session's changes when there's no git diff. Report-only by default; after the
-report it asks whether to apply fixes or iterate, and `--fix` / `--iterate` flags skip the
-prompt. Nothing is edited without a flag or your approval.
+A good way to feel how these fit together, end to end. The planning step can be whatever
+planning command, skill, or process you like; the rest are from this repo. Run them in
+order — though most are useful on their own, too.
 
-**When to use:** a chunk of work is complete and you want unbiased confirmation that
-nothing was missed and scope is fully covered before moving on or shipping.
-
-### `/assumption-inventory`
-
-A preflight for the start of a long or expensive task. Surfaces the assumptions the
-work rests on — goal, root and platform scope, what may be edited, what is off-limits,
-what "done" means, and open questions — and separates what can be cited from what is
-being guessed. Load-bearing guesses are gated on evidence or your confirmation before
-the run starts, so bad direction is caught before time is burned. It plans, it does not
-build. Front end of the triad with `/reground` (mid-drift) and `/fresh-eyes` (after).
-
-**When to use:** you're about to commit to a multi-step or high-cost run, you're
-resuming ambiguous or handed-off work, or the target isn't crisply stated.
-
-### `/goal-workflow`
-
-Runs a settled implementation goal as a bounded autonomous build loop. Locks the goal
-from the conversation and any docs written this session, front-loads every decision,
-maps the terrain, and — the load-bearing step — writes a checkable completion-invariant
-contract *before* any code, so verification anchors to a bar set in writing rather than
-the implementer's memory. Then it loops: build, commit at intervals, push and verify at
-milestones with `/fresh-eyes` against the contract, fix, and close out. It composes the
-native primitives instead of reinventing them — `/goal` is the loop engine, `/fresh-eyes`
-the independent verifier. Gated on the literal keyword `ultracode` in the invoking
-message, which both enables xhigh + workflow orchestration (a skill can't) and confirms
-intent; a missing keyword stops the skill with instructions. The implementation-phase
-member of the set with `/assumption-inventory`, `/reground`, and `/fresh-eyes`.
-
-**When to use:** a plan is settled and you want Claude to implement it end-to-end on its
-own, typically after a planning skill like `/autoplan`. Invoke as `/goal-workflow
-ultracode` — the goal is read from the conversation and any planning docs written this
-session, so you don't restate it; add words only to steer or narrow it.
+| Command | What it does in the flow |
+|---|---|
+| Any planning command, skill, or process | **Plan.** Start with a planning session — however you prefer to do it — and write the plan and any supporting docs to files. |
+| `/assumption-inventory` | **Ground the plan in reality.** Verify what the plan assumes about the project itself: which files actually exist, what may be edited, what must not be touched — the technical terrain, not just the goals. |
+| `/goal-workflow ultracode` | **Build.** The long, expensive bulk of the work — an autonomous loop that implements the plan to a written contract, committing and verifying as it goes, until the invariants hold. |
+| `/fresh-eyes` | **Verify.** Confirm the build actually completed to spec, and surface any bugs or oversights that slipped in, via a blind reconciliation against the intent. |
+| `/reground` | **Recover (as needed).** On longer follow-on sessions, if you start drifting from the main task, halt and re-anchor to codebase evidence before continuing. |
 
 ## Install
 
