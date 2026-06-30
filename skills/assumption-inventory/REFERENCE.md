@@ -66,7 +66,10 @@ may not be the one the user wanted.
 - **Done means** — <checkable end state> [cited … | assumption]
 - **Open questions** — <what could change the above>
 
-**Blocking — confirm before I proceed** (load-bearing + unconfirmed)
+**Weak / unproven acceptance criteria** (the plan's "done" bar is soft)
+- ⚠️ <criterion> — <unmeasurable | rests on uncited assumption X>
+
+**Blocking — confirm before I proceed** (load-bearing + unconfirmed, + the criteria above)
 - [ ] …
 
 **Stated assumptions — proceeding unless you correct them** (not load-bearing)
@@ -75,3 +78,8 @@ may not be the one the user wanted.
 
 Fill every slot. Keep blocking questions to the few that are genuinely load-bearing;
 everything cheaply checkable should already be cited or settled before this report.
+
+The written report above is the record. The **blocking items are then asked through the
+AskUserQuestion tool** (step 5), not left as prose — frame each as a boundary, an
+interpretation, or an acceptance-criteria decision, with concrete options (in scope / out /
+defer) and a recommendation. Skip the questions only when nothing is genuinely uncertain.

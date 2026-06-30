@@ -1,6 +1,6 @@
 ---
 name: assumption-inventory
-description: Surface and confirm the load-bearing assumptions behind a task before a long or expensive run — goal, root, what may be edited, what is off-limits, what done means, and open questions — separating what can be cited from what is being guessed, so bad direction is caught before time is burned. Use at the start of a multi-step or high-cost task, when resuming ambiguous or handed-off work, or whenever the target is not crisply stated and you are about to commit to a long run.
+description: Surface and confirm the load-bearing assumptions behind a task before a long or expensive run — goal, root, what may be edited, what is off-limits, what done means, and open questions — separating what can be cited from what is being guessed, so bad direction is caught before time is burned. Also pressure-tests the plan's acceptance criteria, flagging any that are weak or built on unproven assumptions, and asks the blocking uncertainties (scope boundaries, interpretations, soft "done" bars) as structured questions. Use at the start of a multi-step or high-cost task, when resuming ambiguous or handed-off work, or whenever the target is not crisply stated and you are about to commit to a long run.
 ---
 
 # Assumption Inventory
@@ -59,13 +59,37 @@ be wrong, wasted, or harmful if it turned out false?
 - **Not load-bearing** → state it explicitly as a stated assumption and proceed; the
   user can correct it cheaply because it is visible.
 
-## 5. Confirm, then proceed
+**Pressure-test the acceptance criteria specifically.** The plan usually carries the
+"done means" criteria — but this is the moment to test them, not inherit them. Flag any
+criterion that is either **weak** (vague, unmeasurable, or untestable — "works well", "is
+fast", "handles errors") or **built on an unproven assumption** (it presumes a behavior,
+contract, schema, or file that step 3 could not cite). A criterion no one could objectively
+mark true or false, or one resting on a guess, is a blocking item — the plan looked done
+but its bar is soft. Surface these alongside the load-bearing assumptions; they are often
+the most valuable thing this preflight catches.
 
-Show the user the filled inventory and the blocking questions (template in
-[REFERENCE.md](REFERENCE.md)). Wait for answers to the blocking questions. Stated
-non-blocking assumptions need no sign-off — they proceed unless corrected. Once the
-load-bearing questions are answered, the inventory is the brief for the run; carry it
-forward and check work against it.
+## 5. Ask the blocking questions, then proceed
+
+Show the user the filled inventory as the written report (template in
+[REFERENCE.md](REFERENCE.md)) — that technical record stays. But for the **blocking
+items**, do not just list them in prose: **ask them with the AskUserQuestion tool.** A
+structured question forces a decision and makes the boundary explicit, where a prose note
+is easy to skim past. Reach for it whenever the uncertainty is about *what to do or where
+the edge of the task is* — the things the plan should have settled but didn't. Typical
+questions worth raising:
+
+- **Boundary** — "Is X in scope or out?" / "Does this stop at the API, or include the UI?"
+- **Interpretation** — "The goal could mean A or B — which?"
+- **Acceptance criteria** — "This criterion is unmeasurable / rests on an unproven
+  assumption — how should 'done' actually be judged here?"
+
+Offer concrete options (e.g. *in scope / out of scope / defer*) so the answer is a click,
+and recommend the one the evidence favors. Keep it tight — only genuinely load-bearing
+uncertainties become questions; the *do not over-ask* guardrail still holds, and if nothing
+is truly uncertain, say so and skip straight to proceeding. Stated non-blocking assumptions
+need no sign-off — they proceed unless corrected. Once the blocking questions are answered,
+the inventory (plus those answers) is the brief for the run; carry it forward and check work
+against it.
 
 ## Guardrails
 

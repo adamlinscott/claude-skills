@@ -55,7 +55,10 @@ as `/goal-workflow --confirm`; the goal is read from context, so you don't resta
 
 A preflight for a long or expensive task. Surfaces what the work assumes — goal, scope,
 what may and must not be edited, what "done" means — and separates cited fact from guess,
-gating the load-bearing guesses before time is burned.
+gating the load-bearing guesses before time is burned. Also pressure-tests the plan's
+acceptance criteria — flagging any that are vague or rest on unproven assumptions — and
+asks the blocking uncertainties (scope boundaries, interpretations, soft "done" bars) as
+structured questions rather than burying them in prose.
 
 **When to use:** before committing to a multi-step run, or when resuming ambiguous work.
 
