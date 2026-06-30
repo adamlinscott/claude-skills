@@ -1,18 +1,25 @@
-# claude-skills
+<div align="center">
 
-My personal, version-controlled [Claude Code](https://claude.com/claude-code) skills.
-Each lives under `skills/<name>/SKILL.md` and is the single source of truth; an install
+# 🧩 claude-skills
+
+![Claude Code](https://shieldcn.dev/badge/Claude-Code-D97757.svg?logo=anthropic&variant=outline&size=xs&mode=light)
+![MCP Ready](https://shieldcn.dev/badge/MCP-ready-111827.svg?logo=ri%3AVscMcp&variant=outline&size=xs&mode=light)
+[![Platform](https://shieldcn.dev/badge/runs_on-mac_linux_windows-3b82f6.svg?variant=outline&size=xs)](#-install)  
+
+![Stars + License](https://shieldcn.dev/group/github/stars/vercel/next.js+github/license/vercel/next.js.svg?variant=branded&size=xs)
+
+<hr>
+
+</div>
+
+Each skill lives under `skills/<name>/SKILL.md` and is the single source of truth; an install
 script links them into the global skills directory (`~/.claude/skills/`) so Claude loads
 them in every session, on every machine.
 
-These are **not** meant to replace other skill collections — they work best alongside
-them. I run them next to [Matt Pocock's skills](https://github.com/mattpocock/skills) and
-[Garry Tan's gstack](https://github.com/garrytan/gstack); those bring the planning,
-review, and engineering-discipline workflows, and the skills here add lifecycle gates
-(plan-ahead, build, verify, recover) that slot in around them. See [A workflow to
-try](#a-workflow-to-try) below for how they fit together.
+> [!NOTE]
+> These work best **alongside** other skill collections. I run them next to [Matt Pocock's skills](https://github.com/mattpocock/skills) and [Garry Tan's gstack](https://github.com/garrytan/gstack) for in-depth planning; the skills here add lifecycle gates around them.
 
-## A workflow to try
+## 🧭 A workflow to try
 
 A good way to feel how these fit together, end to end. The planning step can be whatever
 planning command, skill, or process you like; the rest are from this repo. Run them in
@@ -26,7 +33,10 @@ order — though most are useful on their own, too.
 | `/fresh-eyes` | **Verify.** Confirm the build actually completed to spec, and surface any bugs or oversights that slipped in, via a blind reconciliation against the intent. |
 | `/reground` | **Recover (as needed).** On longer follow-on sessions, if you start drifting from the main task, halt and re-anchor to codebase evidence before continuing. |
 
-## Skills
+> [!TIP]
+> Most of these skills are useful standalone — you don't have to run the whole chain. Reach for `/assumption-inventory` before any long task, or `/fresh-eyes` after any finished diff.
+
+## 🧰 Skills
 
 ### `/fresh-eyes`
 
@@ -47,6 +57,9 @@ skill stops, gives the setup steps, and offers two paths: a managed `--confirm` 
 copy-pasteable `/goal` command that hands the work to native goal + workflow orchestration
 for the fullest fan-out. An optional `--commit` flag (default off) turns on commit-at-
 intervals and push-at-milestones in either path; without it, version control stays with you.
+
+> [!IMPORTANT]
+> `/goal-workflow` runs an autonomous, potentially long and expensive loop. The first run stops and walks you through the one-time setup; by default it makes **no commits** unless you pass `--commit`.
 
 **When to use:** a plan is settled and you want Claude to implement it end-to-end. Invoke
 as `/goal-workflow --confirm`; the goal is read from context, so you don't restate it.
@@ -84,7 +97,7 @@ technical audit. Report only; never edits.
 **When to use:** you suspect memory has gone stale, or want an overview of what Claude
 remembers.
 
-## Install
+## ⚙️ Install
 
 Requires [Node.js](https://nodejs.org/). Clone, then run the installer:
 
@@ -95,11 +108,13 @@ node install.mjs
 ```
 
 This links each skill in `skills/` into `~/.claude/skills/<name>`. It is idempotent;
-re-run any time to repair links. It will **not** overwrite a real directory it did not
-create; if it reports a `SKIP`, move or delete that directory and re-run.
+re-run any time to repair links.
 
-- macOS / Linux: directory symlinks.
-- Windows: junctions (no admin rights or Developer Mode needed).
+- 🐧 macOS / Linux: directory symlinks.
+- 🪟 Windows: junctions (no admin rights or Developer Mode needed).
+
+> [!WARNING]
+> The installer will **not** overwrite a real directory it did not create. If it reports a `SKIP`, move or delete that directory and re-run.
 
 Because the links point back here, editing a skill in this repo updates it live in every
 Claude session. Commit and push to share the change.
@@ -110,12 +125,6 @@ Remove the links (leaves the repo and any unrelated skills untouched):
 node install.mjs --uninstall
 ```
 
-## Adding a skill
-
-1. Create `skills/<name>/SKILL.md` (see the [skill format docs](https://code.claude.com/docs/en/skills)).
-2. Run `node install.mjs` to link it.
-3. Commit and push.
-
-## License
+## 📄 License
 
 [MIT](LICENSE). Free to use, modify, and share.
