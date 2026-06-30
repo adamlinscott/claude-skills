@@ -2,11 +2,11 @@
 
 # 🧩 claude-skills
 
-![Claude Code](https://shieldcn.dev/badge/Claude-Code-D97757.svg?logo=anthropic&variant=branded&size=xs&mode=light)
-![MCP Ready](https://shieldcn.dev/badge/MCP-ready-111827.svg?logo=ri%3AVscMcp&variant=branded&size=xs&mode=light)
-[![Platform](https://shieldcn.dev/badge/runs_on-mac_linux_windows-3b82f6.svg?variant=branded&size=xs)](#-install)  
+[![Claude Code](https://shieldcn.dev/badge/Claude-Code-D97757.svg?logo=anthropic&variant=branded&size=xs&mode=light)](#-claude-skills)
+[![MCP Ready](https://shieldcn.dev/badge/MCP-ready-111827.svg?logo=ri%3AVscMcp&variant=branded&size=xs&mode=light)](#-claude-skills)
+[![Platform](https://shieldcn.dev/badge/runs_on-mac_linux_windows-3b82f6.svg?variant=branded&size=xs)](#%EF%B8%8F-install)
 
-![Stars + License](https://shieldcn.dev/group/github/stars/vercel/next.js+github/license/vercel/next.js.svg?variant=branded&size=xs)
+![Stars + License](https://shieldcn.dev/group/github/stars/adamlinscott/claude-skills+github/license/adamlinscott/claude-skills.svg?variant=branded&size=xs)
 
 <hr>
 
