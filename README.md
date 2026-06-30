@@ -2,9 +2,9 @@
 
 # 🧩 claude-skills
 
-![Claude Code](https://shieldcn.dev/badge/Claude-Code-D97757.svg?logo=anthropic&variant=outline&size=xs&mode=light)
-![MCP Ready](https://shieldcn.dev/badge/MCP-ready-111827.svg?logo=ri%3AVscMcp&variant=outline&size=xs&mode=light)
-[![Platform](https://shieldcn.dev/badge/runs_on-mac_linux_windows-3b82f6.svg?variant=outline&size=xs)](#-install)  
+![Claude Code](https://shieldcn.dev/badge/Claude-Code-D97757.svg?logo=anthropic&variant=branded&size=xs&mode=light)
+![MCP Ready](https://shieldcn.dev/badge/MCP-ready-111827.svg?logo=ri%3AVscMcp&variant=branded&size=xs&mode=light)
+[![Platform](https://shieldcn.dev/badge/runs_on-mac_linux_windows-3b82f6.svg?variant=branded&size=xs)](#-install)  
 
 ![Stars + License](https://shieldcn.dev/group/github/stars/vercel/next.js+github/license/vercel/next.js.svg?variant=branded&size=xs)
 
