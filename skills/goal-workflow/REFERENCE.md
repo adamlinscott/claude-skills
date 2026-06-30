@@ -38,12 +38,14 @@ to this gate invocation. They differ only in the version-control clause.
 
 ```
 /goal Determine the goal from this conversation and any plan, ADR, spec, or documentation
-files written this session, then implement it to completion. First commit and push any
-outstanding documentation, then build directly from it. Use a workflow to orchestrate the
-work and parallelise independent parts. Commit to the current feature branch at logical
-intervals and push at milestones. Use the fresh-eyes skill at logical milestones to verify
-each task is complete and to surface bugs, oversights, and spec gaps, then fix what it finds.
-Keep working until the implementation fully satisfies the plan and all checks pass.
+files written this session, then implement it to completion. Orchestrate this as a multi-agent
+workflow: author and run a workflow with the Workflow tool that fans the independent parts out
+across parallel subagents — do NOT implement it solo in the main loop. First commit and push
+any outstanding documentation, then build directly from it. Commit to the current feature
+branch at logical intervals and push at milestones. Use the fresh-eyes skill at logical
+milestones to verify each task is complete and to surface bugs, oversights, and spec gaps,
+then fix what it finds. Keep working until the implementation fully satisfies the plan and all
+checks pass.
 ```
 
 **Without `--commit` (default)** — leaves version control to the user:
@@ -51,11 +53,12 @@ Keep working until the implementation fully satisfies the plan and all checks pa
 ```
 /goal Determine the goal from this conversation and any plan, ADR, spec, or documentation
 files written this session, then implement it to completion, building directly from that
-documentation. Use a workflow to orchestrate the work and parallelise independent parts. Do
-NOT commit or push anything — leave all version control to me. Use the fresh-eyes skill at
-logical milestones to verify each task is complete and to surface bugs, oversights, and spec
-gaps, then fix what it finds. Keep working until the implementation fully satisfies the plan
-and all checks pass.
+documentation. Orchestrate this as a multi-agent workflow: author and run a workflow with the
+Workflow tool that fans the independent parts out across parallel subagents — do NOT implement
+it solo in the main loop. Do NOT commit or push anything — leave all version control to me.
+Use the fresh-eyes skill at logical milestones to verify each task is complete and to surface
+bugs, oversights, and spec gaps, then fix what it finds. Keep working until the implementation
+fully satisfies the plan and all checks pass.
 ```
 
 > Heads up either way:
