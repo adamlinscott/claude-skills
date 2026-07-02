@@ -5,31 +5,33 @@ Gate message, contract template, loop details, and closeout text for the
 
 ## Step 0 — gate message (`--confirm` missing)
 
-When `ARGUMENTS` lacks the literal flag `--confirm`, STOP and send this, then wait for
-re-invocation. Modify nothing. Emit the copy-pasteable `/goal` block verbatim as a fenced
-code block so the user can copy it cleanly.
+When `ARGUMENTS` lacks the literal flag `--confirm`, STOP and send the message below, then
+wait for re-invocation. Modify nothing.
 
-> **Before Goal Workflow runs, set up two things — I can't do them for you.**
+**Keep it to three sections in this order — goal, setup, start.** Fill `<one-sentence goal>`
+and `<source>` from steps 1's derivation (state what you'd build *before* asking the user to
+commit to it). Then emit **one** `/goal` block (chosen by `--commit`, see below) as a fenced
+code block so it copies cleanly. Do not add prose beyond this template — the value is brevity.
+
+> **Ready to build:** *"<one-sentence goal>"* — from `<source>`.
 >
-> This runs a long, autonomous, expensive build loop. It needs ultracode effort and
-> autonomous permissions, and a skill can neither set nor detect either. So first:
+> Two manual setup steps first; I can't set or detect either.
 >
-> 1. **Set effort:** run `/effort ultracode` — turns on xhigh reasoning + workflow
->    orchestration. (Passing "ultracode" as an argument does *not* do this; only the
->    `/effort` command does.)
-> 2. **Go autonomous:** press **Shift+Tab** to cycle to **auto-accept mode**, so I don't
->    stop for permission on every step.
+> **1 · Set up** (both required)
+> - Run `/effort ultracode` — xhigh reasoning + workflow orchestration.
+> - Press **Shift+Tab** → **auto-accept**, so the loop runs without a prompt each step.
 >
-> Then choose how to run it:
+> **2 · Start it** (pick one)
+> - **A — Managed run.** Re-invoke `/goal-workflow --confirm`. I drive it end to end: terrain
+>   → contract → subagent fan-out → `/fresh-eyes` → closeout.
+> - **B — Native orchestration.** Paste the command below — *you* run it, so it gets the
+>   fullest fan-out via native `/goal` + workflow orchestration.
 >
-> **A — Managed run (simpler).** Re-invoke `/goal-workflow --confirm`. I drive the lifecycle
-> myself: terrain map → completion contract → build with explicit subagent fan-out → verify
-> with `/fresh-eyes` → close out. Deterministic, bounded to what a skill can orchestrate. Add
-> `--commit` to let me commit at intervals and push at milestones; without it I touch no git.
->
-> **B — Full native orchestration (most powerful).** Paste the command below. Because *you*
-> run it, it hands the work to native `/goal` plus ultracode's own workflow orchestration —
-> the fullest fan-out — with my best-practice directive baked in.
+> *Either path: autonomous, slow (~1 hr for large goals), and token-heavy. {VC_NOTE}*
+
+`{VC_NOTE}` states the git posture for this invocation in one clause:
+- `--commit` passed → `I'll commit at intervals and push at milestones.`
+- `--commit` absent (default) → `No --commit, so git stays entirely with you.`
 
 Then emit **one** of the two `/goal` variants below, chosen by whether `--commit` was passed
 to this gate invocation. They differ only in the version-control clause.
@@ -61,10 +63,8 @@ bugs, oversights, and spec gaps, then fix what it finds. Keep working until the 
 fully satisfies the plan and all checks pass.
 ```
 
-> Heads up either way:
-> - **This takes a while.** Time scales with goal complexity; large goals have run ~1 hour.
-> - **It's expensive.** ultracode burns tokens fast. Start it only when you mean to commit
->   to a full implementation pass, not a quick change.
+(The slow/expensive warning is the footer line of the gate message above — don't repeat it
+after the code block.)
 
 The `/goal` command is intentionally **generic** — it tells Claude to derive the goal from
 context and docs rather than hard-coding one, so the same text works for any session. It is

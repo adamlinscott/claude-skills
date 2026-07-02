@@ -36,31 +36,21 @@ asserts the user has done the setup.
     **the skill makes no commits or pushes**; version control stays entirely with the user.
 - **`--confirm` present** → setup confirmed. Record whether `--commit` is also present (it
   governs steps 5 and 8), then proceed to step 1.
-- **`--confirm` absent** → STOP. Modify nothing. Output the gate message: the **setup** plus
-  **two ways to proceed**, then wait. Do not proceed without `--confirm`.
+- **`--confirm` absent** → STOP. Modify nothing, then output the gate message and wait. Keep
+  it to **three sections in this order — goal, setup, start** — and nothing more; brevity is
+  the point. The full template is in [REFERENCE.md](REFERENCE.md); in short:
+  1. **Goal** — one line: the goal you'd lock (derived per step 1) and its source doc, so the
+     user sees what they're committing to *before* the how.
+  2. **Set up** — `/effort ultracode` and **Shift+Tab** → auto-accept. The skill can set
+     neither; the user must do both.
+  3. **Start it** — A: re-invoke `/goal-workflow --confirm` (skill-managed); or B: paste the
+     generated `/goal …` command (user-run, fullest native fan-out). Close with a single
+     footer line: autonomous, slow (~1 hr for large goals), token-heavy, and the git posture
+     for this run (commit at intervals if `--commit`, else git stays with the user).
 
-  **Setup (do both first):**
-  1. Run `/effort ultracode` — enables xhigh reasoning + workflow orchestration. The skill
-     can't set effort; you must.
-  2. Press **Shift+Tab** to cycle to **auto-accept mode**, so agents work autonomously
-     without stopping for permission on each step.
-
-  **Then pick one:**
-  - **A — Managed run.** Re-invoke `/goal-workflow --confirm`. The skill drives the lifecycle
-    itself (terrain → contract → Agent-tool fan-out → fresh-eyes → closeout). Deterministic,
-    but bounded to what a skill can orchestrate. Add `--commit` to let it commit at intervals
-    and push at milestones; without it, nothing is committed and git stays with you.
-  - **B — Full native orchestration.** Paste the generated `/goal …` command (see
-    [REFERENCE.md](REFERENCE.md)). Because *you* run it, it hands the work to native `/goal`
-    plus ultracode's workflow orchestration — the fullest fan-out — with the skill's
-    best-practice directive baked in. **Tailor the command to the flags:** include the
-    commit-at-intervals clause only if `--commit` was passed; otherwise generate the variant
-    that tells Claude not to commit.
-
-  **Warn plainly:** either path runs autonomously and can take a long time, scaling with goal
-  complexity (runs have gone ~1 hour). It is **expensive and consumes tokens fast.**
-
-See [REFERENCE.md](REFERENCE.md) for the exact gate message and both `/goal` command variants.
+  **Tailor the `/goal` command to the flags:** emit the commit-at-intervals variant only if
+  `--commit` was passed; otherwise the do-not-commit variant. Both are in
+  [REFERENCE.md](REFERENCE.md).
 
 ## 1. Lock the goal
 
