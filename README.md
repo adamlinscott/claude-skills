@@ -29,6 +29,7 @@ order — though most are useful on their own, too.
 |---|---|
 | Any planning command, skill, or process | **Plan.** Start with a planning session — however you prefer to do it — and write the plan and any supporting docs to files. |
 | `/assumption-inventory` | **Ground the plan in reality.** Verify what the plan assumes about the project itself: which files actually exist, what may be edited, what must not be touched — the technical terrain, not just the goals. |
+| `/ttp` | **Switch to implementation mode.** The decisions are made — turn on *To the Point* so replies lead with the substance and stay focused on shipping, not re-litigating. This is where it shines: mid-build, you want progress, not discussion. |
 | `/goal-workflow` | **Build.** The long, expensive bulk of the work — an autonomous loop that implements the plan to a written contract, verifying as it goes, until the invariants hold. (Run it as-is the first time; it will stop and walk you through the one-time setup it needs.) |
 | `/fresh-eyes` | **Verify.** Confirm the build actually completed to spec, and surface any bugs or oversights that slipped in, via a blind reconciliation against the intent. |
 | `/reground` | **Recover (as needed).** On longer follow-on sessions, if you start drifting from the main task, halt and re-anchor to codebase evidence before continuing. |
@@ -46,6 +47,18 @@ Report-only by default; `--fix` / `--iterate` apply changes.
 
 **When to use:** work is complete and you want unbiased confirmation nothing was missed
 before shipping.
+
+### `/ttp` (To the Point)
+
+Shapes only the prose you read: leads with the substance, keeps the default answer short, and
+expands only when you ask. Leaves you in control — Claude settles small, reversible, or
+already-decided points and proceeds, but routes high-impact calls (architectural, production,
+project shape, which features get built) up to you, one question at a time. Your reasoning,
+tool use, code, and plans are untouched — it compresses the report, never the work. Persists
+until "stop ttp" or "normal mode".
+
+**When to use:** a session has run long or vague — especially the tail of a planning
+session — and you want replies that get to the point.
 
 ### `/goal-workflow`
 
