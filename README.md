@@ -25,11 +25,9 @@ A good way to feel how these fit together, end to end. The planning step can be 
 planning command, skill, or process you like; the rest are from this repo. Run them in
 order — though most are useful on their own, too.
 
-> [!TIP]
-> Run `/seatbelt` once per repo before any of this. It sets the permissions so the rest of the flow can run on auto without you watching it.
-
 | Command | What it does in the flow |
 |---|---|
+| `/seatbelt` | **Set the permissions.** Once per repo, before anything else. Decides what Claude can do here without asking and what it can never do, so the rest of this flow can run on auto instead of stopping to ask you. Skip it and `/goal-workflow` either interrupts constantly or runs with no brakes. |
 | Any planning command, skill, or process | **Plan.** Start with a planning session — however you prefer to do it — and write the plan and any supporting docs to files. |
 | `/assumption-inventory` | **Ground the plan in reality.** Verify what the plan assumes about the project itself: which files actually exist, what may be edited, what must not be touched — the technical terrain, not just the goals. |
 | `/ttp` | **Switch to implementation mode.** The decisions are made — turn on *To the Point* so replies lead with the substance and stay focused on shipping, not re-litigating. This is where it shines: mid-build, you want progress, not discussion. |
@@ -41,6 +39,27 @@ order — though most are useful on their own, too.
 > Most of these skills are useful standalone — you don't have to run the whole chain. Reach for `/assumption-inventory` before any long task, or `/fresh-eyes` after any finished diff.
 
 ## 🧰 Skills
+
+### `/seatbelt` (alias `/seatbelts`)
+
+A seatbelt doesn't limit how fast you drive. It's what lets you drive fast at all.
+
+Writes a per-repo, per-person permission policy so you can hand Claude more autonomy, not less.
+Two modes. **Developer**: a permissive default plus a thin deny-only brake, roughly ten readable
+lines, no allowlist to maintain. **Vibe**: deny-by-default for someone who doesn't know git, so
+code changes flow freely while merges, force-pushes, deploys, secret reads and spend are blocked
+at the Claude layer, in plain English, with a next step every time.
+
+Grounds itself in the repo's existing Claude settings, instructions, MCP servers and CI first,
+then writes to gitignored local settings — so a technical and a non-technical person can share
+one repo on different terms. Ships a tested `guard.mjs` hook that fails closed and checks it's
+still alive at session start.
+
+> [!IMPORTANT]
+> This is the only skill here that **writes** files; everything else is read-only. It stops Claude over-reaching. It is not a lock against a person who dismantles their own setup — and it says so, to your face, in the setup report.
+
+**When to use:** setting a project up for AI-assisted development, handing a repo to a
+non-technical builder, or any time you want to run auto mode without wondering what it might do.
 
 ### `/fresh-eyes`
 
@@ -97,27 +116,6 @@ Halts a drifted agent and re-anchors it to actual codebase evidence, without a f
 compaction.
 
 **When to use:** the agent has gone off course, hallucinated files or APIs, or overbuilt.
-
-### `/seatbelt` (alias `/seatbelts`)
-
-A seatbelt doesn't limit how fast you drive. It's what lets you drive fast at all.
-
-Writes a per-repo, per-person permission policy so you can hand Claude more autonomy, not less.
-Two modes. **Developer**: a permissive default plus a thin deny-only brake, roughly ten readable
-lines, no allowlist to maintain. **Vibe**: deny-by-default for someone who doesn't know git, so
-code changes flow freely while merges, force-pushes, deploys, secret reads and spend are blocked
-at the Claude layer, in plain English, with a next step every time.
-
-Grounds itself in the repo's existing Claude settings, instructions, MCP servers and CI first,
-then writes to gitignored local settings — so a technical and a non-technical person can share
-one repo on different terms. Ships a tested `guard.mjs` hook that fails closed and checks it's
-still alive at session start.
-
-> [!IMPORTANT]
-> This is the only skill here that **writes** files; everything else is read-only. It stops Claude over-reaching. It is not a lock against a person who dismantles their own setup — and it says so, to your face, in the setup report.
-
-**When to use:** setting a project up for AI-assisted development, handing a repo to a
-non-technical builder, or any time you want to run auto mode without wondering what it might do.
 
 ### `/context-audit`
 
