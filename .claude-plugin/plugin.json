@@ -1,0 +1,9 @@
+{
+  "name": "claude-skills",
+  "description": "Skills that add lifecycle gates around planning and building with Claude Code: ground a plan in reality, verify a finished diff with fresh eyes, audit injected context, and set up per-repo permissions so you can run auto mode with confidence.",
+  "author": { "name": "Adam Linscott", "url": "https://github.com/adamlinscott" },
+  "homepage": "https://github.com/adamlinscott/claude-skills",
+  "repository": "https://github.com/adamlinscott/claude-skills",
+  "license": "MIT",
+  "keywords": ["skills", "planning", "review", "permissions", "guardrails", "security"]
+}
