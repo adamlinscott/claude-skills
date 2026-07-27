@@ -40,27 +40,6 @@ order — though most are useful on their own, too.
 
 ## 🧰 Skills
 
-### `/seatbelt` (alias `/seatbelts`)
-
-A seatbelt doesn't limit how fast you drive. It's what lets you drive fast at all.
-
-Writes a per-repo, per-person permission policy so you can hand Claude more autonomy, not less.
-Two modes. **Developer**: a permissive default plus a thin deny-only brake, roughly ten readable
-lines, no allowlist to maintain. **Vibe**: deny-by-default for someone who doesn't know git, so
-code changes flow freely while merges, force-pushes, deploys, secret reads and spend are blocked
-at the Claude layer, in plain English, with a next step every time.
-
-Grounds itself in the repo's existing Claude settings, instructions, MCP servers and CI first,
-then writes to gitignored local settings — so a technical and a non-technical person can share
-one repo on different terms. Ships a tested `guard.mjs` hook that fails closed and checks it's
-still alive at session start.
-
-> [!IMPORTANT]
-> This is the only skill here that **writes** files; everything else is read-only. It stops Claude over-reaching. It is not a lock against a person who dismantles their own setup — and it says so, to your face, in the setup report.
-
-**When to use:** setting a project up for AI-assisted development, handing a repo to a
-non-technical builder, or any time you want to run auto mode without wondering what it might do.
-
 ### `/fresh-eyes`
 
 A subagent with zero conversation history reads your finished diff blind; the main context
@@ -81,6 +60,27 @@ until "stop ttp" or "normal mode".
 
 **When to use:** a session has run long or vague — especially the tail of a planning
 session — and you want replies that get to the point.
+
+### `/seatbelt` (alias `/seatbelts`)
+
+A seatbelt doesn't limit how fast you drive. It's what lets you drive fast at all.
+
+Writes a per-repo, per-person permission policy so you can hand Claude more autonomy, not less.
+Two modes. **Developer**: a permissive default plus a thin deny-only brake, roughly ten readable
+lines, no allowlist to maintain. **Vibe**: deny-by-default for someone who doesn't know git, so
+code changes flow freely while merges, force-pushes, deploys, secret reads and spend are blocked
+at the Claude layer, in plain English, with a next step every time.
+
+Grounds itself in the repo's existing Claude settings, instructions, MCP servers and CI first,
+then writes to gitignored local settings — so a technical and a non-technical person can share
+one repo on different terms. Ships a tested `guard.mjs` hook that fails closed and checks it's
+still alive at session start.
+
+> [!IMPORTANT]
+> This is the only skill here that **writes** files; everything else is read-only. It stops Claude over-reaching. It is not a lock against a person who dismantles their own setup — and it says so, to your face, in the setup report.
+
+**When to use:** setting a project up for AI-assisted development, handing a repo to a
+non-technical builder, or any time you want to run auto mode without wondering what it might do.
 
 ### `/goal-workflow`
 
