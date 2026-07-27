@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "mode": "developer",
+  "_comment": "Deny-only. There is no allowlist and no ask band on purpose: an enumerated allowlist always misses the tail (git stash, rg, jq, one-off scripts), so the developer gets interrupted anyway and flips to bypass — the exact failure this skill exists to prevent. Keep this list short enough to read at a glance; that readability IS the fine-grained control.",
+
+  "protectedPaths": [
+    ".claude/seatbelt.policy.json",
+    ".claude/seatbelt.manifest.json",
+    ".claude/assets/guard.mjs"
+  ],
+  "protectedGlobs": [],
+  "_protectedGlobs_note": "Workflow files are NOT protected in developer mode. 'Fix my failing CI' is a top-five task, CI edits are reversible, and they are reviewed in the PR. Protecting them here would block the mode that promises autonomy.",
+
+  "defaultBranchFallbacks": ["main", "master", "trunk", "develop", "production"],
+  "allowPushToDefaultBranch": false,
+  "allowForcePush": false,
+  "allowHistoryRewrite": true,
+  "_allowHistoryRewrite_note": "true: rebase, amend and reset --hard are daily tools for someone who can read a reflog. Force-push to the default branch is still denied below.",
+  "unresolvedScript": "allow",
+  "unknownMcp": "allow",
+  "logPath": ".claude/seatbelt-log.jsonl",
+
+  "denyCommands": [
+    { "contains": ["gh", "pr", "merge", "--admin"] },
+    { "contains": ["gh", "repo", "delete"] },
+    { "contains": ["gh", "repo", "edit", "--visibility"] },
+    { "contains": ["gh", "secret", "set"] },
+
+    { "contains": ["vercel", "--prod"], "reason": "deploy" },
+    { "contains": ["netlify", "deploy", "--prod"], "reason": "deploy" },
+    { "contains": ["terraform", "destroy"], "reason": "destructive" },
+    { "contains": ["prisma", "migrate", "reset"], "reason": "destructive" },
+    { "contains": ["drop database"], "reason": "destructive" },
+
+    { "contains": ["rm", "-rf", "/"], "reason": "destructive" },
+    { "contains": ["rm", "-rf", "~"], "reason": "destructive" },
+
+    { "contains": ["npm", "publish"] },
+    { "contains": ["cargo", "publish"] }
+  ],
+
+  "askCommands": [],
+  "mcpDeny": [
+    { "regex": "^mcp__.*__(buy|purchase|pay|charge|subscribe)[-_].*$" },
+    { "regex": "^mcp__.*__(delete|drop|destroy)[-_](project|database|repo|cluster|org).*$" }
+  ],
+  "mcpAsk": [],
+  "allowCommands": []
+}

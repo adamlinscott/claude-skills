@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "mode": "vibe",
+  "_comment": "Template copied by /seatbelt into .claude/seatbelt.policy.json. Personal overrides belong in .claude/seatbelt.local.json, which is deliberately NOT self-protected. Rule shapes: \"literal substring\" | {contains:[...]} | {startsWith:\"...\"} | {regex:\"...\"}. Prefer contains over regex — a mis-escaped regex in JSON silently never matches.",
+
+  "protectedPaths": [
+    ".claude/seatbelt.policy.json",
+    ".claude/seatbelt.manifest.json",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/assets/guard.mjs"
+  ],
+  "protectedGlobs": [".github/workflows/**", ".gitlab-ci.yml", ".circleci/**", ".husky/**"],
+
+  "defaultBranchFallbacks": ["main", "master", "trunk", "develop", "production"],
+  "allowPushToDefaultBranch": false,
+  "allowForcePush": false,
+  "allowHistoryRewrite": false,
+  "unresolvedScript": "deny",
+  "unknownMcp": "ask",
+  "logPath": ".claude/seatbelt-log.jsonl",
+
+  "denyCommands": [
+    { "contains": ["gh", "pr", "merge"], "reason": "merge" },
+    { "contains": ["gh", "repo", "delete"] },
+    { "contains": ["gh", "repo", "edit", "--visibility"] },
+    { "contains": ["gh", "release", "create"], "reason": "publish" },
+    { "contains": ["gh", "secret", "set"] },
+    { "contains": ["gh", "workflow", "run"] },
+    { "contains": ["gh", "api", "-x", "delete"] },
+    { "contains": ["gh", "gist", "create", "--public"] },
+
+    { "contains": ["vercel", "--prod"], "reason": "deploy" },
+    { "contains": ["netlify", "deploy", "--prod"], "reason": "deploy" },
+    { "startsWith": "fly deploy", "reason": "deploy" },
+    { "contains": ["wrangler", "deploy"], "reason": "deploy" },
+    { "contains": ["firebase", "deploy"], "reason": "deploy" },
+    { "startsWith": "railway up", "reason": "deploy" },
+    { "contains": ["terraform", "apply"], "reason": "deploy" },
+    { "contains": ["terraform", "destroy"], "reason": "destructive" },
+    { "contains": ["kubectl", "apply"], "reason": "deploy" },
+    { "contains": ["kubectl", "delete"], "reason": "destructive" },
+    { "contains": ["serverless", "deploy"], "reason": "deploy" },
+    { "contains": ["sst", "deploy"], "reason": "deploy" },
+    { "contains": ["eb", "deploy"], "reason": "deploy" },
+
+    { "contains": ["prisma", "migrate", "reset"], "reason": "destructive" },
+    { "contains": ["prisma", "migrate", "deploy"], "reason": "deploy" },
+    { "contains": ["prisma", "db", "push"], "reason": "destructive" },
+    { "contains": ["drizzle-kit", "push"], "reason": "destructive" },
+    { "contains": ["supabase", "db", "push"], "reason": "deploy" },
+    { "contains": ["drop table"], "reason": "destructive" },
+    { "contains": ["drop database"], "reason": "destructive" },
+    { "contains": ["truncate table"], "reason": "destructive" },
+
+    { "contains": ["rm", "-rf", "/"], "reason": "destructive" },
+    { "contains": ["rm", "-rf", "~"], "reason": "destructive" },
+    { "regex": "^\\s*rm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\\b", "reason": "destructive" },
+
+    { "contains": ["npm", "publish"], "reason": "publish" },
+    { "contains": ["pip", "upload"], "reason": "publish" },
+    { "contains": ["cargo", "publish"], "reason": "publish" },
+    { "contains": ["docker", "push"], "reason": "publish" },
+
+    { "regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(ba)?sh" },
+    { "contains": ["chmod", "777"] }
+  ],
+
+  "askCommands": [
+    { "regex": "^\\s*(npm|pnpm|yarn|bun)\\s+(i|add|install)\\s+\\S", "reason": "installs a new package" },
+    { "regex": "^\\s*(pip|pip3|poetry|uv)\\s+(install|add)\\s+\\S", "reason": "installs a new package" },
+    { "regex": "^\\s*(gem|cargo|go)\\s+(install|add|get)\\s+\\S", "reason": "installs a new package" },
+    { "contains": ["prisma", "migrate", "dev"], "reason": "changes your database structure" },
+    { "startsWith": "docker compose down -v", "reason": "deletes container data" }
+  ],
+
+  "mcpDeny": [
+    { "regex": "^mcp__.*__(merge_pull_request|merge_.*)$" },
+    { "regex": "^mcp__.*__(delete|drop|destroy|remove|purge)[-_].*$" },
+    { "regex": "^mcp__.*__.*[-_](delete|drop|destroy|purge)([-_].*)?$" },
+    { "regex": "^mcp__.*__(buy|purchase|pay|charge|subscribe)[-_].*$" },
+    { "regex": "^mcp__.*__deploy([-_].*)?$" }
+  ],
+  "mcpAsk": [{ "regex": "^mcp__.*__(create|update|write|push|send|post|run_sql|exec)([-_].*)?$" }],
+
+  "allowCommands": []
+}

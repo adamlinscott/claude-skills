@@ -1,0 +1,31 @@
+{
+  "name": "adamlinscott-claude-skills",
+  "owner": {
+    "name": "Adam Linscott",
+    "url": "https://github.com/adamlinscott"
+  },
+  "description": "Lifecycle gates for Claude Code: ground a plan, verify a diff, audit context, and set up per-repo permissions.",
+  "plugins": [
+    {
+      "name": "claude-skills",
+      "source": "./",
+      "description": "Skills that add lifecycle gates around planning and building with Claude Code: assumption-inventory, fresh-eyes, goal-workflow, reground, ttp, context-audit, memory-audit, and seatbelt.",
+      "author": { "name": "Adam Linscott" },
+      "homepage": "https://github.com/adamlinscott/claude-skills",
+      "repository": "https://github.com/adamlinscott/claude-skills",
+      "license": "MIT",
+      "keywords": ["skills", "planning", "review", "permissions", "guardrails", "security"],
+      "skills": [
+        "./skills/assumption-inventory",
+        "./skills/context-audit",
+        "./skills/fresh-eyes",
+        "./skills/goal-workflow",
+        "./skills/memory-audit",
+        "./skills/reground",
+        "./skills/seatbelt",
+        "./skills/seatbelts",
+        "./skills/ttp"
+      ]
+    }
+  ]
+}
