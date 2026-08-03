@@ -1,0 +1,17 @@
+# Features that are still in development.
+#
+# These are LEFT OUT of a normal install. They appear together in the installer's first
+# question, and are only applied when the person installing ticks them.
+#
+# One per line, as:  <kind> <name>
+#
+#   skill        <name from skills.txt>
+#   instruction  <file name in ./instructions, without the .md>
+#
+# Move something out of beta by deleting its line — a skill then installs by default, and an
+# instruction moves to the installer's "Other features" question. Blank lines and lines
+# starting with # are ignored. The installer reads this at run time; it never needs editing.
+
+skill        debrief
+skill        seatbelt
+instruction  clear-responses
