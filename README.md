@@ -27,7 +27,7 @@ order — though most are useful on their own, too.
 
 | Command | What it does in the flow |
 |---|---|
-| `/seatbelt` | **Set the permissions.** Once per repo, before anything else. Decides what Claude can do here without asking and what it can never do, so the rest of this flow can run on auto instead of stopping to ask you. Skip it and `/goal-workflow` either interrupts constantly or runs with no brakes. |
+| `/seatbelt` *(beta)* | **Set the permissions.** Once per repo, before anything else. Decides what Claude can do here without asking and what it can never do, so the rest of this flow can run on auto instead of stopping to ask you. Skip it and `/goal-workflow` either interrupts constantly or runs with no brakes. |
 | Any planning command, skill, or process | **Plan.** Start with a planning session — however you prefer to do it — and write the plan and any supporting docs to files. |
 | `/assumption-inventory` | **Ground the plan in reality.** Verify what the plan assumes about the project itself: which files actually exist, what may be edited, what must not be touched — the technical terrain, not just the goals. |
 | `/ttp` | **Switch to implementation mode.** The decisions are made — turn on *To the Point* so replies lead with the substance and stay focused on shipping, not re-litigating. This is where it shines: mid-build, you want progress, not discussion. |
@@ -49,7 +49,7 @@ Report-only by default; `--fix` / `--iterate` apply changes.
 **When to use:** work is complete and you want unbiased confirmation nothing was missed
 before shipping.
 
-### `/ttp` (To the Point)
+### `/ttp` (To the Point — also `/to-the-point`)
 
 Shapes only the prose you read: leads with the substance, keeps the default answer short, and
 expands only when you ask. Leaves you in control — Claude settles small, reversible, or
@@ -58,10 +58,14 @@ project shape, which features get built) up to you, one question at a time. Your
 tool use, code, and plans are untouched — it compresses the report, never the work. Persists
 until "stop ttp" or "normal mode".
 
+Also shapes the sentences themselves — one idea per sentence, active voice, one word per concept,
+no stacked nouns — borrowed from controlled-language practice, with precision ranked above
+simplicity so a technical term is glossed, never downgraded.
+
 **When to use:** a session has run long or vague — especially the tail of a planning
 session — and you want replies that get to the point.
 
-### `/seatbelt` (alias `/seatbelts`)
+### `/seatbelt` (alias `/seatbelts`) — beta
 
 A seatbelt doesn't limit how fast you drive. It's what lets you drive fast at all.
 
@@ -142,23 +146,32 @@ cd claude-skills
 node install.mjs
 ```
 
-This links each skill in `skills/` into `~/.claude/skills/<name>`. It is idempotent;
-re-run any time to repair links.
-
-- 🐧 macOS / Linux: directory symlinks.
-- 🪟 Windows: junctions (no admin rights or Developer Mode needed).
-
-> [!WARNING]
-> The installer will **not** overwrite a real directory it did not create. If it reports a `SKIP`, move or delete that directory and re-run.
-
-Because the links point back here, editing a skill in this repo updates it live in every
-Claude session. Commit and push to share the change.
-
-Remove the links (leaves the repo and any unrelated skills untouched):
+It opens a wizard that explains itself: tick what you want, confirm, done. Nothing changes until
+you confirm. Re-run it any time to change your answers or repair the links.
 
 ```sh
-node install.mjs --uninstall
+node install.mjs --help        # every option, changes nothing
+node install.mjs --uninstall   # remove what it installed
 ```
+
+Because the skills are linked rather than copied, editing one in this repo updates it live in
+every Claude session. Commit and push to share the change.
+
+### 📝 Global instructions
+
+Alongside the skills, the installer offers optional instructions for your **global**
+`~/.claude/CLAUDE.md` — the file Claude reads in every project. Off unless you tick them.
+
+| Instruction | Status | What it does |
+|---|---|---|
+| `clear-responses` | beta | Plain, direct wording in every reply Claude writes to you: short sentences, active voice, one word per concept. Scoped to prose you read — never code, commits, files, reasoning, or subagent instructions, and it never downgrades a precise technical term to a vaguer one. |
+
+Useful when Claude is being read by someone less technical, or by someone reading English as a
+second language, and you want that everywhere rather than per-session. It is **not** `/ttp` — it
+changes how sentences read, not how much Claude says or who decides what.
+
+Each one is a file in `instructions/`, written into your `CLAUDE.md` between markers — so
+re-running updates it in place and never touches anything else in that file.
 
 ### Plugin install (scaffolded, not yet published)
 

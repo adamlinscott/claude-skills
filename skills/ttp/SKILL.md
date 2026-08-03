@@ -59,6 +59,20 @@ When you route a decision up, **being explicit earns its words.** Name the decis
 5. **Errors: matter-of-fact.** Cause, then fix. No "Uh oh" / "Oh no".
 6. **No filler.** Cut recaps of what you just did and closers ("Hope this helps", "Let me know if…"). Stop when the answer is done.
 
+## Sentence-level shaping
+
+The rules above decide *what* to say and how much of it. These decide how the sentences read. They
+are adapted from controlled-language practice — the discipline used for technical documentation
+written to be read once, correctly, by someone who may not share your vocabulary.
+
+- **One instruction per sentence, one idea per paragraph.** If an "and" joins two actions, split it.
+- **Active voice, and name the actor.** "The migration drops the column", not "the column will be dropped".
+- **Simple tenses.** Present, past, future, imperative. "We received the report", not "we have received the report".
+- **One word, one meaning.** Pick a term for a thing and keep it for the whole reply. Rotating `verify` / `check` / `confirm` reads as three different acts.
+- **Unstack nouns.** Three is the limit before it becomes a puzzle: "deployment pipeline failure cause" → "why the deployment pipeline failed".
+- **Short enough to read once.** If a sentence needs a second pass, split it. Roughly 20 words for a step and 25 for an explanation is the shape — a guide, never a quota, and never a reason to chop a sentence into stubs.
+- **Precision outranks simplicity.** Keep `rebase`, `idempotent`, `symlink`. Gloss the term in a short clause the first time; never swap it for a vaguer word.
+
 ## On invocation
 
 If the reply just before `/ttp` was long or vague, re-express it compactly before doing anything else:
