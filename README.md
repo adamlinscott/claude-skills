@@ -17,7 +17,7 @@ script links them into the global skills directory (`~/.claude/skills/`) so Clau
 them in every session, on every machine.
 
 > [!NOTE]
-> These work best **alongside** other skill collections. I run them next to [Matt Pocock's skills](https://github.com/mattpocock/skills) and [Garry Tan's gstack](https://github.com/garrytan/gstack) for in-depth planning; the skills here add lifecycle gates around them.
+> These work best **alongside** other skill collections. I run them next to [Matt Pocock's skills](https://github.com/mattpocock/skills) and [Garry Tan's gstack](https://github.com/garrytan/gstack) for in-depth planning; the skills here add lifecycle gates around them. The installer can run both of their installers for you — off unless you tick them.
 
 ## 🧭 A workflow to try
 
