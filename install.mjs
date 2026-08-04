@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 // Installer for this skill collection.
 //
-// It runs in two halves. FIRST it asks — arrow-key checklists for the skills, the beta features
-// and any other optional features, then a summary and a final Install/Cancel. THEN it acts.
+// It runs in two halves. FIRST it asks — arrow-key checklists for the skills, the beta features,
+// any other optional features and other people's collections, then a summary and a final
+// Install/Cancel. THEN it acts, running other people's installers last.
 // Nothing on disk is touched until that confirmation, so cancelling leaves the machine as it was.
 //
 // The menus live in ./lib/wizard.mjs. Without a terminal (CI, a pipe) they are skipped entirely
 // and every question takes its safe default, so an unattended run never enables anything.
 //
-// Two things are read from disk rather than hardcoded here, so this file does not need editing as
-// the collection changes:
+// Everything it offers is read from disk rather than hardcoded here, so this file does not need
+// editing as the collection changes:
+//   • ./skills.txt        — one checkbox per skill, its folders, and a description for a person
 //   • ./beta-features.txt — which skills and instructions are still in development
 //   • ./instructions/*.md — the optional blocks offered for the global CLAUDE.md
+//   • ./extras/*.md       — other people's collections, and the command that installs each
 //
 // Run `node install.mjs --help` for the options.
 //
@@ -31,6 +34,7 @@ const repoInstructionsDir = path.join(repoRoot, "instructions");
 const repoToolsDir = path.join(repoRoot, "tools");
 const betaListFile = path.join(repoRoot, "beta-features.txt");
 const skillsListFile = path.join(repoRoot, "skills.txt");
+const repoExtrasDir = path.join(repoRoot, "extras");
 
 // How each kind of beta feature is described in the installer's list.
 const KIND_LABELS = { skill: "skill", instruction: "global instruction", agent: "agent" };
@@ -59,6 +63,7 @@ const KNOWN_FLAGS = [
   "--add-instructions",
   "--remove-instructions",
   "--skip-instructions",
+  "--extras",
   "--accept-defaults",
   "--yes",
   "-y",
@@ -75,6 +80,7 @@ const forceNoBeta = has("--no-beta");
 const skipInstructions = has("--skip-instructions");
 const addInstructions = flagValue("--add-instructions");
 const removeInstructions = flagValue("--remove-instructions");
+const extrasArg = flagValue("--extras");
 const acceptDefaults = has("--accept-defaults") || has("--yes") || has("-y");
 
 const unknownFlags = argv.filter((a) => a.startsWith("-") && !KNOWN_FLAGS.includes(a.split("=")[0]));
@@ -98,6 +104,7 @@ if (unknownFlags.length) {
     applySkillLinks(plan);
     applyBetaTools(plan);
     if (plan.instructions) applyInstructionBlocks(plan.instructions);
+    await runExtras(plan.extras);
     printFarewell();
   }
 }
@@ -125,6 +132,7 @@ function printWelcome(interactive) {
 function printHelp() {
   const blocks = loadInstructionBlocks();
   const names = blocks.map((b) => b.name).join(", ") || "none available";
+  const extraNames = loadExtras().map((e) => e.name).join(", ") || "none available";
   console.log("  Usage:  node install.mjs [options]");
   console.log("");
   console.log("  With no options it walks you through the setup, then asks you to confirm.");
@@ -141,6 +149,10 @@ function printHelp() {
   console.log(`                                Available: ${names}`);
   console.log("  --remove-instructions=<names> Remove these blocks. Comma-separated, or 'all'.");
   console.log("  --skip-instructions           Do not ask about them, and leave any already there.");
+  console.log("");
+  console.log("  --extras=<names>              Also run these other people's installers, once this");
+  console.log("                                repo's own skills are in. Comma-separated, 'all', or");
+  console.log(`                                'none'. Available: ${extraNames}`);
   console.log("");
   console.log("  --accept-defaults, -y         Do not ask anything. Takes the safe answer to every");
   console.log("                                question: link the stable skills, no beta, and leave");
@@ -189,6 +201,7 @@ async function buildPlan() {
     name: f.name,
     label: f.kind === "instruction" ? blocks.find((b) => b.name === f.name).title : f.name,
   }));
+  const extras = uninstall ? [] : loadExtras();
   const stableGroups = skillGroups.filter((g) => !betaSkills.includes(g.name));
   const stableSkills = stableGroups.map((g) => g.name);
 
@@ -208,7 +221,9 @@ async function buildPlan() {
     !uninstall &&
     addInstructions === undefined &&
     removeInstructions === undefined;
-  const totalSteps = (askSkills ? 1 : 0) + (askBeta ? 1 : 0) + (askOptional ? 1 : 0) + (interactive ? 1 : 0);
+  const askExtras = interactive && extras.length > 0 && !uninstall && extrasArg === undefined;
+  const totalSteps =
+    (askSkills ? 1 : 0) + (askBeta ? 1 : 0) + (askOptional ? 1 : 0) + (askExtras ? 1 : 0) + (interactive ? 1 : 0);
   let stepNumber = 0;
   const stepLabel = () => (totalSteps > 1 ? `  (${++stepNumber} of ${totalSteps})` : "");
 
@@ -225,6 +240,8 @@ async function buildPlan() {
   // actually have, so a choice made last time is not silently undone by re-running.
   let selectedSkills = new Set(uninstall || linkedStable.length ? linkedStable : stableSkills);
   let wantInstructions; // Set of block names, or null to leave the CLAUDE.md step alone entirely
+  // Never selected on your behalf: these run someone else's installer.
+  let selectedExtras = new Set(resolveExtrasFlag(extras));
 
   if (interactive) {
     try {
@@ -285,11 +302,31 @@ async function buildPlan() {
         wantInstructions = new Set([...optionalBlocks.filter((b) => installedBlocks.has(b.name)).map((b) => b.name), ...fromBeta]);
       }
 
+      // — Other people's collections —
+      if (askExtras) {
+        screen();
+        const picked = await multiSelect({
+          heading: `Recommended extras${stepLabel()}`,
+          note: "Optional. Each runs its own installer on your machine, after this one.",
+          items: extras.map((e) => ({
+            value: e.name,
+            label: e.title,
+            hint: isExtraInstalled(e) ? "looks already installed" : "",
+            details: `${e.description}
+
+Runs: ${e.command}`,
+          })),
+          selected: [],
+        });
+        if (!picked) return null;
+        selectedExtras = new Set(picked);
+      }
+
       // — Confirm —
       screen();
       const go = await chooseAction({
         heading: `Ready${stepLabel()}`,
-        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune: true, optionalBlocks, installedBlocks, wantInstructions }),
+        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune: true, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras }),
         items: [
           { value: "go", label: uninstall ? "Remove them" : "Install", hint: "apply the changes above" },
           { value: "cancel", label: "Cancel", hint: "change nothing" },
@@ -312,7 +349,7 @@ async function buildPlan() {
       wantInstructions = new Set([...resolveInstructionFlags(blocks, installedBlocks), ...fromBeta]);
     } else wantInstructions = new Set([...installedBlocks, ...fromBeta]);
 
-    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune: false, optionalBlocks, installedBlocks, wantInstructions })) {
+    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune: false, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras })) {
       console.log(`  ${line}`);
     }
     console.log("");
@@ -339,6 +376,7 @@ async function buildPlan() {
     newlyEnabledBeta,
     instructions: wantInstructions,
     prune: interactive,
+    extras: extras.filter((e) => selectedExtras.has(e.name)),
   };
 }
 
@@ -349,7 +387,7 @@ async function buildPlan() {
  * with two rows can never report on only one of them. The optional lines cover only the non-beta
  * blocks, which keeps each feature in exactly one place.
  */
-function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions }) {
+function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras }) {
   const verb = uninstall ? "remove" : "install";
   const lines = [];
   const names = (items) => items.map((i) => i.label).join(", ");
@@ -397,7 +435,23 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
     if (keep.length) lines.push(`keep: ${keep.join(", ")}`);
     if (drop.length) lines.push(`disable: ${drop.join(", ")}`);
   }
+
+  const chosenExtras = (extras || []).filter((e) => selectedExtras.has(e.name));
+  if (chosenExtras.length) lines.push(`then run: ${chosenExtras.map((e) => e.title).join(", ")}`);
   return lines;
+}
+
+/** --extras=<names|all|none>. Nothing is selected without one of these, or an explicit tick. */
+function resolveExtrasFlag(extras) {
+  if (extrasArg === undefined) return [];
+  const known = extras.map((e) => e.name);
+  const wanted = extrasArg
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s && s !== "none");
+  if (wanted.includes("all")) return known;
+  for (const w of wanted) if (!known.includes(w)) console.log(`  (--extras: nothing called "${w}" — ignored)`);
+  return wanted.filter((w) => known.includes(w));
 }
 
 /** Start from what is already installed, then apply --add-instructions / --remove-instructions. */
@@ -486,6 +540,135 @@ function loadBetaFeatures() {
       return { kind, name };
     })
     .filter((entry) => entry.name && KIND_LABELS[entry.kind]);
+}
+
+// ── Other people's collections ──────────────────────────────────────────────────────────────────
+// Each ./extras/*.md describes a collection someone else maintains: what it is, the command that
+// installs it, what that command needs on PATH, and what you have to run inside Claude afterwards.
+// These run LAST, after everything this repo installs, and only when explicitly ticked — the
+// command comes from a third party and runs on the person's machine, so it is shown before it runs
+// and is never selected by default.
+
+function loadExtras() {
+  if (!fs.existsSync(repoExtrasDir)) return [];
+  return fs
+    .readdirSync(repoExtrasDir)
+    .filter((f) => f.endsWith(".md"))
+    .map((file) => {
+      const { meta, body } = parseFrontmatter(fs.readFileSync(path.join(repoExtrasDir, file), "utf8"));
+      const fallback = path.basename(file, ".md");
+      return {
+        file,
+        name: meta.name || fallback,
+        title: meta.title || fallback,
+        summary: meta.summary || "",
+        description: body,
+        order: Number(meta.order || 99),
+        detect: meta.detect || "",
+        url: meta.url || "",
+        // `requires: git, bun=https://bun.sh` — the optional =url is where to go to get it.
+        requires: (meta.requires || "")
+          .split(",")
+          .map((r) => r.trim())
+          .filter(Boolean)
+          .map((r) => {
+            const [name, url = ""] = r.split("=");
+            return { name: name.trim(), url: url.trim() };
+          }),
+        useBash: (meta.shell || "") === "bash",
+        command: meta.command || "",
+        next: meta.next || "",
+      };
+    })
+    .filter((e) => e.command)
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+}
+
+// Declarations, not `const` arrows: buildPlan() runs above, before this point in the file is
+// evaluated, and only function declarations hoist past it.
+function expandHome(p) {
+  return p.startsWith("~") ? path.join(homedir(), p.slice(1)) : p;
+}
+
+function isExtraInstalled(extra) {
+  return Boolean(extra.detect) && fs.existsSync(expandHome(extra.detect));
+}
+
+/**
+ * True if `name` is on PATH. Asked of the OS rather than by running the command with --version:
+ * that needs shell:true on Windows to resolve .cmd shims, and passing arguments through a shell
+ * is both deprecated (DEP0190) and a quoting hazard.
+ */
+function commandExists(name) {
+  const probe = spawnSync(process.platform === "win32" ? "where" : "which", [name], { stdio: "ignore" });
+  return !probe.error && probe.status === 0;
+}
+
+function missingRequirements(extra) {
+  const missing = extra.requires.filter((r) => !commandExists(r.name));
+  // A POSIX-shell command needs a shell to run it. On Windows that ships with Git.
+  if (extra.useBash && !commandExists("bash")) {
+    missing.push({ name: "bash", url: process.platform === "win32" ? "https://git-scm.com/downloads" : "" });
+  }
+  return missing;
+}
+
+/**
+ * Whenever we cannot finish an install for someone, hand back everything they need to finish it
+ * themselves: what is missing and where to get it, the exact command, and the project's own page.
+ * URLs are printed bare so a terminal linkifies them.
+ */
+function printManualFallback(extra, missing = []) {
+  if (missing.length) {
+    console.log("");
+    for (const req of missing) {
+      console.log(`    install ${req.name}${req.url ? `:  ${style.cyan(req.url)}` : " and put it on your PATH"}`);
+    }
+  }
+  console.log(`\n    then run this yourself:`);
+  console.log(`      ${extra.command}`);
+  if (extra.url) console.log(`\n    instructions:  ${style.cyan(extra.url)}`);
+}
+
+async function runExtras(extras) {
+  if (!extras || extras.length === 0) return;
+  const followUps = [];
+  const unfinished = [];
+
+  for (const extra of extras) {
+    console.log(`\n  ${style.bold(extra.title)}`);
+    const missing = missingRequirements(extra);
+    if (missing.length) {
+      console.log(`  ${style.yellow("skipped  ")} ${missing.map((m) => m.name).join(" and ")} not found on your PATH.`);
+      printManualFallback(extra, missing);
+      unfinished.push(extra.title);
+      continue;
+    }
+
+    console.log(`  ${style.dim(`running: ${extra.command}`)}`);
+    const res = extra.useBash
+      ? spawnSync("bash", ["-lc", extra.command], { stdio: "inherit" })
+      : spawnSync(extra.command, { stdio: "inherit", shell: true });
+
+    if (res.error || res.status !== 0) {
+      console.log(`  ${style.yellow("failed   ")} ${res.error ? res.error.message : `the installer exited with code ${res.status}`}.`);
+      console.log(`  ${style.dim("Nothing else was changed.")}`);
+      printManualFallback(extra);
+      unfinished.push(extra.title);
+      continue;
+    }
+    console.log(`  ${style.green("installed")} ${extra.title}`);
+    if (extra.next) followUps.push([extra.title, extra.next]);
+  }
+
+  // The follow-up steps are slash commands typed inside Claude, so they cannot be run from here.
+  if (followUps.length) {
+    console.log(`\n  ${style.bold("Next, inside Claude:")}`);
+    for (const [title, next] of followUps) console.log(`    ${title} — ${next}`);
+  }
+  if (unfinished.length) {
+    console.log(`\n  ${style.yellow(`Not installed: ${unfinished.join(", ")}`)} — see the steps above to finish by hand.`);
+  }
 }
 
 // ── Skill links ─────────────────────────────────────────────────────────────────────────────────
