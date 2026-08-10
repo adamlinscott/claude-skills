@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# A stand-in for the `claude` binary, for the systemd tests only.
+#
+# It answers the questions the setup asks of the real one, and then — when asked to start a session —
+# sits there until something kills it. That is the behaviour under test: what systemd does when the
+# process a unit supervises goes away, and whether the bootstrap really ran before it existed.
+#
+# It is deliberately NOT a mock of Claude Code. It proves nothing about Remote Control itself; the
+# real thing needs a subscription and a network, and testing it here would be testing Anthropic's
+# service rather than our unit file.
+#
+# Two invocation shapes matter, and the difference is not cosmetic:
+#   claude remote-control ...      the server form — one process, many sessions
+#   claude --remote-control <id>   one interactive session, which is what this design uses
+# Getting them confused is how an earlier version of this stub silently passed while measuring
+# nothing, so both are handled explicitly and anything else is loud.
+
+set -uo pipefail
+
+stay_running() {
+  local name="$1"
+  local marker="${HOME}/.fake-claude-running-${name}"
+  echo "$$" > "$marker"
+  echo "fake claude: up for ${name} in $(pwd)"
+  # HUP as well as TERM: systemd signals the whole cgroup at once. A long-running server is expected
+  # to notice and shut down rather than be killed outright, so if the marker survives a stop then
+  # something sent SIGKILL, and that is worth knowing.
+  trap 'rm -f "$marker"; exit 0' TERM INT HUP
+  # `sleep` in the foreground would delay the trap until it returned; backgrounding it and waiting
+  # lets bash act on the signal immediately.
+  while true; do sleep 1 & wait $!; done
+}
+
+# The per-session form: `claude --remote-control <id> [--permission-mode auto]`.
+if [ "${1:-}" = "--remote-control" ] || [ "${1:-}" = "--rc" ]; then
+  stay_running "${2:-unnamed}"
+  exit 0
+fi
+
+case "${1:-}" in
+  --version)
+    echo "2.1.221 (Claude Code)"
+    ;;
+
+  auth)
+    case "${2:-}" in
+      status) echo "Logged in as dev (fake)" ;;
+      *) echo "fake claude auth: ${2:-}" ;;
+    esac
+    ;;
+
+  remote-control)
+    # The server form. Only its --help is used now, by the preflight, which checks that this build
+    # understands worktree spawning at all.
+    if [[ " ${*} " == *" --help "* ]]; then
+      cat <<'HELP'
+Remote Control - Control local sessions from claude.ai/code or the Claude mobile app
+USAGE
+  claude remote-control [options]
+OPTIONS
+  --name <name>              Name for the session
+  --permission-mode <mode>   Permission mode for spawned sessions
+  --spawn <mode>             Spawn mode: same-dir, worktree, session
+  --capacity <N>             Max concurrent sessions
+HELP
+      exit 0
+    fi
+    name="unknown"
+    for ((i = 1; i <= $#; i++)); do
+      if [[ "${!i}" == "--name" ]]; then
+        j=$((i + 1))
+        name="${!j}"
+      fi
+    done
+    stay_running "$name"
+    ;;
+
+  *)
+    echo "fake claude: unhandled invocation: ${*}" >&2
+    exit 64
+    ;;
+esac

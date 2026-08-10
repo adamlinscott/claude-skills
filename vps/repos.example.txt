@@ -1,0 +1,24 @@
+# Repos this box offers to the Claude app.
+#
+# Copy this to repos.txt and edit it, or skip the file entirely and use:
+#     skillhost add git@github.com:you/thing.git
+#
+# repos.txt is gitignored, because it is your machine's configuration and nobody else's.
+#
+# One line per repo:
+#
+#   <name> | <git url> | <bootstrap hook, or ->
+#
+#   name    what the repo is called on this box: the directory under the workspace root, the
+#           systemd unit, the tmux socket, and the label you tap in the Claude app.
+#           Lower case, a-z 0-9 and hyphens, up to 39 characters.
+#
+#   url     https://host/owner/repo or git@host:owner/repo. Nothing else — the other git
+#           transports can run commands, and one of them exists for exactly that.
+#
+#   hook    a file in vps/hooks, run at the start of every session in a fresh worktree.
+#           Use - for none. A hook committed in the repo itself wins over this one.
+#
+# Blank lines and lines starting with # are ignored.
+
+workspace | git@github.com:lorveil/workspace.git | workspace-pull-all.sh

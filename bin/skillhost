@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+// Entry point for `skillhost`. Wires the real world — spawnSync, node:fs, this machine's home
+// directory — into the code that does the thinking, and does nothing else itself.
+//
+// Everything worth testing lives in ../lib/host-cli.mjs and ../lib/host-steps.mjs behind an
+// injected executor, so this file stays too small to hide a bug in.
+
+import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import path from "node:path";
+
+import { createHost, realExecutor } from "../lib/host-steps.mjs";
+import { runCli, parseArgv, MENTAL_MODEL } from "../lib/host-cli.mjs";
+import { createServer } from "../lib/host-server.mjs";
+import { loadConfig } from "../lib/host-plan.mjs";
+
+const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const readIf = (file) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null);
+const configText = readIf(path.join(repoRoot, "vps", "config.json"));
+
+const hooksDir = path.join(repoRoot, "vps", "hooks");
+const availableHooks = fs.existsSync(hooksDir) ? fs.readdirSync(hooksDir) : [];
+
+const host = createHost({
+  run: realExecutor(spawnSync),
+  fs,
+  home: homedir().split(path.sep).join("/"),
+  repoRoot: repoRoot.split(path.sep).join("/"),
+  randomBytes,
+});
+host.availableHooks = () => availableHooks;
+
+const argv = process.argv.slice(2);
+const { command, flags } = parseArgv(argv);
+
+if (command === "serve") {
+  // Long-running, so it does not go through runCli's return-lines-and-exit shape.
+  const loaded = loadConfig(configText);
+  if (!loaded.ok) {
+    console.log(`  ${loaded.reason}`);
+  } else {
+    const { token } = host.ensureToken(randomBytes);
+    const port = Number(flags.port ?? loaded.config.port);
+    const { server } = createServer({ host, configText, token, log: (m) => console.log(m) });
+
+    server.on("error", (err) => {
+      // The one failure people actually hit, answered rather than dumped as a stack trace.
+      if (err.code === "EADDRINUSE") {
+        console.log(`\n  Port ${port} is already in use.`);
+        console.log("  Something else is on it — another skillhost, probably. Check with:");
+        console.log(`      ss -ltnp | grep ${port}`);
+        console.log(`  Or pick another: skillhost serve --port ${port + 1}\n`);
+      } else {
+        console.log(`\n  Could not listen on ${loaded.config.bind}:${port} — ${err.message}\n`);
+      }
+      process.exitCode = 1;
+    });
+
+    server.listen(port, loaded.config.bind, () => {
+      console.log(`\n  skillhost is listening on ${loaded.config.bind}:${port}`);
+      console.log(`  Token: ${host.paths.tokenFile}`);
+      console.log("");
+      console.log("  Add a repo from anywhere you can reach this box:");
+      console.log(`      curl -s -X POST http://127.0.0.1:${port}/repos \\`);
+      console.log(`        -H "Authorization: Bearer $(cat ${host.paths.tokenFile})" \\`);
+      console.log(`        -H 'content-type: application/json' \\`);
+      console.log(`        -d '{"url":"git@github.com:you/thing.git"}'`);
+      console.log("");
+      console.log(`  ${MENTAL_MODEL}`);
+      console.log("");
+    });
+    // Leave the port free straight away on ctrl-c, so a restart does not hit EADDRINUSE.
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      process.on(signal, () => server.close(() => process.exit(0)));
+    }
+  }
+} else {
+  const { code, lines } = await runCli(argv, {
+    host,
+    configText,
+    availableHooks,
+    env: process.env,
+  });
+  for (const line of lines) console.log(line);
+  process.exitCode = code;
+}

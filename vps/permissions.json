@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Permission rules merged into ~/.claude/settings.json — USER scope, so they apply to every",
+    "session on this box, including the unattended ones nobody is watching. That makes this the",
+    "highest-leverage file the setup writes.",
+    "",
+    "It is deliberately deny-only. An allowlist would have to be maintained forever and would",
+    "still miss the tail, and the point of this box is that sessions can work without stopping to",
+    "ask. What is denied here is the small set of things a session on THIS box should never do,",
+    "because this box holds an SSH key with push access and a signed-in Claude account.",
+    "",
+    "Per-repo policy is a different job: run /seatbelt inside each clone.",
+    "",
+    "Two rules from skills/seatbelt/REFERENCE.md apply here and are easy to get wrong:",
+    "  - Write(path), Glob(path) and NotebookEdit(path) are accepted and never matched. They",
+    "    would look protective and do nothing. Use Read(path) and Edit(path).",
+    "  - An MCP matcher needs a trailing .* — mcp__github matches nothing, mcp__github__.* matches.",
+    "",
+    "The setup records exactly which of these it added, so --uninstall removes those and leaves",
+    "anything you added yourself alone."
+  ],
+
+  "permissions": {
+    "deny": [
+      "Read(~/.ssh/**)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.config/skillhost/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa*)",
+      "Read(**/id_ed25519*)",
+
+      "Edit(~/.config/systemd/user/**)",
+      "Edit(~/.claude/settings.json)",
+      "Edit(~/.claude.json)",
+      "Edit(~/.ssh/**)",
+
+      "Bash(loginctl:*)",
+      "Bash(systemctl --user disable:*)",
+      "Bash(skillhost:*)"
+    ]
+  }
+}

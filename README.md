@@ -181,6 +181,148 @@ reaches the non-technical audience `/seatbelt --vibe` is written for. Nothing is
 marketplace is published. See [PUBLISHING.md](PUBLISHING.md) for what the files do and how to
 turn them on.
 
+## 🖥️ Run it on a VPS
+
+**Register a repo once. Every session is a fresh worktree, bootstrap already run.**
+
+A small always-on Linux server holds your repos. One request makes a git worktree, runs that repo's
+setup script to completion, and opens a Claude session in it on auto mode — which you carry on with
+in the Claude app or at [claude.ai/code](https://claude.ai/code), and which keeps running when your
+phone sleeps.
+
+The setup script is the part worth explaining. It runs as systemd's `ExecStartPre`, so it finishes
+*before* Claude exists, and a non-zero exit means no session is registered at all. A Claude
+`SessionStart` hook cannot promise that — a slow hook gets abandoned and the session starts anyway
+on a tree that was never prepared, which is the failure this shape exists to remove.
+
+### What you need first
+
+- A **Claude subscription** (Pro, Max, Team or Enterprise). An API key will not work, and neither
+  will `claude setup-token` — those tokens can only make model requests, and Remote Control refuses
+  them.
+- A **Linux VPS**, 2 GB of RAM or more, that you can SSH into as a normal (non-root) user.
+- A **phone or laptop with a browser**, to finish signing in. The box has no browser of its own.
+
+### Setting it up
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/adamlinscott/claude-skills/main/host.sh | bash
+```
+
+That installs git, Node and Claude Code, clones this repo, and stops. Then:
+
+```sh
+cd ~/claude-skills
+node host-setup.mjs            # the guided setup — asks first, changes nothing until you confirm
+```
+
+It checks the box, signs you in, writes the permission rules, installs the skills globally, clones
+your repos and starts a server for each one. At the end it tells you to open the app.
+
+```sh
+node host-setup.mjs --doctor      # is this box healthy? changes nothing
+node host-setup.mjs --uninstall   # remove what it installed; your clones are kept
+```
+
+### Afterwards
+
+```sh
+skillhost add git@github.com:you/thing.git    # register a repo. Starts nothing.
+skillhost session thing fix-login             # worktree + bootstrap + a live session
+skillhost sessions                            # what is running, and what only thinks it is
+skillhost end thing-fix-login-a1b2 --purge    # stop it and reclaim its worktree
+skillhost why thing-fix-login-a1b2            # why one did not start. Usually the bootstrap.
+skillhost reap                                # reclaim worktrees from finished sessions
+skillhost doctor                              # check everything
+skillhost serve                               # take these over HTTP, so a phone shortcut can do it
+```
+
+`skillhost serve` only ever listens on loopback. Reach it over [Tailscale](https://tailscale.com) or
+an SSH tunnel — it will not bind a public address whatever you put in the config. One POST starts a
+session:
+
+```sh
+curl -sX POST http://127.0.0.1:7717/sessions \
+  -H "Authorization: Bearer $(cat ~/.config/skillhost/token)" \
+  -H 'content-type: application/json' \
+  -d '{"repo":"thing","task":"fix login"}'
+```
+
+### Where your bootstrap goes
+
+A repo that commits `.claude/bootstrap.sh` uses that. Otherwise name a script from `vps/hooks/` when
+you register the repo — `vps/hooks/workspace-pull-all.sh` is the worked example, for the case where
+one workspace repo pulls its siblings into place. Either way it runs in the fresh worktree, with
+`CLAUDE_PROJECT_DIR`, `SKILLHOST_REPO` and `SKILLHOST_SESSION` set, before Claude starts.
+
+### Trust, and what registering a repo actually means
+
+Starting a repo lets code from that repo run on this box, as you, unattended — the bootstrap script
+is read from the repo itself. That box holds an SSH key with push access and a signed-in Claude
+account, so the decision matters.
+
+So it is decided by ownership, and you never have to type anything extra for the normal case:
+
+| The repo is owned by | What happens |
+|---|---|
+| you | cloned and started |
+| an organisation you belong to | cloned and started |
+| anyone else | cloned, **not** started, until you run `skillhost trust <repo>` |
+
+Ownership is read from the GitHub CLI, so `gh auth login` is worth doing — without it nothing can be
+trusted automatically and every repo needs approving by hand. Note that in a large organisation, any
+member's push runs on your box; that is the trade the middle row makes.
+
+> [!IMPORTANT]
+> This box ends up holding your logged-in Claude subscription and an SSH key with push access to your
+> repositories, running sessions on auto mode that restart themselves. Treat it like a machine you
+> would hand someone your laptop password for. Run `/seatbelt` inside each clone before pointing it at
+> anything you care about.
+
+### Why it might not work
+
+Every one of these fails *quietly* — the box looks fine and your phone shows nothing.
+`skillhost doctor` checks all of them and prints only what is wrong, with the fix. The long version
+is [vps/preflight.md](vps/preflight.md).
+
+| Symptom | Usually |
+|---|---|
+| Nothing appears in the app | Signed in with `claude setup-token`, or no subscription on the account |
+| A session will not start | Nearly always the bootstrap — `skillhost why <id>` prints the journal |
+| A repo refuses to start sessions | The trust dialog — run `skillhost trust <repo>` |
+| Everything dies when you close SSH | Linger is off: `sudo loginctl enable-linger $USER` |
+| Worked yesterday, silent today | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_GROWTHBOOK` got set |
+| Clones start failing for no clear reason | Worktrees filling the disk — `skillhost reap` |
+
+### When not to bother
+
+- **Your repos are on GitHub and you need nothing local.** Claude Code on the web already does this
+  with no VPS at all. Try that first.
+- **You only have one repo and no setup script.** SSH in, run `claude remote-control --spawn worktree`,
+  done. This exists for the many-repos-one-box case, and for when a worktree needs preparing before
+  work can start in it.
+- **You pay per API call.** Remote Control needs a subscription.
+
+### A note on updating
+
+Unlike the skills, which are symlinked and update themselves, the VPS pieces are **copied** onto the
+box. After `git pull`, re-run `node host-setup.mjs` to pick up the changes. `skillhost doctor` says
+when your units are out of date.
+
+## 🧪 Tests
+
+```sh
+npm test              # everything that runs anywhere. No dependencies.
+npm run test:systemd  # the handful of things that need real systemd. Needs Docker.
+```
+
+The second one builds a throwaway container with systemd as PID 1 and a stand-in `claude`, then
+checks the things no mock can: that the bootstrap really finishes before Claude starts, that a
+*failing* bootstrap stops the session existing at all, that two sessions run side by side, and that
+Claude gets a real terminal. It earned its keep several times over — it caught a unit file that
+reported healthy over a dead service, a shutdown race that only appeared 2 times in 5, and two
+systemd keys silently ignored because they sat in the wrong section.
+
 ## 📄 License
 
 [MIT](LICENSE). Free to use, modify, and share.

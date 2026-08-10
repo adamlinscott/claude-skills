@@ -8,3 +8,12 @@ desktop.ini
 *~
 .vscode/
 .idea/
+
+# Your VPS's own configuration, not anybody else's. vps/repos.example.txt is the one that ships.
+vps/repos.txt
+
+# Belt and braces. The API token lives in ~/.config/skillhost/token and should never be in here,
+# but a stray copy would be one `git add -A` away from being published.
+vps/token
+*.token
+

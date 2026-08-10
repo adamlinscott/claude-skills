@@ -1,0 +1,64 @@
+# A throwaway Linux box with real systemd, for the tests that cannot run anywhere else.
+#
+# Most of this project is testable on any machine, because every decision is a pure function and
+# every subprocess goes through an injected executor. Three things are not:
+#
+#   - does the generated unit actually start?
+#   - do two repos really run side by side?
+#   - when a session dies, does Restart=always actually fire?
+#
+# That last one is the whole reason this file exists. The obvious unit — Type=forking with a plain
+# `tmux new-session -d` — passes every unit test and then fails in production, because tmux shares
+# one server per user: the second unit's ExecStart leaves nothing in its own cgroup, and a dead
+# session hides behind a server that is still alive for some other repo. systemd sees a healthy
+# service over a dead one. No amount of mocking finds that. A container with PID 1 systemd does.
+#
+# Build and run from the repo root:
+#     docker build -f docker/Dockerfile.systemd -t skillhost-systemd .
+#     docker run --rm --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw skillhost-systemd
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV container=docker
+
+# Deliberately no tmux. The first version of the unit ran Claude inside it and this container is
+# what proved that wrong; leaving tmux out means the tests cannot quietly start depending on it
+# again. `script` comes from util-linux, which is already in the base image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      systemd systemd-sysv dbus dbus-user-session \
+      git curl ca-certificates procps sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node 20+: Ubuntu 24.04 ships 18, and the test runner needs a newer one.
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Strip the units a container has no use for. Without this, boot waits on things that will never
+# happen and the tests time out before systemd is ready.
+RUN find /etc/systemd/system /lib/systemd/system \
+      -path '*.wants/*' \
+      \( -name '*getty*' -o -name '*udev*' -o -name '*mount*' -o -name '*swap*' \
+         -o -name 'systemd-tmpfiles-setup*' -o -name 'systemd-firstboot*' \) \
+      -exec rm -f {} + 2>/dev/null || true
+
+RUN useradd --create-home --shell /bin/bash dev \
+    && echo 'dev ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev
+
+# A `claude` that behaves like the real one for the two things these tests care about: it advertises
+# --spawn worktree, and `remote-control` runs until something kills it. Using the real binary would
+# need a subscription and a network, and would test Anthropic's service rather than our unit file.
+COPY docker/fake-claude /usr/local/bin/claude
+RUN chmod +x /usr/local/bin/claude
+
+COPY --chown=dev:dev . /opt/claude-skills
+RUN ln -sf /opt/claude-skills/bin/skillhost /usr/local/bin/skillhost \
+    && chmod +x /opt/claude-skills/bin/skillhost /opt/claude-skills/docker/systemd-tests.sh
+
+# Linger has to be on before the user manager will keep units alive without a login session, which
+# is exactly the property being tested.
+RUN mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/dev
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

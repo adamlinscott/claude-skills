@@ -1,0 +1,86 @@
+# Three jobs, because the project has three kinds of test.
+#
+#   unit     — pure decisions and injected-executor integration. Runs anywhere. Both platforms,
+#              because the maintainer develops on Windows and the target is Linux, and a path
+#              separator leaking between the two is exactly the bug that would not be noticed.
+#   systemd  — the handful of things that need a real init: does the unit start, do two repos run
+#              side by side, does a dead session actually get restarted. Ubuntu runners are full
+#              systemd VMs, so this is a normal job rather than a container trick.
+#   shell    — the bootstrap script and the hooks, checked by shellcheck. They run on a box where
+#              nobody is watching, so a quoting mistake is a silent hang rather than an error.
+#
+# No dependencies anywhere: `node --test` is the runner, and nothing is installed from npm.
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm test
+
+  systemd:
+    name: systemd (real units)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Stand in for the claude binary
+        # The real one needs a subscription and a network. What is under test is the unit file, not
+        # Anthropic's service, so the stub answers the two questions the unit asks and then waits to
+        # be killed — which is the behaviour the restart test turns on.
+        run: |
+          sudo cp docker/fake-claude /usr/local/bin/claude
+          sudo chmod +x /usr/local/bin/claude
+          claude --version
+
+      - name: Let user units survive without a login session
+        run: |
+          sudo loginctl enable-linger "$USER"
+          loginctl show-user "$USER" --property=Linger
+
+      - name: Run the systemd tests
+        run: |
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          sudo mkdir -p /opt && sudo ln -sfn "$GITHUB_WORKSPACE" /opt/claude-skills
+          ./docker/systemd-tests.sh
+
+      - name: Show the journal if anything failed
+        if: failure()
+        run: journalctl --user -u 'skillhost@*' -n 100 --no-pager || true
+
+  shell:
+    name: shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --severity=warning \
+            host.sh \
+            docker/fake-claude \
+            docker/systemd-tests.sh \
+            docker/run-systemd-tests.sh \
+            vps/hooks/*.sh

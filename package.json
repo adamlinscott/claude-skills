@@ -1,0 +1,15 @@
+{
+  "name": "claude-skills",
+  "private": true,
+  "type": "module",
+  "description": "Skills that add lifecycle gates around planning and building with Claude Code, plus the VPS host tooling.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\" \"skills/seatbelt/assets/*.test.mjs\"",
+    "test:watch": "node --test --watch \"tests/*.test.mjs\"",
+    "test:systemd": "bash docker/run-systemd-tests.sh"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

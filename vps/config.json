@@ -1,0 +1,43 @@
+{
+  "_comment": [
+    "Settings for the VPS host tooling. Read at run time by host-setup.mjs and skillhost,",
+    "so changing something here needs no code edit. Delete a key to take its default.",
+    "",
+    "workspaceRoot   where clones live. One directory per repo.",
+    "stem            the one name used for the command and for the systemd units, so",
+    "                `systemctl --user status <stem>-session@<id>` is always guessable from",
+    "                the command you typed.",
+    "permissionMode  how sessions run. 'auto' is full auto mode WITHOUT the dangerous skip flag.",
+    "capacity        how many sessions may run at once on this whole box. 'auto' works it",
+    "                out from this box's RAM. A number overrides that.",
+    "perSessionMb    the memory a session is assumed to want, used by the 'auto' calculation.",
+    "allowedHosts    git hosts a clone may come from. Nothing else is accepted, whoever asks.",
+    "bind / port     the optional HTTP wrapper. bind must stay on loopback — reach it with",
+    "                Tailscale or an SSH tunnel rather than opening a port to the internet.",
+    "autoTrust       when a repo may start without you approving it by hand. 'owner' is a repo",
+    "                owned by the account you are signed in as; 'org' is one owned by an",
+    "                organisation you belong to. Set either to false to approve those by hand too.",
+    "retentionDays   how long an idle worktree survives `skillhost reap`. Anything with",
+    "                uncommitted or unpushed work is kept regardless of age.",
+    "bootstrapTimeoutSec  how long a repo's bootstrap may take before systemd gives up on the",
+    "                session. It runs before Claude starts, so this is a ceiling on how long",
+    "                `skillhost session` can sit there preparing."
+  ],
+  "workspaceRoot": "~/workspace",
+  "stem": "skillhost",
+  "permissionMode": "auto",
+  "capacity": "auto",
+  "perSessionMb": 800,
+  "bootstrapTimeoutSec": 600,
+  "allowedHosts": [
+    "github.com",
+    "gitlab.com"
+  ],
+  "bind": "127.0.0.1",
+  "port": 7717,
+  "autoTrust": {
+    "owner": true,
+    "org": true
+  },
+  "retentionDays": 14
+}
