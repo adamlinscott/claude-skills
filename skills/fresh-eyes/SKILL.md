@@ -1,6 +1,6 @@
 ---
 name: fresh-eyes
-description: Fresh-context audit of a finished diff against the conversation's stated intent. A subagent with zero conversation history reviews the diff blind — reporting what it believes the change does, its quality, and any oversights — then the main context reconciles that blind read against what the work was actually meant to do. Use when a chunk of work is complete and you want fresh eyes to confirm nothing was missed, scope is fully covered, and no oversights or bugs slipped through, before moving on or shipping.
+description: Fresh-context audit of a finished diff against the conversation's stated intent. A subagent with zero conversation history reviews the diff blind — reporting what it believes the change does, its quality, and any oversights — then the main context reconciles that blind read against what the work was actually meant to do, and surfaces any assumption about real-world behaviour that the code cannot settle. Use when a chunk of work is complete and you want fresh eyes to confirm nothing was missed, scope is fully covered, and no oversights or bugs slipped through, before moving on or shipping.
 ---
 
 # fresh-eyes
@@ -15,14 +15,30 @@ what it was meant to, fully. Catching bugs and oversights is a secondary byprodu
 that check, welcome but not the goal. For a dedicated correctness sweep, use
 `/code-review` or `/codex review` instead.
 
+**Know what this instrument cannot see.** It measures the gap between two readings, so
+it is blind to any error the two share. If the intent itself is wrong, a faithful
+implementation of it produces zero divergence — the strongest possible pass. Agreement
+is therefore evidence that the code expresses the intent, never evidence that the intent
+was right. Steps 1, 3 and 4 exist to attack that blind spot directly; do not water them
+down.
+
 ## Workflow
 
 Run these steps in order. Do not skip step 1 — it is the integrity gate.
 
 1. **Pre-register intent (BEFORE any review).** Write down, in the conversation, a
-   short brief: *what we set out to do, what is in scope, what is out of scope.* This
-   must happen before reading the blind report, or the main context will rationalize
-   the blind read into false agreement and the signal is lost. Show it to the user.
+   short brief of what we set out to do. This must happen before reading the blind
+   report, or the main context will rationalize the blind read into false agreement and
+   the signal is lost. Split the brief in two:
+   - **Asked** — what the user actually requested. In scope and out of scope.
+   - **Derived** — everything else that ended up in scope: proposed by a prior review,
+     by a subagent, or by your own inference. Tag each item with where it came from and
+     what it rests on — a **domain fact** (someone knew how the world actually behaves)
+     or **code shape** (the types, names, or structure suggested it).
+
+   Keeping these apart is the point. A wrong premise almost never enters through the
+   *Asked* list; it enters as a code-shape derivation that everyone downstream then
+   treats as settled. Show the brief to the user.
 
 2. **Capture the change to audit.** Try these sources in order; use the first that
    yields a non-empty change:
@@ -48,6 +64,8 @@ Run these steps in order. Do not skip step 1 — it is the integrity gate.
    - What it believes this change does / fixes / builds.
    - How well it is implemented (clarity, structure, tests).
    - Oversights, bugs, missed edge cases, and shadow paths (nil / empty / error inputs).
+   - **Assumptions about the world** the change depends on but cannot prove, including
+     any behaviour it makes narrower or stricter.
 
    If the subagent fails, times out, or returns nothing usable, retry once. If it still
    fails, tell the user and stop — never fabricate a blind read to fill the gap.
@@ -56,15 +74,28 @@ Run these steps in order. Do not skip step 1 — it is the integrity gate.
    Where the agent's understanding diverges from what you meant = dropped scope, or an
    implementation that does not express the intent. That divergence is the headline.
 
+   Then work the *Derived* list, which divergence alone will never flag. For each item
+   tagged **code shape**, do not audit whether it was implemented correctly — re-derive
+   it: state what would have to be true about the domain for it to be right, and whether
+   anything in the diff actually establishes that. Auditing an implementation against a
+   premise only deepens the premise; three careful passes can all agree and all be
+   measuring the wrong thing. Anything you cannot establish from the code becomes a
+   behavioural assumption in the report.
+
 5. **Report** using the template in [REFERENCE.md](REFERENCE.md): Intended → Delivered →
    Divergences → Left to do (in scope) → Leftovers (out of scope) → Oversights/bugs →
-   Verdict (`DONE` / `DONE_WITH_CONCERNS` / `GAPS`).
+   Assumptions only the user can confirm → Verdict (`DONE` / `DONE_WITH_CONCERNS` /
+   `GAPS`).
 
 6. **Decide what happens next.**
    - If `--fix` or `--iterate` was passed, proceed into that mode now (see Modes).
    - If neither flag was passed, STOP and ask the user whether to fix the in-scope gaps,
      run the bounded iterate loop, or leave it as a report. Modify nothing until they
      choose — the report alone never edits code.
+   - Either way, put the **Assumptions** section in front of the user as a question, not
+     as a footnote. One sentence of confirmation from someone who knows the domain is
+     the cheapest control this skill has, and the only one that can catch a premise the
+     code cannot settle.
 
 ## Modes
 
@@ -77,9 +108,20 @@ passed, the skill does NOT modify anything — it reports, then asks (step 6).
   overview: what was implemented, what remains in scope, what is deferred out of scope.
   See [REFERENCE.md](REFERENCE.md) for the loop.
 
+**Non-fixable findings.** Behavioural assumptions and reductions in breadth are never
+auto-resolved, in any mode. `--fix` and `--iterate` must surface them and move on, never
+act on them, and their presence caps the verdict at `DONE_WITH_CONCERNS`. These modes
+exist to run without a human in the loop, which is exactly when a wrong premise
+compounds instead of being caught — so the one finding that only a human can settle must
+survive the loop intact rather than being tidied away by it.
+
 ## Guardrails
 
-- Never feed the intent to the blind agent. A contaminated read is worthless.
+- **The blind agent is only as blind as the diff.** Withholding the conversation is not
+  enough: comments, KDoc, doc updates, and test names carry the author's own rationale
+  straight into the "fresh" read, and the agent will adopt it. Never pass conversation
+  history or planning docs — and prompt the agent to treat in-diff justification as a
+  claim to be tested, not as context (see [REFERENCE.md](REFERENCE.md)).
 - Only `--fix`/`--iterate`, or explicit user approval at step 6, may modify the tree.
   With no flag and no approval, the skill is strictly read-only.
 - One blind agent is enough for most diffs. For a large or high-stakes diff, fan out
@@ -92,3 +134,9 @@ passed, the skill does NOT modify anything — it reports, then asks (step 6).
 `fresh-eyes` is the union: fresh context AND intent reconciliation. A sibling
 plan-preflight skill (cold read of a plan before implementation) may follow; this
 skill stays diff-only.
+
+`assumption-inventory` is the front half of the same problem — it surfaces load-bearing
+assumptions *before* a long run, where they are cheap to correct. If a fresh-eyes report
+keeps landing behavioural assumptions late, that is a signal to run
+`assumption-inventory` at the start of the next piece of work rather than to grow this
+skill toward it.
