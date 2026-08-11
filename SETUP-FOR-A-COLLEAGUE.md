@@ -90,8 +90,12 @@ cd claude-skills
 node install.mjs --for=someone-else
 ```
 
-That flag skips every checklist and applies the non-technical defaults. You still get the
-Ready summary; nothing on disk changes until you confirm it, so read it before you accept.
+That flag skips every checklist and installs only the problem-reporting skills. It is an alias
+for `--for=nontechnical`; both install exactly the same thing. You still get the Ready summary;
+nothing on disk changes until you confirm it, so read it before you accept.
+
+Without the flag the installer asks which skills this machine should get, and **defaults to the
+full developer set** — so if you run it bare here, do not just press Enter.
 
 Two things in that summary are worth reading properly rather than nodding through:
 

@@ -199,22 +199,24 @@ node install.mjs --uninstall   # remove what it installed
 Because the skills are linked rather than copied, editing one in this repo updates it live in
 every Claude session. Commit and push to share the change.
 
-#### Two tracks
+#### Two sets
 
-The first question is who the setup is for, because the right set of skills is not the same for
-someone building the software and someone reporting problems with it.
+The first question is which skills this machine gets, because the right set is not the same for
+someone building the software and someone reporting problems with it. It is asked in those terms
+— what you end up with — rather than how much work each answer is, so that picking the smaller
+set is a decision rather than a shortcut.
 
-| Track | What it does |
+| Answer | What you get |
 |---|---|
-| **You write code** | The checklist wizard, opened on sensible developer defaults. Tick and untick whatever you like. |
-| **You don't, or you're setting this up for someone who doesn't** | No checklists. Applies the non-technical defaults — `/raise-issue`, `/ttp`, `/reground`, `/memory-audit`, plus plain-English replies — and shows the same Ready summary, naming every skill, before it touches anything. |
+| **All 8 — I'll pick from a checklist** | The full collection, opened on sensible developer defaults. Tick and untick whatever you like. The default answer, and the right one for anyone who writes code here. |
+| **Only the 4 for reporting problems** | `/raise-issue`, `/ttp`, `/reground`, `/memory-audit`, plus plain-English replies. No checklists. It names, on screen, the four developer skills it leaves out, and the Ready summary lists every skill before anything is touched. |
 
 Answer it up front with a flag:
 
 ```sh
-node install.mjs --for=developer      # the checklist wizard
-node install.mjs --for=nontechnical   # non-technical defaults, no checklists
-node install.mjs --for=someone-else   # the same, plus what to do next on their machine
+node install.mjs --for=developer      # the full checklist
+node install.mjs --for=nontechnical   # only the problem-reporting skills
+node install.mjs --for=someone-else   # an alias for nontechnical — identical install
 ```
 
 The flag only seeds the answers. It never skips the Ready confirmation, it never installs a

@@ -43,7 +43,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
-import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, style } from "./lib/wizard.mjs";
+import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, style, wrap } from "./lib/wizard.mjs";
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoSkillsDir = path.join(repoRoot, "skills");
@@ -192,12 +192,12 @@ function printHelp() {
   console.log("");
   console.log("  --help, -h                    Show this and stop. Changes nothing.");
   console.log("");
-  console.log("  --for=<who>                   Who the setup is for, which decides what gets");
-  console.log("                                installed without asking:");
-  console.log("                                  developer      show every skill and let me tick");
-  console.log("                                  nontechnical   a sensible set, nothing to choose");
-  console.log("                                  someone-else   the same set, plus what to do next");
-  console.log("                                                 on their machine");
+  console.log("  --for=<who>                   Which skills to install, without asking:");
+  console.log("                                  developer      all of them, via a checklist");
+  console.log("                                  nontechnical   only the problem-reporting ones,");
+  console.log("                                                 for someone who does not write code");
+  console.log("                                  someone-else   an alias for nontechnical; both");
+  console.log("                                                 install exactly the same thing");
   console.log("                                A choice here can only ADD. Neither setup removes a");
   console.log("                                skill you already have.");
   console.log("");
@@ -247,9 +247,9 @@ function printFarewell(plan = {}) {
   // between a setup that is finished and one that quietly stops short.
   console.log("");
   if (plan.wantsHandover) {
-    console.log(`  ${style.bold("Setting this up for someone else?")}`);
-    console.log("  There are a few things left that have to happen on THEIR machine.");
-    console.log(`  The checklist is in ${style.cyan("SETUP-FOR-A-COLLEAGUE.md")}.`);
+    console.log(`  ${style.bold("This is not the whole job.")}`);
+    console.log("  Signing in to the issue tracker and cloning the product repo still have to");
+    console.log(`  happen on this machine. The checklist is in ${style.cyan("SETUP-FOR-A-COLLEAGUE.md")}.`);
     console.log("");
   }
   console.log(`  To report a problem, describe it to Claude, or type ${style.bold("/raise-issue")}.`);
@@ -337,20 +337,38 @@ async function buildPlan() {
     // Framed by CONSEQUENCE, not identity — the rule /seatbelt already follows. "I don't write
     // code" is a public self-demotion typed into a terminal, and everyone dodges it, landing the
     // people who most need the simple setup in the nine-item checklist instead.
+    // Split on WHAT YOU GET, not on how much work it is. "A sensible set, nothing to choose"
+    // advertises convenience and hides the consequence, so a developer feeling lazy picks the
+    // reduced set and silently loses four skills with no reason to suspect it. Name the count and
+    // name the omissions; the choice then has to be made on purpose.
+    const guidedCount = stableGroups.filter((g) => g.defaults.nontech).length;
+    const omitted = stableGroups
+      .filter((g) => g.defaults.dev && !g.defaults.nontech)
+      .map((g) => `/${g.name}`);
     const picked = await chooseAction({
-      heading: "What kind of setup do you want?",
+      heading: "Which skills should this machine get?",
       body: [
+        ...wrap(`The smaller set is for someone who only reports problems. It leaves out ${omitted.join(", ")}.`, 84).map(
+          (l) => style.dim(l),
+        ),
         style.dim("Nothing is installed until you confirm on the next screen."),
       ],
       items: [
-        { value: "nontechnical", label: "Set it up for me", hint: "a sensible set, one confirmation, nothing to choose" },
-        { value: "developer", label: "Let me choose", hint: "show every skill and let me tick" },
-        { value: "someone-else", label: "I'm setting this up for someone else", hint: "same as the first, plus what to do on their machine" },
+        {
+          value: "developer",
+          label: `All ${stableSkills.length} — I'll pick from a checklist`,
+          hint: "if you write code here, this one",
+        },
+        {
+          value: "nontechnical",
+          label: `Only the ${guidedCount} for reporting problems`,
+          hint: `leaves out ${omitted.length} developer skills`,
+        },
       ],
-      // Open on "Let me choose" for anyone who already has skills linked. They are a returning
-      // developer, and hitting enter out of habit should not quietly add a preset to a machine
-      // they have already curated. A fresh machine opens on the guided answer.
-      initial: linkedStable.length ? "developer" : "nontechnical",
+      // Always open on the full set. The person who cloned a repo and ran a Node script is, on
+      // the evidence, technical — and on a fresh machine the union floor has nothing to protect,
+      // so a stray Enter on the reduced option is the one mistake with no safety net.
+      initial: "developer",
     });
     // Escape, q, Ctrl-C and end-of-input all arrive as null. Every one of them means cancel;
     // falling through to a track here would let a stray keypress silently pick one.
@@ -367,7 +385,11 @@ async function buildPlan() {
   // Under --uninstall every checkbox means the opposite, so a preset has no coherent meaning —
   // the only safe reading is "ignore the track entirely and show the list".
   const guided = track === "nontech" && !uninstall;
-  const wantsHandover = audience === "someone-else" && !uninstall;
+  // The handover checklist is shown for the reduced set whoever is sitting at the keyboard. It
+  // covers `gh auth login` and cloning the product repo, which are needed either way, so asking
+  // "is this your machine or theirs?" would have bought exactly one paragraph of output and cost
+  // a whole screen. --for=someone-else is kept as an alias because the docs use it.
+  const wantsHandover = guided;
 
   // A step is skipped when a flag already answers it, when the guided track decided it, or when
   // it has nothing to show. Computed AFTER the audience answer so the count stays honest —

@@ -134,6 +134,42 @@ test("REGRESSION: choosing the non-technical track never unlinks an existing ins
   assert.ok(!/removed/.test(stdout), "nothing should be reported as removed");
 });
 
+test("REGRESSION: the default answer on a fresh machine is the FULL set", (t) => {
+  const h = makeHome();
+  t.after(h.cleanup);
+
+  // The trap this guards: a developer runs the installer on a new machine, hits Enter out of
+  // habit, and silently gets the reduced problem-reporting set. On a fresh machine the union
+  // floor has nothing to protect, so this is the one wrong keypress with no safety net.
+  const DOWN = "\x1b[B";
+  const keys =
+    "\r" + //                     audience: take the default
+    DOWN.repeat(8) + "\r" + //    skills: change nothing, confirm
+    DOWN.repeat(3) + "\r" + //    beta
+    DOWN.repeat(2) + "\r" + //    extras
+    "\r"; //                      Ready
+  const { stdout } = runInteractive([], { home: h.home, stdin: keys });
+
+  const got = readdir(h.skillsDir);
+  assert.ok(got.includes("fresh-eyes"), "the default answer must not drop developer skills");
+  assert.ok(got.includes("goal-workflow"), "the default answer must not drop developer skills");
+  assert.ok(!got.includes("raise-issue"), "and must not silently apply the reduced preset");
+  assert.ok(!existsSync(h.claudeMd), "nor write a global instruction nobody ticked");
+  assert.match(stdout, /Which skills should this machine get/, "the audience question must actually have run");
+});
+
+test("the audience question names what the smaller set leaves out", (t) => {
+  const h = makeHome();
+  t.after(h.cleanup);
+
+  const { stdout } = runInteractive([], { home: h.home, stdin: "\x1b" });
+  // The consequence has to be on screen at the moment of choosing, not merely implied by
+  // "a sensible set, nothing to choose" — which advertises effort and hides the trade-off.
+  assert.match(stdout, /leaves out/i);
+  assert.match(stdout, /\/goal-workflow/, "the omitted skills must be named, not just counted");
+  assert.match(stdout, /All 8/, "the full set must state how many it installs");
+});
+
 test("the union floor ADDS the preset to a partial install without disturbing it", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
