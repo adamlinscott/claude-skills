@@ -1,0 +1,29 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # Both, deliberately. install.mjs creates directory JUNCTIONS on Windows and SYMLINKS
+    # everywhere else (linkType, install.mjs), and junctions are a stated selling point of this
+    # installer — they need no admin rights or Developer Mode. A Linux-only matrix never
+    # exercises the branch most likely to break, on the platform hardest to debug remotely.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the `engines` floor in package.json.
+          node-version: 20
+
+      # No install step: this repo has no dependencies, and the suite is node:test.
+      - run: node --test test/*.test.mjs

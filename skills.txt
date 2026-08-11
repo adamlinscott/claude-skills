@@ -2,7 +2,7 @@
 #
 # One line per checkbox:
 #
-#   <name> | <folders> | <what it does>
+#   <name> | <folders> | <what it does> | <dev>,<nontech>
 #
 #   name         what the installer shows, and what beta-features.txt refers to.
 #   folders      comma-separated folder names under ./skills that this entry installs.
@@ -12,24 +12,36 @@
 #                SKILL.md is written to help Claude decide when to use the skill; it is long and
 #                technical and makes a poor answer to "what is this?". Write a plain sentence or
 #                two here instead.
+#   defaults     on/off for each of the two setups the installer offers:
+#                  dev      "Let me choose" — is this ticked when the checklist opens?
+#                  nontech  "Set it up for me" — is this installed with no question asked?
+#                Leave the column off entirely and you get `on,off`, which is what almost
+#                everything here wants: available to a developer, not part of the guided setup.
+#                Anything unparseable resolves to OFF, never on — a typo must never quietly
+#                install something on someone's machine.
+#
+# A track default can only ever ADD. Neither setup removes a skill you already have; only a
+# checklist you actually saw can do that.
 #
 # A folder with no line here still installs, on its own, with no description. Blank lines and
 # lines starting with # are ignored. The installer reads this at run time.
 
-assumption-inventory | assumption-inventory | Before a long job, checks what the plan takes for granted — which files exist, what may be changed, what "finished" means — and asks you about anything it had to guess.
+assumption-inventory | assumption-inventory | Before a long job, checks what the plan takes for granted — which files exist, what may be changed, what "finished" means — and asks you about anything it had to guess. | on,off
 
-context-audit | context-audit | Reviews the instructions and notes Claude reads in a project, and reports what is bloated, broken, or contradicting itself. Only reports; changes nothing.
+context-audit | context-audit | Reviews the instructions and notes Claude reads in a project, and reports what is bloated, broken, or contradicting itself. Only reports; changes nothing. | on,off
 
-debrief | debrief | Reads back through your past Claude sessions to find the corrections you keep repeating, asks you why, and can write the answers up as project rules.
+debrief | debrief | Reads back through your past Claude sessions to find the corrections you keep repeating, asks you why, and can write the answers up as project rules. | off,off
 
-fresh-eyes | fresh-eyes | Gets a second Claude to read your finished work with no memory of the conversation, then compares that reading against what you actually asked for. Catches what was missed.
+fresh-eyes | fresh-eyes | Gets a second Claude to read your finished work with no memory of the conversation, then compares that reading against what you actually asked for. Catches what was missed. | on,off
 
-goal-workflow | goal-workflow | Hands Claude a settled plan and lets it build the whole thing on its own, checking its own work as it goes. Long-running, and it will use a lot of tokens.
+goal-workflow | goal-workflow | Hands Claude a settled plan and lets it build the whole thing on its own, checking its own work as it goes. Long-running, and it will use a lot of tokens. | on,off
 
-memory-audit | memory-audit | Tells you what Claude remembers about a project and whether any of it has gone stale. Only reports; changes nothing.
+memory-audit | memory-audit | Tells you what Claude remembers about a project and whether any of it has gone stale. Only reports; changes nothing. | on,on
 
-reground | reground | Stops Claude when it has wandered off the task or started inventing files and APIs, and pins it back to what is really in your code.
+raise-issue | raise-issue, report-issue | Turns "the export button is broken" into a proper issue on your team's tracker. Asks a few plain questions, works out which part of the code you mean, checks nobody has reported it already, and shows you the finished issue before it files anything. | off,on
 
-seatbelt | seatbelt, seatbelts | Decides up front what Claude may do in a project without asking, and what it must never do. Set it once, then let Claude run without watching every step.
+reground | reground | Stops Claude when it has wandered off the task or started inventing files and APIs, and pins it back to what is really in your code. | on,on
 
-ttp | ttp, to-the-point | Makes Claude's replies short and direct — the answer first, the detail only if you ask for it. Big decisions still come back to you.
+seatbelt | seatbelt, seatbelts | Decides up front what Claude may do in a project without asking, and what it must never do. Set it once, then let Claude run without watching every step. | off,off
+
+ttp | ttp, to-the-point | Makes Claude's replies short and direct — the answer first, the detail only if you ask for it. Big decisions still come back to you. | on,on

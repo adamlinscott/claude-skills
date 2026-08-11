@@ -5,10 +5,19 @@ until someone runs `/plugin marketplace add` against this repo, so the files are
 nothing while they sit there.
 
 Why they exist: the current install path is `git clone` → `cd` → `node install.mjs`. That is
-fine for a developer and impassable for the audience `/seatbelt --vibe` was written for — a
-person who does not know what a pull request is needs a terminal, git, Node, and an
-understanding of `cd` before they ever see a skill. The plugin route is two lines pasted into a
-Claude Code session they are already sitting in.
+fine for a developer and impassable for the non-technical audience `/seatbelt --vibe` and
+`/raise-issue` are written for — a person who does not know what a pull request is needs a
+terminal, git, Node, a paid Claude seat, two clones, and an understanding of `cd` before they
+ever see a skill. The plugin route is two lines pasted into a Claude Code session they are
+already sitting in.
+
+The installer now has a guided route (`node install.mjs --for=someone-else`, see
+[SETUP-FOR-A-COLLEAGUE.md](SETUP-FOR-A-COLLEAGUE.md)), and that changes the framing here but not
+the conclusion. That route is a **handover tool**: it is run by a developer, sitting at the
+colleague's machine, and it takes 45 to 90 minutes. It makes the setup survivable, not
+self-serve. Publishing this marketplace is still the only thing that removes the terminal, git,
+both clones and the installer from the colleague's path, and it deletes roughly half the steps
+in that checklist. It remains the highest-value unshipped item in this repo.
 
 ## What the two files do
 

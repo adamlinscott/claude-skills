@@ -1,20 +1,37 @@
 #!/usr/bin/env node
 // Installer for this skill collection.
 //
-// It runs in two halves. FIRST it asks — arrow-key checklists for the skills, the beta features,
-// any other optional features and other people's collections, then a summary and a final
-// Install/Cancel. THEN it acts, running other people's installers last.
-// Nothing on disk is touched until that confirmation, so cancelling leaves the machine as it was.
+// It runs in two halves. FIRST it asks, THEN it acts, running other people's installers last.
+// Nothing on disk is touched until the final confirmation, so cancelling leaves the machine as it
+// was. That promise holds on every path through this file.
+//
+// The first question is who the setup is for, and it decides the shape of the rest:
+//   • "Let me choose" (dev)     — arrow-key checklists for the skills, the beta features, any
+//                                 other optional features and other people's collections.
+//   • "Set it up for me" (nontech) — NO checklists at all. The selections come from the per-track
+//                                 defaults on disk, and the Ready summary is the only place they
+//                                 are shown, so it names them individually rather than counting.
+// Either way it ends at the same Install/Cancel gate.
+//
+// A track default may only ever ADD (see unionFloor). Nothing already installed is removed unless
+// the user saw it on a checklist and left its box empty, or asked for a removal outright.
 //
 // The menus live in ./lib/wizard.mjs. Without a terminal (CI, a pipe) they are skipped entirely
-// and every question takes its safe default, so an unattended run never enables anything.
+// and every question takes its safe default, so an unattended run never enables anything — in
+// particular it never enables a beta feature without --beta, whatever the track says. The one
+// exception is CLAUDE_SKILLS_FORCE_PROMPT (see lib/wizard.mjs), which exists so the test suite
+// can drive the menus over a pipe; it is read nowhere else and should not be set by a human.
 //
 // Everything it offers is read from disk rather than hardcoded here, so this file does not need
 // editing as the collection changes:
-//   • ./skills.txt        — one checkbox per skill, its folders, and a description for a person
+//   • ./skills.txt        — one checkbox per skill, its folders, a description for a person, and
+//                           whether each setup defaults it on. Override the path for tests with
+//                           CLAUDE_SKILLS_LIST_FILE.
 //   • ./beta-features.txt — which skills and instructions are still in development
-//   • ./instructions/*.md — the optional blocks offered for the global CLAUDE.md
-//   • ./extras/*.md       — other people's collections, and the command that installs each
+//   • ./instructions/*.md — the optional blocks offered for the global CLAUDE.md, each carrying
+//                           its own dev:/nontech: defaults
+//   • ./extras/*.md       — other people's collections, and the command that installs each. Never
+//                           a default on any track; always shown with its literal command first.
 //
 // Run `node install.mjs --help` for the options.
 //
@@ -33,8 +50,21 @@ const repoSkillsDir = path.join(repoRoot, "skills");
 const repoInstructionsDir = path.join(repoRoot, "instructions");
 const repoToolsDir = path.join(repoRoot, "tools");
 const betaListFile = path.join(repoRoot, "beta-features.txt");
-const skillsListFile = path.join(repoRoot, "skills.txt");
+// Overridable so the test suite can point at a fixture without a real skills.txt on disk.
+const skillsListFile = process.env.CLAUDE_SKILLS_LIST_FILE || path.join(repoRoot, "skills.txt");
 const repoExtrasDir = path.join(repoRoot, "extras");
+
+// Problems found while READING the config files: a line naming folders that do not exist, a
+// defaults value that is not on/off, an --extras name nobody recognises.
+//
+// Collected rather than printed at the point of discovery, because discovery happens before the
+// first clearScreen() and a console.log there is wiped off the terminal a moment later. They are
+// rendered into the Ready summary instead, which is the last thing on screen before anything is
+// applied. Never fatal: a typo degrades to a safe default, but it must not do so in silence.
+const configWarnings = [];
+const warnConfig = (message) => {
+  if (!configWarnings.includes(message)) configWarnings.push(message);
+};
 
 // How each kind of beta feature is described in the installer's list.
 const KIND_LABELS = { skill: "skill", instruction: "global instruction", agent: "agent" };
@@ -54,9 +84,19 @@ const BETA_TOOLS = {
 
 // ── Options ─────────────────────────────────────────────────────────────────────────────────────
 
+// Who the setup is for. Both non-developer answers apply the same preset; they differ only in
+// what is printed at the end, because "someone else" needs the handover checklist and the person
+// setting up their own machine does not.
+const TRACKS = {
+  developer: "dev",
+  nontechnical: "nontech",
+  "someone-else": "nontech",
+};
+
 const KNOWN_FLAGS = [
   "--help",
   "-h",
+  "--for",
   "--uninstall",
   "--beta",
   "--no-beta",
@@ -82,8 +122,15 @@ const addInstructions = flagValue("--add-instructions");
 const removeInstructions = flagValue("--remove-instructions");
 const extrasArg = flagValue("--extras");
 const acceptDefaults = has("--accept-defaults") || has("--yes") || has("-y");
+const forArg = flagValue("--for");
 
 const unknownFlags = argv.filter((a) => a.startsWith("-") && !KNOWN_FLAGS.includes(a.split("=")[0]));
+// A typo here must not silently pick a track: `--for=nontech` looks close enough to
+// `--for=nontechnical` that falling through to the developer default would be the worst
+// possible outcome. Treated exactly like an unknown flag.
+// `--for` with no `=value` reaches flagValue() as undefined, which would sail past this check and
+// fall through to the interactive question — the exact silent fallthrough the check exists to stop.
+const badForValue = (has("--for") && forArg === undefined) || (forArg !== undefined && !Object.hasOwn(TRACKS, forArg));
 
 // ── Run ─────────────────────────────────────────────────────────────────────────────────────────
 // No process.exit() anywhere: console.log to a pipe is asynchronous, and exiting would discard
@@ -92,6 +139,11 @@ const unknownFlags = argv.filter((a) => a.startsWith("-") && !KNOWN_FLAGS.includ
 if (unknownFlags.length) {
   printBanner();
   console.log(`  Sorry — I do not recognise: ${unknownFlags.join(", ")}\n`);
+  printHelp();
+} else if (badForValue) {
+  printBanner();
+  console.log(`  Sorry — "${forArg ?? ""}" is not a valid --for value.`);
+  console.log(`  Pick one of: ${Object.keys(TRACKS).join(", ")}\n`);
   printHelp();
 } else if (showHelp) {
   printBanner();
@@ -103,9 +155,9 @@ if (unknownFlags.length) {
   } else {
     applySkillLinks(plan);
     applyBetaTools(plan);
-    if (plan.instructions) applyInstructionBlocks(plan.instructions);
-    await runExtras(plan.extras);
-    printFarewell();
+    if (plan.instructions) applyInstructionBlocks(plan.instructions, plan.mayRemoveInstructions);
+    await runExtras(plan.extras, plan.guided);
+    printFarewell(plan);
   }
 }
 
@@ -140,6 +192,15 @@ function printHelp() {
   console.log("");
   console.log("  --help, -h                    Show this and stop. Changes nothing.");
   console.log("");
+  console.log("  --for=<who>                   Who the setup is for, which decides what gets");
+  console.log("                                installed without asking:");
+  console.log("                                  developer      show every skill and let me tick");
+  console.log("                                  nontechnical   a sensible set, nothing to choose");
+  console.log("                                  someone-else   the same set, plus what to do next");
+  console.log("                                                 on their machine");
+  console.log("                                A choice here can only ADD. Neither setup removes a");
+  console.log("                                skill you already have.");
+  console.log("");
   console.log("  --beta                        Include the features that are still in development.");
   console.log("  --no-beta                     Leave them out.");
   console.log(`                                Which ones are beta is listed in beta-features.txt.`);
@@ -155,8 +216,10 @@ function printHelp() {
   console.log(`                                'none'. Available: ${extraNames}`);
   console.log("");
   console.log("  --accept-defaults, -y         Do not ask anything. Takes the safe answer to every");
-  console.log("                                question: link the stable skills, no beta, and leave");
-  console.log("                                your instructions exactly as they are.");
+  console.log("                                question: link the skills this setup defaults to, no");
+  console.log("                                beta, and add nothing to your instructions that is");
+  console.log("                                not already there. Which skills those are depends on");
+  console.log("                                --for; without it you get the developer defaults.");
   console.log("");
   console.log("  --uninstall                   Remove what this installer created.");
   console.log("");
@@ -168,8 +231,54 @@ function printHelp() {
   console.log("");
 }
 
-function printFarewell() {
-  console.log(uninstall ? "\n  Done.\n" : "\n  Done. Start a new Claude session to pick them up.\n");
+function printFarewell(plan = {}) {
+  if (uninstall) {
+    console.log("\n  Done.\n");
+    return;
+  }
+  console.log("\n  Done. Start a new Claude session to pick them up.");
+
+  if (!plan.guided) {
+    console.log("");
+    return;
+  }
+
+  // The guided track chose not to ask about these. Saying what was NOT done is the difference
+  // between a setup that is finished and one that quietly stops short.
+  console.log("");
+  if (plan.wantsHandover) {
+    console.log(`  ${style.bold("Setting this up for someone else?")}`);
+    console.log("  There are a few things left that have to happen on THEIR machine.");
+    console.log(`  The checklist is in ${style.cyan("SETUP-FOR-A-COLLEAGUE.md")}.`);
+    console.log("");
+  }
+  console.log(`  To report a problem, describe it to Claude, or type ${style.bold("/raise-issue")}.`);
+  console.log("");
+  // Only what this run actually left out. An extra it just installed is not "left alone", and a
+  // beta skill the union floor kept is not either — saying otherwise is how a closing message
+  // starts lying to the one reader who cannot check it.
+  const installedNames = new Set((plan.extras || []).map((e) => e.name));
+  const leftOut = loadExtras().filter((e) => e.nontechFallback && !installedNames.has(e.name));
+  const seatbeltLeftOut = (plan.skillGroups || []).some(
+    (g) => g.name === "seatbelt" && !plan.selectedGroups?.has(g.name),
+  );
+  if (!leftOut.length && !seatbeltLeftOut) {
+    console.log("");
+    return;
+  }
+
+  console.log(`  ${style.dim("What this setup deliberately left alone:")}`);
+  if (seatbeltLeftOut) {
+    console.log(`  ${style.dim("• /seatbelt decides what Claude may do in a repo without asking. It is still")}`);
+    console.log(`  ${style.dim("  in development, and it is worth asking a teammate to set it up for you.")}`);
+  }
+  for (const extra of leftOut) {
+    const summary = (extra.summary || "another collection").replace(/\.\s*$/, "");
+    console.log(`  ${style.dim(`• ${extra.title} — ${summary}.`)}`);
+    console.log(`  ${style.dim(`  Not installed. ${extra.nontechFallback}`)}`);
+    console.log(`  ${style.dim(`  Someone can add it with: ${extra.command}`)}`);
+  }
+  console.log("");
 }
 
 // ── Questionnaire ───────────────────────────────────────────────────────────────────────────────
@@ -211,37 +320,130 @@ async function buildPlan() {
     .map((f) => f.name);
   const linkedStable = stableGroups.filter(isGroupLinked).map((g) => g.name);
 
-  // A step is skipped when a flag already answers it, or has nothing to show, so the count is honest.
-  const askSkills = interactive && stableSkills.length > 0;
-  const askBeta = interactive && betaFeatures.length > 0 && !forceBeta && !forceNoBeta;
-  const askOptional =
-    interactive &&
-    optionalBlocks.length > 0 &&
-    !skipInstructions &&
-    !uninstall &&
-    addInstructions === undefined &&
-    removeInstructions === undefined;
-  const askExtras = interactive && extras.length > 0 && !uninstall && extrasArg === undefined;
-  const totalSteps =
-    (askSkills ? 1 : 0) + (askBeta ? 1 : 0) + (askOptional ? 1 : 0) + (askExtras ? 1 : 0) + (interactive ? 1 : 0);
-  let stepNumber = 0;
-  const stepLabel = () => (totalSteps > 1 ? `  (${++stepNumber} of ${totalSteps})` : "");
-
   const screen = () => {
     clearScreen();
     printBanner();
     printWelcome(interactive);
   };
 
+  // — Who is this for? —
+  // Asked before anything else, and NOT under --uninstall: there every checkbox means the
+  // opposite, so a track preset has no coherent meaning and the question would be a pointless
+  // one asked of a nervous person mid-removal.
+  const askAudience = interactive && !uninstall && forArg === undefined;
+  let audience = forArg;
+  if (askAudience) {
+    screen();
+    // Framed by CONSEQUENCE, not identity — the rule /seatbelt already follows. "I don't write
+    // code" is a public self-demotion typed into a terminal, and everyone dodges it, landing the
+    // people who most need the simple setup in the nine-item checklist instead.
+    const picked = await chooseAction({
+      heading: "What kind of setup do you want?",
+      body: [
+        style.dim("Nothing is installed until you confirm on the next screen."),
+      ],
+      items: [
+        { value: "nontechnical", label: "Set it up for me", hint: "a sensible set, one confirmation, nothing to choose" },
+        { value: "developer", label: "Let me choose", hint: "show every skill and let me tick" },
+        { value: "someone-else", label: "I'm setting this up for someone else", hint: "same as the first, plus what to do on their machine" },
+      ],
+      // Open on "Let me choose" for anyone who already has skills linked. They are a returning
+      // developer, and hitting enter out of habit should not quietly add a preset to a machine
+      // they have already curated. A fresh machine opens on the guided answer.
+      initial: linkedStable.length ? "developer" : "nontechnical",
+    });
+    // Escape, q, Ctrl-C and end-of-input all arrive as null. Every one of them means cancel;
+    // falling through to a track here would let a stray keypress silently pick one.
+    if (!picked) {
+      closeInput();
+      return null;
+    }
+    audience = picked;
+  }
+  const track = TRACKS[audience ?? "developer"] ?? "dev";
+  // A track NEVER applies to a removal. Skipping the audience question under --uninstall is not
+  // enough on its own: an explicit --for=nontechnical would still leave guided true, suppress the
+  // removal checklist, and unlink everything on one keypress with nothing itemised on screen.
+  // Under --uninstall every checkbox means the opposite, so a preset has no coherent meaning —
+  // the only safe reading is "ignore the track entirely and show the list".
+  const guided = track === "nontech" && !uninstall;
+  const wantsHandover = audience === "someone-else" && !uninstall;
+
+  // A step is skipped when a flag already answers it, when the guided track decided it, or when
+  // it has nothing to show. Computed AFTER the audience answer so the count stays honest —
+  // it depends on which track we are on.
+  const askSkills = interactive && !guided && stableSkills.length > 0;
+  const askBeta = interactive && !guided && betaFeatures.length > 0 && !forceBeta && !forceNoBeta;
+  const askOptional =
+    interactive &&
+    !guided &&
+    optionalBlocks.length > 0 &&
+    !skipInstructions &&
+    !uninstall &&
+    addInstructions === undefined &&
+    removeInstructions === undefined;
+  // Not on the guided track. "Nothing to choose" has to mean it, and a checklist whose Enter key
+  // TOGGLES the hovered row is the last thing to put in front of someone who was promised no
+  // choices — one stray keypress ticks a third party's installer. They are named in the closing
+  // message instead, as an optional next step.
+  const askExtras = interactive && !guided && extras.length > 0 && !uninstall && extrasArg === undefined;
+  // The audience question is NOT counted. It renders before this number can be known — it is the
+  // thing that decides it — so it cannot label itself, and counting it would produce a screen
+  // with no counter followed by "(2 of 2)". It is the fork, not a step.
+  const totalSteps =
+    (askSkills ? 1 : 0) +
+    (askBeta ? 1 : 0) +
+    (askOptional ? 1 : 0) +
+    (askExtras ? 1 : 0) +
+    (interactive ? 1 : 0);
+  let stepNumber = 0;
+  const stepLabel = () => (totalSteps > 1 ? `  (${++stepNumber} of ${totalSteps})` : "");
+
+  /**
+   * A track preset may only ever ADD.
+   *
+   * This is the rule that stops the guided track being a destructive operation wearing a
+   * friendly hat. applySkillLinks removes anything unticked when prune is on, and prune used to
+   * mean "interactive" — safe only because a checklist had shown the current state. The guided
+   * track is interactive and shows no checklist, so without this a full install plus "set it up
+   * for me" would unlink everything outside the preset, with no undo.
+   */
+  const unionFloor = (already, defaults) => new Set([...already, ...defaults]);
+
+  /**
+   * Whether an unticked item may be REMOVED, tracked per kind rather than as one flag.
+   *
+   * It used to be a single `prune: interactive`. The honest predicate is "the user saw this item
+   * on a checklist and left its box empty" — which is per question, not per run. On the guided
+   * track no checklist is shown, so nothing may be pruned; on the developer track the checklists
+   * that actually ran may prune, and the ones a flag answered may not.
+   */
+  const prune = { skills: askSkills, beta: askBeta, instructions: askOptional };
+
+  // What this track would switch on, before anything already installed is folded in.
+  const trackSkills = stableGroups.filter((g) => g.defaults[track]).map((g) => g.name);
+  const trackBlocks = blocks.filter((b) => b.defaults[track]).map((b) => b.name);
+  // Beta stays off on a flag-driven run whatever the track says — an unattended run never
+  // enables something still in development. Interactively it is named and labelled in the
+  // summary before it goes anywhere, so a guided preset may include it.
+  const trackBeta = interactive ? betaFeatures.filter((f) => nameHasTrackDefault(f, track, skillGroups, blocks)).map((f) => f.name) : [];
+
   // Default: keep whatever is already in place. Only an explicit tick adds something new, and
   // only the interactive checklist — where the current state was on screen — takes one away.
   let selectedBeta = new Set(forceBeta ? betaFeatures.map((f) => f.name) : activeBeta);
-  // Skills: everything, unless some are already linked — then the checklist opens on what you
+  // Skills: on a first run take the track's defaults; once something is linked, open on what you
   // actually have, so a choice made last time is not silently undone by re-running.
-  let selectedSkills = new Set(uninstall || linkedStable.length ? linkedStable : stableSkills);
+  let selectedSkills = new Set(uninstall || linkedStable.length ? linkedStable : trackSkills);
   let wantInstructions; // Set of block names, or null to leave the CLAUDE.md step alone entirely
-  // Never selected on your behalf: these run someone else's installer.
+  // Never selected on your behalf: these run someone else's installer. No track defaults one.
   let selectedExtras = new Set(resolveExtrasFlag(extras));
+
+  // The guided track answers every checklist from the preset instead of asking. Union floor
+  // throughout: it can only add to what is already there.
+  if (guided && !uninstall) {
+    selectedSkills = unionFloor(linkedStable, trackSkills);
+    selectedBeta = unionFloor(activeBeta, trackBeta);
+  }
 
   if (interactive) {
     try {
@@ -297,6 +499,9 @@ async function buildPlan() {
         });
         if (!picked) return null;
         wantInstructions = new Set([...picked, ...fromBeta]);
+      } else if (guided) {
+        // Union floor again: whatever is installed, plus whatever this track switches on.
+        wantInstructions = unionFloor([...installedBlocks], [...trackBlocks, ...fromBeta]);
       } else {
         // No optional features to ask about: keep the non-beta blocks as they are.
         wantInstructions = new Set([...optionalBlocks.filter((b) => installedBlocks.has(b.name)).map((b) => b.name), ...fromBeta]);
@@ -326,7 +531,7 @@ Runs: ${e.command}`,
       screen();
       const go = await chooseAction({
         heading: `Ready${stepLabel()}`,
-        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune: true, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras }),
+        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks, guided }),
         items: [
           { value: "go", label: uninstall ? "Remove them" : "Install", hint: "apply the changes above" },
           { value: "cancel", label: "Cancel", hint: "change nothing" },
@@ -338,18 +543,25 @@ Runs: ${e.command}`,
       closeInput();
     }
   } else {
-    // Not asking: nothing new is enabled, and nothing already in place is taken away. Stable
-    // skills are the exception — installing all of them IS the default answer.
-    selectedSkills = new Set(stableSkills);
+    // Not asking: nothing new is enabled, and nothing already in place is taken away. The
+    // track's defaults ARE the default answer, so -y and the interactive first run agree on what
+    // "default" means. Union floor, so an unattended run can still only add.
+    selectedSkills = unionFloor(linkedStable, trackSkills);
     if (forceNoBeta) selectedBeta = new Set(activeBeta);
     const fromBeta = [...selectedBeta].filter((name) => betaBlockNames.has(name));
     if (skipInstructions || blocks.length === 0) wantInstructions = null;
     else if (uninstall) wantInstructions = new Set();
     else if (addInstructions !== undefined || removeInstructions !== undefined) {
       wantInstructions = new Set([...resolveInstructionFlags(blocks, installedBlocks), ...fromBeta]);
+    } else if (guided) {
+      // The guided track applies its preset here too, so `--for=X -y` and the interactive run of
+      // the same track agree. They differ in exactly one way, and only for BETA blocks: an
+      // unattended run never switches on something still in development without --beta. That is
+      // the existing invariant for every other beta feature, and it is not worth breaking here.
+      wantInstructions = unionFloor([...installedBlocks], [...trackBlocks.filter((n) => !betaBlockNames.has(n)), ...fromBeta]);
     } else wantInstructions = new Set([...installedBlocks, ...fromBeta]);
 
-    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune: false, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras })) {
+    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks, guided })) {
       console.log(`  ${line}`);
     }
     console.log("");
@@ -375,7 +587,13 @@ Runs: ${e.command}`,
     selectedBeta,
     newlyEnabledBeta,
     instructions: wantInstructions,
-    prune: interactive,
+    // A block may be taken away only when the user saw it — on the "Other features" checklist,
+    // or because they named it themselves with --remove-instructions, or because this is an
+    // uninstall. The guided track shows no such checklist, so it can only ever add.
+    mayRemoveInstructions: prune.instructions || uninstall || removeInstructions !== undefined,
+    prune,
+    guided,
+    wantsHandover,
     extras: extras.filter((e) => selectedExtras.has(e.name)),
   };
 }
@@ -387,13 +605,18 @@ Runs: ${e.command}`,
  * with two rows can never report on only one of them. The optional lines cover only the non-beta
  * blocks, which keeps each feature in exactly one place.
  */
-function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras }) {
+function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks = [], guided = false }) {
   const verb = uninstall ? "remove" : "install";
   const lines = [];
   const names = (items) => items.map((i) => i.label).join(", ");
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   const chosenSkills = stableSkills.filter((n) => selectedSkills.has(n));
+  // On the guided track this summary is the ONLY place the skills are ever shown — there was no
+  // checklist. "install 4 skills" is not informed consent for the one reader who has no other way
+  // to find out what they are, so name them. The developer track just saw a list and does not
+  // need it repeated.
+  const nameThem = (names) => (guided && names.length ? `: ${names.join(", ")}` : "");
   if (uninstall) {
     // Unticked here means "leave it installed" — the opposite of what it means on the way in.
     const left = stableSkills.filter((n) => !selectedSkills.has(n) && linkedStable.includes(n));
@@ -402,11 +625,16 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
   } else {
     const newSkills = chosenSkills.filter((n) => !linkedStable.includes(n));
     const keptSkills = chosenSkills.filter((n) => linkedStable.includes(n));
-    const droppedSkills = stableSkills.filter((n) => !selectedSkills.has(n) && linkedStable.includes(n) && prune);
-    if (newSkills.length) lines.push(`install ${plural(newSkills.length, "skill")}`);
-    if (keptSkills.length) lines.push(`keep ${plural(keptSkills.length, "skill")}`);
+    const droppedSkills = stableSkills.filter((n) => !selectedSkills.has(n) && linkedStable.includes(n) && prune.skills);
+    if (newSkills.length) lines.push(`install ${plural(newSkills.length, "skill")}${nameThem(newSkills)}`);
+    if (keptSkills.length) lines.push(`keep ${plural(keptSkills.length, "skill")}${nameThem(keptSkills)}`);
     if (droppedSkills.length) lines.push(`remove ${plural(droppedSkills.length, "skill")}: ${droppedSkills.join(", ")}`);
     if (!chosenSkills.length && !droppedSkills.length) lines.push("install no skills");
+  }
+
+  // "beta" is jargon, and the guided track's reader has no checklist hint to read it against.
+  if (guided && betaItems.some((i) => selectedBeta.has(i.name))) {
+    lines.push(`beta means still being worked on — it may change or be rough at the edges`);
   }
 
   if (betaItems.length) {
@@ -418,8 +646,8 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
     } else {
       const added = betaItems.filter((i) => selectedBeta.has(i.name) && !activeBeta.includes(i.name));
       const kept = betaItems.filter((i) => selectedBeta.has(i.name) && activeBeta.includes(i.name));
-      const dropped = betaItems.filter((i) => !selectedBeta.has(i.name) && activeBeta.includes(i.name) && prune);
-      const skipped = betaItems.filter((i) => !selectedBeta.has(i.name) && !(activeBeta.includes(i.name) && prune));
+      const dropped = betaItems.filter((i) => !selectedBeta.has(i.name) && activeBeta.includes(i.name) && prune.beta);
+      const skipped = betaItems.filter((i) => !selectedBeta.has(i.name) && !(activeBeta.includes(i.name) && prune.beta));
       if (added.length) lines.push(`install beta: ${names(added)}`);
       if (kept.length) lines.push(`keep beta: ${names(kept)}`);
       if (dropped.length) lines.push(`remove beta: ${names(dropped)}`);
@@ -436,8 +664,29 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
     if (drop.length) lines.push(`disable: ${drop.join(", ")}`);
   }
 
+  // A managed block goes into the GLOBAL CLAUDE.md, which "enable: Clear responses" does not
+  // convey at all. On the guided track especially, the person confirming has no other way to
+  // learn that this changes Claude in every project on the machine.
+  if (wantInstructions !== null && wantInstructions.size) {
+    const enabling = blocks.filter((b) => wantInstructions.has(b.name) && !installedBlocks.has(b.name));
+    if (enabling.length) {
+      lines.push(`  ${enabling.map((b) => b.title).join(", ")} changes how Claude writes in EVERY project`);
+      lines.push(`  on this machine. Undo with: node install.mjs --uninstall`);
+    }
+  }
+
+  // Each extra runs a THIRD PARTY's installer. The title alone is not informed consent, and the
+  // guided track never sees the details panel where the command used to live, so the literal
+  // command goes in the summary itself.
   const chosenExtras = (extras || []).filter((e) => selectedExtras.has(e.name));
-  if (chosenExtras.length) lines.push(`then run: ${chosenExtras.map((e) => e.title).join(", ")}`);
+  for (const e of chosenExtras) {
+    lines.push(`then run ${e.title}, which is not mine and runs:`);
+    lines.push(`  ${e.command}`);
+  }
+
+  // Last, so a config typo is the final thing read before the Install/Cancel choice. Printing
+  // these where they are discovered does not work: that happens before the first clearScreen().
+  for (const w of configWarnings) lines.push(style.yellow(`note: ${w}`));
   return lines;
 }
 
@@ -450,7 +699,7 @@ function resolveExtrasFlag(extras) {
     .map((s) => s.trim())
     .filter((s) => s && s !== "none");
   if (wanted.includes("all")) return known;
-  for (const w of wanted) if (!known.includes(w)) console.log(`  (--extras: nothing called "${w}" — ignored)`);
+  for (const w of wanted) if (!known.includes(w)) warnConfig(`--extras: nothing called "${w}" — ignored`);
   return wanted.filter((w) => known.includes(w));
 }
 
@@ -495,20 +744,82 @@ function loadSkillGroups() {
     for (const line of fs.readFileSync(skillsListFile, "utf8").split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
-      const [name, folderList = "", description = ""] = trimmed.split("|").map((part) => part.trim());
+      const [name, folderList = "", description = "", defaults = ""] = trimmed.split("|").map((part) => part.trim());
       const members = (folderList || name)
         .split(",")
         .map((f) => f.trim())
         .filter((f) => folders.includes(f));
-      if (!name || members.length === 0) continue; // a stale line cannot break the run
+      if (!name || members.length === 0) {
+        // A stale line cannot break the run — but it must not vanish without a word either, or a
+        // renamed folder silently drops a skill out of every setup and nobody notices for months.
+        if (name) warnConfig(`skills.txt: "${name}" names no folder that exists under ./skills — ignored`);
+        continue;
+      }
       members.forEach((f) => claimed.add(f));
-      groups.push({ name, folders: members, description });
+      groups.push({
+        name,
+        folders: members,
+        description,
+        defaults: parseDefaults(defaults, { dev: true, nontech: false }, `skills.txt: ${name}`),
+      });
     }
   }
   for (const folder of folders) {
-    if (!claimed.has(folder)) groups.push({ name: folder, folders: [folder], description: "" });
+    // A folder with no line still installs on the developer track, exactly as before.
+    if (!claimed.has(folder)) groups.push({ name: folder, folders: [folder], description: "", defaults: { dev: true, nontech: false } });
   }
   return groups.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The fourth column of a skills.txt line: `<dev>,<nontech>` as `on`/`off`.
+ *
+ * An EMPTY field means "not specified" and takes the fallback, so `| ,on` sets only the nontech
+ * axis and leaves dev at its default. A field that is present but is not `on` resolves to OFF —
+ * a typo must not quietly enable something on someone's machine, and the failure that matters is
+ * the silent yes, not the silent no.
+ */
+function parseDefaults(raw, fallback, where = "") {
+  if (!raw) return { ...fallback };
+  const parts = raw.split(",").map((s) => s.trim().toLowerCase());
+  return {
+    dev: readOnOff(parts[0], fallback.dev, where, "dev"),
+    nontech: readOnOff(parts[1], fallback.nontech, where, "nontech"),
+  };
+}
+
+/**
+ * One on/off value. Empty means "not specified" and takes the fallback; anything else that is not
+ * `on` resolves to OFF and says so, rather than looking like a deliberate choice.
+ */
+function readOnOff(value, whenMissing, where, axis) {
+  if (value === undefined || String(value).trim() === "") return whenMissing;
+  const normalised = String(value).trim().toLowerCase();
+  if (normalised === "on") return true;
+  if (normalised !== "off" && where) {
+    warnConfig(`${where}: "${value}" is not on or off — treating ${axis} as off`);
+  }
+  return false;
+}
+
+/**
+ * Does this beta feature carry a track default? Beta covers both skills and instructions, so the
+ * answer lives in a different list depending on its kind.
+ */
+function nameHasTrackDefault(feature, track, skillGroups, blocks) {
+  const source =
+    feature.kind === "skill"
+      ? skillGroups.find((g) => g.name === feature.name)
+      : blocks.find((b) => b.name === feature.name);
+  return Boolean(source?.defaults?.[track]);
+}
+
+/** `dev:` / `nontech:` frontmatter, for instructions and extras. Same fail-safe-to-off rule. */
+function frontmatterDefaults(meta, fallback, where = "") {
+  return {
+    dev: readOnOff(meta.dev, fallback.dev, where, "dev"),
+    nontech: readOnOff(meta.nontech, fallback.nontech, where, "nontech"),
+  };
 }
 
 
@@ -578,6 +889,11 @@ function loadExtras() {
         useBash: (meta.shell || "") === "bash",
         command: meta.command || "",
         next: meta.next || "",
+        // What to say to a non-technical person when this one does not install. States the
+        // CONSEQUENCE, not just the command — a bare "run this yourself" is a dead end for them.
+        // Doubles as the signal that an extra is relevant to that audience at all: one without
+        // this key is developer tooling and is never named in the guided closing message.
+        nontechFallback: meta.nontech_fallback || "",
       };
     })
     .filter((e) => e.command)
@@ -630,7 +946,23 @@ function printManualFallback(extra, missing = []) {
   if (extra.url) console.log(`\n    instructions:  ${style.cyan(extra.url)}`);
 }
 
-async function runExtras(extras) {
+/**
+ * The same failure, said to someone who cannot act on "put it on your PATH".
+ *
+ * A developer reads printManualFallback and knows what to do. For the guided track the useful
+ * information is the CONSEQUENCE — what still works, what is now worse — and who to ask. The
+ * wording comes from the extra's own frontmatter so this stays data rather than code.
+ */
+function printNontechFallback(extra) {
+  const consequence = extra.nontechFallback || "Everything else is ready. This part is optional.";
+  console.log("");
+  console.log(`    ${consequence}`);
+  console.log(`    ${style.dim("To add it, someone can run:")}`);
+  console.log(`      ${extra.command}`);
+  if (extra.url) console.log(`    ${style.dim("More:")}  ${style.cyan(extra.url)}`);
+}
+
+async function runExtras(extras, guided = false) {
   if (!extras || extras.length === 0) return;
   const followUps = [];
   const unfinished = [];
@@ -640,7 +972,8 @@ async function runExtras(extras) {
     const missing = missingRequirements(extra);
     if (missing.length) {
       console.log(`  ${style.yellow("skipped  ")} ${missing.map((m) => m.name).join(" and ")} not found on your PATH.`);
-      printManualFallback(extra, missing);
+      if (guided) printNontechFallback(extra);
+      else printManualFallback(extra, missing);
       unfinished.push(extra.title);
       continue;
     }
@@ -653,7 +986,8 @@ async function runExtras(extras) {
     if (res.error || res.status !== 0) {
       console.log(`  ${style.yellow("failed   ")} ${res.error ? res.error.message : `the installer exited with code ${res.status}`}.`);
       console.log(`  ${style.dim("Nothing else was changed.")}`);
-      printManualFallback(extra);
+      if (guided) printNontechFallback(extra);
+      else printManualFallback(extra);
       unfinished.push(extra.title);
       continue;
     }
@@ -684,9 +1018,20 @@ function applySkillLinks(plan) {
     // empty box there means "take it away"; a flag-driven run never removes silently and just
     // leaves it be.
     if (!wanted && !uninstall) {
-      if (plan.prune && isGroupLinked(group)) {
-        for (const folder of group.folders) fs.rmSync(path.join(globalSkillsDir, folder), { recursive: true, force: true });
-        report(group, "removed", "(unticked)");
+      // Per-kind: a beta skill may only be pruned if the BETA checklist ran, a stable one only
+      // if the skills checklist ran. On the guided track neither did, so neither can be removed.
+      const mayPrune = isBeta ? plan.prune.beta : plan.prune.skills;
+      if (mayPrune && isGroupLinked(group)) {
+        // unlinkFolder, NOT a bare rmSync over group.folders. isGroupLinked is `.some()`, so one
+        // of our links makes the whole group read as present — but the other folders in it may be
+        // a real directory somebody else put there. A blind recursive force-delete would take
+        // that with it, under a group name that never mentions the folder it just destroyed:
+        // unticking `ttp` would delete a foreign `to-the-point/` and report only "removed ttp".
+        // unlinkFolder already refuses anything that is not our own link; the prune path was the
+        // one place bypassing that guard.
+        const outcomes = group.folders.map(unlinkFolder);
+        const kept = outcomes.filter((o) => o === "foreign").length;
+        report(group, "removed", kept ? `(unticked; left ${kept} not installed by this repo)` : "(unticked)");
       } else {
         report(group, "skipped", isBeta ? "(beta)" : "");
       }
@@ -918,7 +1263,16 @@ function loadInstructionBlocks() {
     .map((file) => {
       const { meta, body } = parseFrontmatter(fs.readFileSync(path.join(repoInstructionsDir, file), "utf8"));
       const fallback = path.basename(file, ".md");
-      return { file, name: meta.name || fallback, title: meta.title || fallback, summary: meta.summary || "", body };
+      return {
+        file,
+        name: meta.name || fallback,
+        title: meta.title || fallback,
+        summary: meta.summary || "",
+        // An instruction block writes to the GLOBAL CLAUDE.md, so it is off for both tracks
+        // unless it says otherwise. `default:` was the old spelling and was never read.
+        defaults: frontmatterDefaults(meta, { dev: false, nontech: false }, `instructions/${file}`),
+        body,
+      };
     })
     .filter((b) => b.body.length > 0);
 }
@@ -965,12 +1319,19 @@ function tidyEnds(content, eol) {
   return trimmed ? trimmed + eol : "";
 }
 
-function applyInstructionBlocks(desired) {
+/**
+ * @param desired    block names that should be present afterwards
+ * @param mayRemove  whether a block that is installed but not desired may be taken away. False
+ *                   when nothing on screen showed the user it was there — the same predicate the
+ *                   skills path uses, rather than removing on a set difference the user never saw.
+ */
+function applyInstructionBlocks(desired, mayRemove = true) {
   const blocks = loadInstructionBlocks();
   if (blocks.length === 0) return;
 
   const existed = fs.existsSync(globalClaudeMd);
   const content = existed ? fs.readFileSync(globalClaudeMd, "utf8") : "";
+
   // Match whatever the file already uses so a Windows-authored CLAUDE.md stays CRLF throughout.
   const eol = /\r\n/.test(content) ? "\r\n" : "\n";
   const installed = new Set(blocks.filter((b) => blockPattern(b.name).test(content)).map((b) => b.name));
@@ -985,13 +1346,32 @@ function applyInstructionBlocks(desired) {
       if (before === null) actions.push(`turned on  ${b.title}`);
       else if (before !== after) actions.push(`refreshed  ${b.title}`);
       else actions.push(`ready      ${b.title}`);
-    } else if (installed.has(b.name)) {
+    } else if (installed.has(b.name) && mayRemove) {
       next = withoutBlock(next, b.name, eol);
       actions.push(`turned off ${b.title}`);
     }
   }
   for (const a of actions) console.log(`  ${a}`);
-  if (next === content) return;
+  if (next === content) return; // nothing to do, so nothing to back up
+
+  // Back up ONLY now, when the content is genuinely about to change, and overwrite each time so
+  // the .bak always holds the state immediately before the current write.
+  //
+  // The earlier version wrote it once ever, before knowing whether anything would change. On a
+  // normal timeline — install, live with the machine for months, re-run — that burned the single
+  // slot on installer-generated boilerplate from day one, and the backup was guaranteed stale by
+  // the time the marker-collision it guards against could strike. A stale backup is worse than
+  // none: it looks like a safety net.
+  if (existed && content.trim()) {
+    try {
+      fs.writeFileSync(`${globalClaudeMd}.bak`, content);
+    } catch (err) {
+      // Never silently. If the backup is the safety story, the user has to know it failed before
+      // the destructive write lands, not after.
+      console.log(`  ${style.yellow("WARNING  ")} could not back up ${globalClaudeMd} — ${err.message}`);
+      console.log(`            Continuing, because you asked for this change.`);
+    }
+  }
 
   if (next.trim() === "") {
     // The file held nothing but our blocks — leave no empty husk behind.
