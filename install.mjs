@@ -18,15 +18,16 @@
 //
 // The menus live in ./lib/wizard.mjs. Without a terminal (CI, a pipe) they are skipped entirely
 // and every question takes its safe default, so an unattended run never enables anything — in
-// particular it never enables a beta feature without --beta, whatever the track says. The one
-// exception is CLAUDE_SKILLS_FORCE_PROMPT (see lib/wizard.mjs), which exists so the test suite
-// can drive the menus over a pipe; it is read nowhere else and should not be set by a human.
+// particular it never enables a beta feature without --beta, whatever the install mode says.
+//
+// Node 20 or newer. fs.rmSync(recursive, force) is pointed at directory junctions and symlinks
+// here, and a Node old enough to descend a reparse point rather than remove it would delete this
+// repo's own skills/ contents.
 //
 // Everything it offers is read from disk rather than hardcoded here, so this file does not need
 // editing as the collection changes:
 //   • ./skills.txt        — one checkbox per skill, its folders, a description for a person, and
-//                           whether each setup defaults it on. Override the path for tests with
-//                           CLAUDE_SKILLS_LIST_FILE.
+//                           whether each setup defaults it on.
 //   • ./beta-features.txt — which skills and instructions are still in development
 //   • ./instructions/*.md — the optional blocks offered for the global CLAUDE.md, each carrying
 //                           its own dev:/nontech: defaults
@@ -50,8 +51,7 @@ const repoSkillsDir = path.join(repoRoot, "skills");
 const repoInstructionsDir = path.join(repoRoot, "instructions");
 const repoToolsDir = path.join(repoRoot, "tools");
 const betaListFile = path.join(repoRoot, "beta-features.txt");
-// Overridable so the test suite can point at a fixture without a real skills.txt on disk.
-const skillsListFile = process.env.CLAUDE_SKILLS_LIST_FILE || path.join(repoRoot, "skills.txt");
+const skillsListFile = path.join(repoRoot, "skills.txt");
 const repoExtrasDir = path.join(repoRoot, "extras");
 
 // Problems found while READING the config files: a line naming folders that do not exist, a
