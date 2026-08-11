@@ -87,16 +87,20 @@ From inside the skills repo:
 
 ```sh
 cd claude-skills
-node install.mjs --quick
+node install.mjs --simple
 ```
 
-`--quick` is the non-technical install: it skips every checklist and installs only the
-problem-reporting skills. You still get the Ready summary; nothing on disk changes until you
-confirm it, so read it before you accept.
+`--simple` is the non-technical install: it skips every checklist, installs only the
+problem-reporting skills, and sets Claude up to write in plain English everywhere on this
+machine. You still get the Ready summary; nothing on disk changes until you confirm it, so read
+it before you accept.
 
-Without the flag the installer asks you to choose between a quick install and an advanced one,
-and **the advanced install is the default answer** — so if you run it bare here, do not just
-press Enter.
+Both the choosing screen and the Ready summary carry a warning telling a developer not to pick
+this. That warning is for you on **your** machine, not here — on your colleague's machine, Simple
+is the right answer. Read it and continue.
+
+Without the flag the installer asks you to choose, and **Advanced is the default answer** — so if
+you run it bare here, do not just press Enter.
 
 Two things in that summary are worth reading properly rather than nodding through:
 

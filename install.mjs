@@ -88,18 +88,24 @@ const BETA_TOOLS = {
 //
 // This is the old Express-versus-Advanced fork every desktop installer has had for thirty years,
 // and it works because the audience is named IN the option: people who customise their machine
-// pick Advanced because it says it is for them, and everyone else takes Quick. The question is
-// which install you want, NOT who you are and NOT which skills to tick — those were both tried
-// and both obscured the choice.
+// pick Advanced because it says it is for them, and everyone else takes the simple one. The
+// question is which install you want, NOT who you are and NOT which skills to tick — those were
+// both tried and both obscured the choice.
+//
+// "Simple", not "Quick", and the difference is not cosmetic. Quick promises the same destination
+// sooner, which would be a lie: this mode CONSTRAINS the machine. It already rewrites how Claude
+// talks in every project on it, and it is where the guard rails and automations land as they
+// arrive — plain language enforced globally, and limits on what Claude may do without asking.
+// A developer does not want a faster path to that; they want a different path. Say so on screen.
 const INSTALL_MODES = {
-  quick: "nontech",
+  simple: "nontech",
   advanced: "dev",
 };
 
 const KNOWN_FLAGS = [
   "--help",
   "-h",
-  "--quick",
+  "--simple",
   "--advanced",
   "--uninstall",
   "--beta",
@@ -126,15 +132,15 @@ const addInstructions = flagValue("--add-instructions");
 const removeInstructions = flagValue("--remove-instructions");
 const extrasArg = flagValue("--extras");
 const acceptDefaults = has("--accept-defaults") || has("--yes") || has("-y");
-const wantQuick = has("--quick");
+const wantSimple = has("--simple");
 const wantAdvanced = has("--advanced");
 // Two plain flags rather than --for=<value>. There is no value to mistype, so the whole class of
 // "--for=nontech looked close enough and silently picked the other one" cannot arise.
-const modeArg = wantQuick ? "quick" : wantAdvanced ? "advanced" : undefined;
+const modeArg = wantSimple ? "simple" : wantAdvanced ? "advanced" : undefined;
 
 const unknownFlags = argv.filter((a) => a.startsWith("-") && !KNOWN_FLAGS.includes(a.split("=")[0]));
 // Asking for both is a contradiction, not a preference. Never guess which one was meant.
-const conflictingMode = wantQuick && wantAdvanced;
+const conflictingMode = wantSimple && wantAdvanced;
 
 // ── Run ─────────────────────────────────────────────────────────────────────────────────────────
 // No process.exit() anywhere: console.log to a pipe is asynchronous, and exiting would discard
@@ -146,7 +152,7 @@ if (unknownFlags.length) {
   printHelp();
 } else if (conflictingMode) {
   printBanner();
-  console.log("  Sorry — --quick and --advanced ask for opposite things. Pick one.\n");
+  console.log("  Sorry — --simple and --advanced ask for opposite things. Pick one.\n");
   printHelp();
 } else if (showHelp) {
   printBanner();
@@ -195,9 +201,12 @@ function printHelp() {
   console.log("");
   console.log("  --help, -h                    Show this and stop. Changes nothing.");
   console.log("");
-  console.log("  --quick                       Quick install, for people who do not write code.");
+  console.log("  --simple                      Simple install, for people who do NOT write code.");
   console.log("                                A small set of skills for describing problems and");
-  console.log("                                writing them up. No checklists.");
+  console.log("                                writing them up, no checklists, and it changes how");
+  console.log("                                Claude talks in every project on the machine. It");
+  console.log("                                constrains what Claude does, on purpose. Do not use");
+  console.log("                                this on your own machine if you write code.");
   console.log("  --advanced                    Advanced install, for developers. Every skill, and");
   console.log("                                you pick which ones. This is the default answer.");
   console.log("                                Either way the install can only ADD — neither one");
@@ -226,8 +235,8 @@ function printHelp() {
   console.log("  --uninstall                   Remove what this installer created.");
   console.log("");
   console.log("  Examples:");
-  console.log("    node install.mjs                                  asks quick or advanced");
-  console.log("    node install.mjs --quick                          the quick install");
+  console.log("    node install.mjs                                  asks simple or advanced");
+  console.log("    node install.mjs --simple                          the simple install");
   console.log("    node install.mjs --accept-defaults                just link the stable skills");
   console.log("    node install.mjs --beta --add-instructions=all    everything, no questions");
   console.log("    node install.mjs --uninstall                      undo it");
@@ -337,7 +346,7 @@ async function buildPlan() {
   let mode = modeArg;
   if (askMode) {
     screen();
-    const quickCount = stableGroups.filter((g) => g.defaults.nontech).length;
+    const simpleCount = stableGroups.filter((g) => g.defaults.nontech).length;
     const omitted = stableGroups
       .filter((g) => g.defaults.dev && !g.defaults.nontech)
       .map((g) => `/${g.name}`);
@@ -345,18 +354,24 @@ async function buildPlan() {
       heading: "Choose an install",
       body: [
         ...wrap(
-          `Quick installs ${quickCount} skills for describing problems and writing them up. Advanced installs all ${stableSkills.length}, including ${omitted.join(", ")}, and lets you pick.`,
+          `Simple sets this machine up for someone who does not read code: ${simpleCount} skills for describing problems and writing them up, and it changes how Claude talks in EVERY project here. Advanced installs all ${stableSkills.length}, including ${omitted.join(", ")}, and lets you pick.`,
           84,
         ).map((l) => style.dim(l)),
+        "",
+        // The warning belongs on this screen, not the next one. By the Ready summary the choice
+        // already feels made, and this is the one option a developer should never take.
+        style.yellow("If you write code, do not choose Simple. It is not a smaller Advanced —"),
+        style.yellow("it constrains what Claude does on this machine, on purpose."),
+        "",
         style.dim("Nothing is installed until you confirm on the next screen."),
       ],
       items: [
-        { value: "quick", label: "Quick install", hint: "for people who do not write code — nothing to choose" },
+        { value: "simple", label: "Simple install", hint: "for people who do not write code" },
         { value: "advanced", label: "Advanced install", hint: "for developers — every skill, and you pick" },
       ],
       // Open on Advanced. The label is what does the real work — anyone who customises their
       // machine reads "for developers" and takes it — but on a FRESH machine the union floor has
-      // nothing to protect, so a stray Enter on Quick is the one mistake with no safety net.
+      // nothing to protect, so a stray Enter on Simple is the one mistake with no safety net.
       initial: "advanced",
     });
     // Escape, q, Ctrl-C and end-of-input all arrive as null. Every one of them means cancel;
@@ -369,12 +384,12 @@ async function buildPlan() {
   }
   const track = INSTALL_MODES[mode ?? "advanced"] ?? "dev";
   // A mode NEVER applies to a removal. Skipping the question under --uninstall is not enough on
-  // its own: an explicit --quick would still leave guided true, suppress the removal checklist,
+  // its own: an explicit --simple would still leave guided true, suppress the removal checklist,
   // and unlink everything on one keypress with nothing itemised on screen. Under --uninstall
   // every checkbox means the opposite, so the only safe reading is "ignore the mode, show the
   // list".
   const guided = track === "nontech" && !uninstall;
-  // The handover checklist is pointed at whenever Quick runs, whoever is at the keyboard. It
+  // The handover checklist is pointed at whenever Simple runs, whoever is at the keyboard. It
   // covers signing in to the tracker and cloning the product repo, which are needed either way,
   // so asking "is this your machine or theirs?" would buy one paragraph and cost a whole screen.
   const wantsHandover = guided;
@@ -642,11 +657,6 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
     if (!chosenSkills.length && !droppedSkills.length) lines.push("install no skills");
   }
 
-  // "beta" is jargon, and the guided track's reader has no checklist hint to read it against.
-  if (guided && betaItems.some((i) => selectedBeta.has(i.name))) {
-    lines.push(`beta means still being worked on — it may change or be rough at the edges`);
-  }
-
   if (betaItems.length) {
     if (uninstall) {
       const picked = betaItems.filter((i) => selectedBeta.has(i.name));
@@ -662,6 +672,11 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
       if (kept.length) lines.push(`keep beta: ${names(kept)}`);
       if (dropped.length) lines.push(`remove beta: ${names(dropped)}`);
       if (skipped.length) lines.push(`skip beta: ${names(skipped)}`);
+    }
+    // "beta" is jargon, and the guided reader has no checklist hint to read it against. Sits
+    // directly under the beta lines it explains.
+    if (guided && betaItems.some((i) => selectedBeta.has(i.name))) {
+      lines.push(`  beta means still being worked on — it may change or be rough at the edges`);
     }
   }
 
@@ -694,9 +709,17 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
     lines.push(`  ${e.command}`);
   }
 
-  // Last, so a config typo is the final thing read before the Install/Cancel choice. Printing
-  // these where they are discovered does not work: that happens before the first clearScreen().
+  // Printing these where they are discovered does not work: that happens before the first
+  // clearScreen(), which wipes them a moment later.
   for (const w of configWarnings) lines.push(style.yellow(`note: ${w}`));
+
+  // Dead last, immediately above Install/Cancel. This is the final chance to catch a developer
+  // who skimmed the first screen, and it is the one option they should never end up taking.
+  if (guided) {
+    lines.push("");
+    lines.push(style.yellow("This is the Simple install, for someone who does not write code."));
+    lines.push(style.yellow("If you write code, cancel and choose Advanced instead."));
+  }
   return lines;
 }
 
