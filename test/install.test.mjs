@@ -83,7 +83,6 @@ test("--simple -y links the simple-install set and nothing else", (t) => {
   assert.deepEqual(readdir(h.skillsDir), [
     "memory-audit",
     "raise-issue",
-    "reground",
     "report-issue",
     "to-the-point",
     "ttp",

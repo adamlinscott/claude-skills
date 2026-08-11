@@ -208,7 +208,7 @@ machine pick Advanced because it says it is for them, and everyone else takes Si
 | Install | Who it is for |
 |---|---|
 | **Advanced install** | Developers. Every skill, and you pick which ones from a checklist. This is the default answer. |
-| **Simple install** | People who do not write code. A small set for describing problems and writing them up — `/raise-issue`, `/ttp`, `/reground`, `/memory-audit` — plus plain-English replies in every project on the machine. Nothing to choose. |
+| **Simple install** | People who do not write code. A small set for describing problems and writing them up — `/raise-issue`, `/ttp`, `/memory-audit` — plus plain-English replies in every project on the machine. Nothing to choose. |
 
 > [!WARNING]
 > **Simple is not a smaller Advanced, and if you write code you do not want it.** It is a
