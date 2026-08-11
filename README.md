@@ -272,26 +272,6 @@ non-technical person on its own. The plugin route is the self-serve fix — two 
 session they are already in — and it is the one that deletes most of
 [SETUP-FOR-A-COLLEAGUE.md](SETUP-FOR-A-COLLEAGUE.md). It is not published yet.
 
-## 🧪 Tests
-
-The installer links and unlinks directories in your home folder and rewrites a global config
-file, so it has a suite. No dependencies, no framework:
-
-```sh
-npm test
-```
-
-Every test spawns the real `install.mjs` as a child process with `HOME` and `USERPROFILE` pointed
-at a throwaway directory, then asserts on what actually landed on disk. CI runs it on Linux and
-Windows, because the link type differs between them and junctions are the harder half.
-
-Two environment variables exist for that harness, and are read nowhere else:
-
-| Variable | Effect |
-|---|---|
-| `CLAUDE_SKILLS_FORCE_PROMPT=1` | Run the arrow-key menus even when stdin is not a terminal, so a test can drive them with piped keystrokes. Set this outside a test and the installer will wait for input that never comes. |
-| `CLAUDE_SKILLS_LIST_FILE` | Read the skill list from somewhere other than `skills.txt`, so a test can use a fixture. |
-
 ## 📄 License
 
 [MIT](LICENSE). Free to use, modify, and share.
