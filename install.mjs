@@ -84,19 +84,23 @@ const BETA_TOOLS = {
 
 // ── Options ─────────────────────────────────────────────────────────────────────────────────────
 
-// Who the setup is for. Both non-developer answers apply the same preset; they differ only in
-// what is printed at the end, because "someone else" needs the handover checklist and the person
-// setting up their own machine does not.
-const TRACKS = {
-  developer: "dev",
-  nontechnical: "nontech",
-  "someone-else": "nontech",
+// The two install modes, and the defaults column each one reads.
+//
+// This is the old Express-versus-Advanced fork every desktop installer has had for thirty years,
+// and it works because the audience is named IN the option: people who customise their machine
+// pick Advanced because it says it is for them, and everyone else takes Quick. The question is
+// which install you want, NOT who you are and NOT which skills to tick — those were both tried
+// and both obscured the choice.
+const INSTALL_MODES = {
+  quick: "nontech",
+  advanced: "dev",
 };
 
 const KNOWN_FLAGS = [
   "--help",
   "-h",
-  "--for",
+  "--quick",
+  "--advanced",
   "--uninstall",
   "--beta",
   "--no-beta",
@@ -122,15 +126,15 @@ const addInstructions = flagValue("--add-instructions");
 const removeInstructions = flagValue("--remove-instructions");
 const extrasArg = flagValue("--extras");
 const acceptDefaults = has("--accept-defaults") || has("--yes") || has("-y");
-const forArg = flagValue("--for");
+const wantQuick = has("--quick");
+const wantAdvanced = has("--advanced");
+// Two plain flags rather than --for=<value>. There is no value to mistype, so the whole class of
+// "--for=nontech looked close enough and silently picked the other one" cannot arise.
+const modeArg = wantQuick ? "quick" : wantAdvanced ? "advanced" : undefined;
 
 const unknownFlags = argv.filter((a) => a.startsWith("-") && !KNOWN_FLAGS.includes(a.split("=")[0]));
-// A typo here must not silently pick a track: `--for=nontech` looks close enough to
-// `--for=nontechnical` that falling through to the developer default would be the worst
-// possible outcome. Treated exactly like an unknown flag.
-// `--for` with no `=value` reaches flagValue() as undefined, which would sail past this check and
-// fall through to the interactive question — the exact silent fallthrough the check exists to stop.
-const badForValue = (has("--for") && forArg === undefined) || (forArg !== undefined && !Object.hasOwn(TRACKS, forArg));
+// Asking for both is a contradiction, not a preference. Never guess which one was meant.
+const conflictingMode = wantQuick && wantAdvanced;
 
 // ── Run ─────────────────────────────────────────────────────────────────────────────────────────
 // No process.exit() anywhere: console.log to a pipe is asynchronous, and exiting would discard
@@ -140,10 +144,9 @@ if (unknownFlags.length) {
   printBanner();
   console.log(`  Sorry — I do not recognise: ${unknownFlags.join(", ")}\n`);
   printHelp();
-} else if (badForValue) {
+} else if (conflictingMode) {
   printBanner();
-  console.log(`  Sorry — "${forArg ?? ""}" is not a valid --for value.`);
-  console.log(`  Pick one of: ${Object.keys(TRACKS).join(", ")}\n`);
+  console.log("  Sorry — --quick and --advanced ask for opposite things. Pick one.\n");
   printHelp();
 } else if (showHelp) {
   printBanner();
@@ -192,14 +195,13 @@ function printHelp() {
   console.log("");
   console.log("  --help, -h                    Show this and stop. Changes nothing.");
   console.log("");
-  console.log("  --for=<who>                   Which skills to install, without asking:");
-  console.log("                                  developer      all of them, via a checklist");
-  console.log("                                  nontechnical   only the problem-reporting ones,");
-  console.log("                                                 for someone who does not write code");
-  console.log("                                  someone-else   an alias for nontechnical; both");
-  console.log("                                                 install exactly the same thing");
-  console.log("                                A choice here can only ADD. Neither setup removes a");
-  console.log("                                skill you already have.");
+  console.log("  --quick                       Quick install, for people who do not write code.");
+  console.log("                                A small set of skills for describing problems and");
+  console.log("                                writing them up. No checklists.");
+  console.log("  --advanced                    Advanced install, for developers. Every skill, and");
+  console.log("                                you pick which ones. This is the default answer.");
+  console.log("                                Either way the install can only ADD — neither one");
+  console.log("                                removes a skill you already have.");
   console.log("");
   console.log("  --beta                        Include the features that are still in development.");
   console.log("  --no-beta                     Leave them out.");
@@ -224,7 +226,8 @@ function printHelp() {
   console.log("  --uninstall                   Remove what this installer created.");
   console.log("");
   console.log("  Examples:");
-  console.log("    node install.mjs                                  the guided setup");
+  console.log("    node install.mjs                                  asks quick or advanced");
+  console.log("    node install.mjs --quick                          the quick install");
   console.log("    node install.mjs --accept-defaults                just link the stable skills");
   console.log("    node install.mjs --beta --add-instructions=all    everything, no questions");
   console.log("    node install.mjs --uninstall                      undo it");
@@ -328,67 +331,52 @@ async function buildPlan() {
 
   // — Who is this for? —
   // Asked before anything else, and NOT under --uninstall: there every checkbox means the
-  // opposite, so a track preset has no coherent meaning and the question would be a pointless
+  // opposite, so an install mode has no coherent meaning and the question would be a pointless
   // one asked of a nervous person mid-removal.
-  const askAudience = interactive && !uninstall && forArg === undefined;
-  let audience = forArg;
-  if (askAudience) {
+  const askMode = interactive && !uninstall && modeArg === undefined;
+  let mode = modeArg;
+  if (askMode) {
     screen();
-    // Framed by CONSEQUENCE, not identity — the rule /seatbelt already follows. "I don't write
-    // code" is a public self-demotion typed into a terminal, and everyone dodges it, landing the
-    // people who most need the simple setup in the nine-item checklist instead.
-    // Split on WHAT YOU GET, not on how much work it is. "A sensible set, nothing to choose"
-    // advertises convenience and hides the consequence, so a developer feeling lazy picks the
-    // reduced set and silently loses four skills with no reason to suspect it. Name the count and
-    // name the omissions; the choice then has to be made on purpose.
-    const guidedCount = stableGroups.filter((g) => g.defaults.nontech).length;
+    const quickCount = stableGroups.filter((g) => g.defaults.nontech).length;
     const omitted = stableGroups
       .filter((g) => g.defaults.dev && !g.defaults.nontech)
       .map((g) => `/${g.name}`);
     const picked = await chooseAction({
-      heading: "Which skills should this machine get?",
+      heading: "Choose an install",
       body: [
-        ...wrap(`The smaller set is for someone who only reports problems. It leaves out ${omitted.join(", ")}.`, 84).map(
-          (l) => style.dim(l),
-        ),
+        ...wrap(
+          `Quick installs ${quickCount} skills for describing problems and writing them up. Advanced installs all ${stableSkills.length}, including ${omitted.join(", ")}, and lets you pick.`,
+          84,
+        ).map((l) => style.dim(l)),
         style.dim("Nothing is installed until you confirm on the next screen."),
       ],
       items: [
-        {
-          value: "developer",
-          label: `All ${stableSkills.length} — I'll pick from a checklist`,
-          hint: "if you write code here, this one",
-        },
-        {
-          value: "nontechnical",
-          label: `Only the ${guidedCount} for reporting problems`,
-          hint: `leaves out ${omitted.length} developer skills`,
-        },
+        { value: "quick", label: "Quick install", hint: "for people who do not write code — nothing to choose" },
+        { value: "advanced", label: "Advanced install", hint: "for developers — every skill, and you pick" },
       ],
-      // Always open on the full set. The person who cloned a repo and ran a Node script is, on
-      // the evidence, technical — and on a fresh machine the union floor has nothing to protect,
-      // so a stray Enter on the reduced option is the one mistake with no safety net.
-      initial: "developer",
+      // Open on Advanced. The label is what does the real work — anyone who customises their
+      // machine reads "for developers" and takes it — but on a FRESH machine the union floor has
+      // nothing to protect, so a stray Enter on Quick is the one mistake with no safety net.
+      initial: "advanced",
     });
     // Escape, q, Ctrl-C and end-of-input all arrive as null. Every one of them means cancel;
-    // falling through to a track here would let a stray keypress silently pick one.
+    // falling through to a mode here would let a stray keypress silently pick one.
     if (!picked) {
       closeInput();
       return null;
     }
-    audience = picked;
+    mode = picked;
   }
-  const track = TRACKS[audience ?? "developer"] ?? "dev";
-  // A track NEVER applies to a removal. Skipping the audience question under --uninstall is not
-  // enough on its own: an explicit --for=nontechnical would still leave guided true, suppress the
-  // removal checklist, and unlink everything on one keypress with nothing itemised on screen.
-  // Under --uninstall every checkbox means the opposite, so a preset has no coherent meaning —
-  // the only safe reading is "ignore the track entirely and show the list".
+  const track = INSTALL_MODES[mode ?? "advanced"] ?? "dev";
+  // A mode NEVER applies to a removal. Skipping the question under --uninstall is not enough on
+  // its own: an explicit --quick would still leave guided true, suppress the removal checklist,
+  // and unlink everything on one keypress with nothing itemised on screen. Under --uninstall
+  // every checkbox means the opposite, so the only safe reading is "ignore the mode, show the
+  // list".
   const guided = track === "nontech" && !uninstall;
-  // The handover checklist is shown for the reduced set whoever is sitting at the keyboard. It
-  // covers `gh auth login` and cloning the product repo, which are needed either way, so asking
-  // "is this your machine or theirs?" would have bought exactly one paragraph of output and cost
-  // a whole screen. --for=someone-else is kept as an alias because the docs use it.
+  // The handover checklist is pointed at whenever Quick runs, whoever is at the keyboard. It
+  // covers signing in to the tracker and cloning the product repo, which are needed either way,
+  // so asking "is this your machine or theirs?" would buy one paragraph and cost a whole screen.
   const wantsHandover = guided;
 
   // A step is skipped when a flag already answers it, when the guided track decided it, or when
@@ -409,8 +397,8 @@ async function buildPlan() {
   // choices — one stray keypress ticks a third party's installer. They are named in the closing
   // message instead, as an optional next step.
   const askExtras = interactive && !guided && extras.length > 0 && !uninstall && extrasArg === undefined;
-  // The audience question is NOT counted. It renders before this number can be known — it is the
-  // thing that decides it — so it cannot label itself, and counting it would produce a screen
+  // The install-mode question is NOT counted. It renders before this number can be known — it is
+  // the thing that decides it — so it cannot label itself, and counting it would produce a screen
   // with no counter followed by "(2 of 2)". It is the fork, not a step.
   const totalSteps =
     (askSkills ? 1 : 0) +
