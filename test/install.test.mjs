@@ -57,11 +57,11 @@ function readdir(dir) {
 
 // ── Cases ──────────────────────────────────────────────────────────────────────────────────────
 
-test("developer track with -y links the dev defaults and writes no instruction block", (t) => {
+test("--advanced -y links the developer defaults and writes no instruction block", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
-  const { status } = run(["--for=developer", "-y"], { home: h.home });
+  const { status } = run(["--advanced", "-y"], { home: h.home });
   assert.equal(status, 0);
 
   const got = readdir(h.skillsDir);
@@ -71,11 +71,11 @@ test("developer track with -y links the dev defaults and writes no instruction b
   assert.ok(!existsSync(h.claudeMd), "no instruction block without an explicit yes");
 });
 
-test("non-technical track with -y links the nontech preset and nothing else", (t) => {
+test("--quick -y links the quick-install set and nothing else", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
-  const { status } = run(["--for=nontechnical", "-y"], { home: h.home });
+  const { status } = run(["--quick", "-y"], { home: h.home });
   assert.equal(status, 0);
 
   // Exactly the preset, not merely "contains some of it" — an over-broad track default is as
@@ -94,7 +94,7 @@ test("no extras command is ever executed on a non-interactive run", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
-  const { stdout } = run(["--for=nontechnical", "-y"], { home: h.home });
+  const { stdout } = run(["--quick", "-y"], { home: h.home });
   // Only EXECUTION is forbidden. The command may still be printed as a suggestion for someone
   // to run later — that is the point of the closing message — so assert on the markers runExtras
   // emits when it actually spawns something, not on the command text itself.
@@ -103,7 +103,7 @@ test("no extras command is ever executed on a non-interactive run", (t) => {
   assert.ok(!/Next, inside Claude:/.test(stdout), "that follow-up only prints after a real install");
 });
 
-test("REGRESSION: choosing the non-technical track never unlinks an existing install", (t) => {
+test("REGRESSION: the quick install never unlinks an existing install", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
@@ -123,7 +123,7 @@ test("REGRESSION: choosing the non-technical track never unlinks an existing ins
     symlinkSync(path.join(repoSkills, folder), path.join(h.skillsDir, folder), linkType);
   }
 
-  const { status, stdout } = runInteractive(["--for=nontechnical"], { home: h.home, stdin: ENTER });
+  const { status, stdout } = runInteractive(["--quick"], { home: h.home, stdin: ENTER });
   assert.equal(status, 0, stdout);
 
   const got = readdir(h.skillsDir);
@@ -134,16 +134,16 @@ test("REGRESSION: choosing the non-technical track never unlinks an existing ins
   assert.ok(!/removed/.test(stdout), "nothing should be reported as removed");
 });
 
-test("REGRESSION: the default answer on a fresh machine is the FULL set", (t) => {
+test("REGRESSION: the default answer is the ADVANCED install", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
   // The trap this guards: a developer runs the installer on a new machine, hits Enter out of
-  // habit, and silently gets the reduced problem-reporting set. On a fresh machine the union
-  // floor has nothing to protect, so this is the one wrong keypress with no safety net.
+  // habit, and silently gets the quick install's reduced set. On a fresh machine the union floor
+  // has nothing to protect, so this is the one wrong keypress with no safety net.
   const DOWN = "\x1b[B";
   const keys =
-    "\r" + //                     audience: take the default
+    "\r" + //                     install mode: take the default
     DOWN.repeat(8) + "\r" + //    skills: change nothing, confirm
     DOWN.repeat(3) + "\r" + //    beta
     DOWN.repeat(2) + "\r" + //    extras
@@ -153,21 +153,24 @@ test("REGRESSION: the default answer on a fresh machine is the FULL set", (t) =>
   const got = readdir(h.skillsDir);
   assert.ok(got.includes("fresh-eyes"), "the default answer must not drop developer skills");
   assert.ok(got.includes("goal-workflow"), "the default answer must not drop developer skills");
-  assert.ok(!got.includes("raise-issue"), "and must not silently apply the reduced preset");
+  assert.ok(!got.includes("raise-issue"), "and must not silently apply the quick install's set");
   assert.ok(!existsSync(h.claudeMd), "nor write a global instruction nobody ticked");
-  assert.match(stdout, /Which skills should this machine get/, "the audience question must actually have run");
+  assert.match(stdout, /Choose an install/, "the install-mode question must actually have run");
 });
 
-test("the audience question names what the smaller set leaves out", (t) => {
+test("the install question names both audiences and what quick leaves out", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
   const { stdout } = runInteractive([], { home: h.home, stdin: "\x1b" });
-  // The consequence has to be on screen at the moment of choosing, not merely implied by
-  // "a sensible set, nothing to choose" — which advertises effort and hides the trade-off.
-  assert.match(stdout, /leaves out/i);
-  assert.match(stdout, /\/goal-workflow/, "the omitted skills must be named, not just counted");
-  assert.match(stdout, /All 8/, "the full set must state how many it installs");
+  // The audience belongs IN the option, so people self-select the way they always have on an
+  // Express-versus-Advanced screen. And the consequence has to be visible at the moment of
+  // choosing, not implied by "nothing to choose", which advertises effort and hides the trade-off.
+  assert.match(stdout, /Quick install/);
+  assert.match(stdout, /Advanced install/);
+  assert.match(stdout, /do not write code/i, "quick must name its audience");
+  assert.match(stdout, /for developers/i, "advanced must name its audience");
+  assert.match(stdout, /\/goal-workflow/, "what quick omits must be named, not just counted");
 });
 
 test("the union floor ADDS the preset to a partial install without disturbing it", (t) => {
@@ -183,7 +186,7 @@ test("the union floor ADDS the preset to a partial install without disturbing it
     symlinkSync(path.join(repoSkills, folder), path.join(h.skillsDir, folder), linkType);
   }
 
-  const { stdout } = runInteractive(["--for=nontechnical"], { home: h.home, stdin: ENTER });
+  const { stdout } = runInteractive(["--quick"], { home: h.home, stdin: ENTER });
   const got = readdir(h.skillsDir);
 
   assert.ok(got.includes("goal-workflow"), "a skill outside the preset was dropped — not a floor");
@@ -196,7 +199,7 @@ test("the guided track writes the plain-English instruction; the developer track
   const h = makeHome();
   t.after(h.cleanup);
 
-  runInteractive(["--for=nontechnical"], { home: h.home, stdin: ENTER });
+  runInteractive(["--quick"], { home: h.home, stdin: ENTER });
   assert.ok(existsSync(h.claudeMd), "the guided track must write the global instruction block");
   assert.match(readFileSync(h.claudeMd, "utf8"), /claude-skills:clear-responses/);
 
@@ -204,7 +207,7 @@ test("the guided track writes the plain-English instruction; the developer track
   t.after(h2.cleanup);
   // Developer track: walk every checklist to its Confirm row, ticking nothing extra.
   const DOWN = "\x1b[B";
-  runInteractive(["--for=developer"], {
+  runInteractive(["--advanced"], {
     home: h2.home,
     stdin: DOWN.repeat(8) + "\r" + DOWN.repeat(3) + "\r" + DOWN.repeat(2) + "\r" + "\r",
   });
@@ -217,12 +220,12 @@ test("the backup is refreshed on each change, not written once and left to go st
 
   mkdirSync(path.join(h.home, ".claude"), { recursive: true });
   writeFileSync(h.claudeMd, "# first\n");
-  run(["--for=developer", "-y", "--add-instructions=clear-responses"], { home: h.home });
+  run(["--advanced", "-y", "--add-instructions=clear-responses"], { home: h.home });
   assert.match(readFileSync(`${h.claudeMd}.bak`, "utf8"), /# first/);
 
   // The user then edits their own file. The next change must back up THAT, not the day-one state.
   writeFileSync(h.claudeMd, "# second, written by hand later\n");
-  run(["--for=developer", "-y", "--add-instructions=clear-responses"], { home: h.home });
+  run(["--advanced", "-y", "--add-instructions=clear-responses"], { home: h.home });
   const bak = readFileSync(`${h.claudeMd}.bak`, "utf8");
   assert.match(bak, /second, written by hand later/, "the backup is stale — it still holds the first version");
 });
@@ -234,11 +237,11 @@ test("a run that changes nothing does not touch the backup", (t) => {
   mkdirSync(path.join(h.home, ".claude"), { recursive: true });
   writeFileSync(h.claudeMd, "# mine\n");
   // No instruction selected, so nothing about the file changes.
-  run(["--for=developer", "-y"], { home: h.home });
+  run(["--advanced", "-y"], { home: h.home });
   assert.ok(!existsSync(`${h.claudeMd}.bak`), "a no-op run must not burn the backup on unchanged content");
 });
 
-test("the audience question is skipped entirely under --uninstall", (t) => {
+test("the install-mode question is skipped entirely under --uninstall", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
@@ -253,12 +256,12 @@ test("the audience question is skipped entirely under --uninstall", (t) => {
   const { stdout, status } = runInteractive(["--uninstall"], { home: h.home, stdin: keys });
   assert.equal(status, 0);
 
-  assert.ok(!/kind of setup do you want/i.test(stdout), "no audience question during a removal");
+  assert.ok(!/kind of setup do you want/i.test(stdout), "no install-mode question during a removal");
   assert.match(stdout, /Tick the ones to remove/, "the removal checklist must be what is shown instead");
   assert.deepEqual(readdir(h.skillsDir), [], "the run must actually have removed something");
 });
 
-test("REGRESSION: --for cannot turn a removal into a silent remove-everything", (t) => {
+test("REGRESSION: an install-mode flag cannot turn a removal into a silent wipe", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
@@ -267,9 +270,9 @@ test("REGRESSION: --for cannot turn a removal into a silent remove-everything", 
     symlinkSync(path.join(repoSkills, folder), path.join(h.skillsDir, folder), linkType);
   }
 
-  // Skipping the audience QUESTION under --uninstall is not enough — an explicit --for must not
+  // Skipping the QUESTION under --uninstall is not enough — an explicit mode flag must not
   // suppress the removal checklist either, or one keypress unlinks everything unseen.
-  const { stdout } = runInteractive(["--uninstall", "--for=nontechnical"], { home: h.home, stdin: ENTER });
+  const { stdout } = runInteractive(["--uninstall", "--quick"], { home: h.home, stdin: ENTER });
   assert.match(stdout, /Tick the ones to remove/, "the removal checklist must still be shown");
   assert.deepEqual(readdir(h.skillsDir), ["fresh-eyes", "reground", "ttp"], "nothing may be removed on one keypress");
 });
@@ -295,7 +298,7 @@ test("REGRESSION: pruning a group never deletes a foreign directory sharing its 
     DOWN.repeat(3) + "\r" + //                    beta: 3 items, confirm
     DOWN.repeat(2) + "\r" + //                    extras: 2 items, confirm
     "\r"; //                                      Ready: Install
-  const { stdout } = runInteractive(["--for=developer"], { home: h.home, stdin: keys });
+  const { stdout } = runInteractive(["--advanced"], { home: h.home, stdin: keys });
 
   // Guard against this test going vacuous: if the prune path is not reached, it proves nothing.
   assert.match(stdout, /removed\s+ttp/, "the prune path was never reached — this test is not testing anything");
@@ -305,13 +308,22 @@ test("REGRESSION: pruning a group never deletes a foreign directory sharing its 
   assert.equal(readFileSync(foreign, "utf8"), "# not ours\n");
 });
 
-test("an unknown --for value is rejected rather than silently defaulting", (t) => {
+test("a misspelled mode flag is rejected rather than silently defaulting", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
-  const { stdout } = run(["--for=nontech"], { home: h.home });
-  assert.match(stdout, /do not recognise|not a valid/i);
+  const { stdout } = run(["--quik"], { home: h.home });
+  assert.match(stdout, /do not recognise/i);
   assert.ok(!existsSync(h.skillsDir), "nothing should be installed after a bad flag");
+});
+
+test("asking for both installs at once is refused, not guessed", (t) => {
+  const h = makeHome();
+  t.after(h.cleanup);
+
+  const { stdout } = run(["--quick", "--advanced", "-y"], { home: h.home });
+  assert.match(stdout, /opposite things/i);
+  assert.ok(!existsSync(h.skillsDir), "a contradiction must install nothing at all");
 });
 
 test("a malformed defaults column fails safe to off and never to on", (t) => {
@@ -323,7 +335,7 @@ test("a malformed defaults column fails safe to off and never to on", (t) => {
   // that an unparseable value actively forces off.
   const custom = path.join(h.home, "skills.txt");
   writeFileSync(custom, "fresh-eyes | fresh-eyes | desc | banana,banana\nttp | ttp | desc | on,on\n");
-  const { status } = run(["--for=developer", "-y"], {
+  const { status } = run(["--advanced", "-y"], {
     home: h.home,
     env: { CLAUDE_SKILLS_LIST_FILE: custom },
   });
@@ -339,12 +351,12 @@ test("an omitted defaults column keeps the historical on,off behaviour", (t) => 
 
   const custom = path.join(h.home, "skills.txt");
   writeFileSync(custom, "fresh-eyes | fresh-eyes | desc\n");
-  run(["--for=developer", "-y"], { home: h.home, env: { CLAUDE_SKILLS_LIST_FILE: custom } });
+  run(["--advanced", "-y"], { home: h.home, env: { CLAUDE_SKILLS_LIST_FILE: custom } });
   assert.ok(readdir(h.skillsDir).includes("fresh-eyes"), "a three-field line must still install for a developer");
 
   const h2 = makeHome();
   t.after(h2.cleanup);
-  run(["--for=nontechnical", "-y"], { home: h2.home, env: { CLAUDE_SKILLS_LIST_FILE: custom } });
+  run(["--quick", "-y"], { home: h2.home, env: { CLAUDE_SKILLS_LIST_FILE: custom } });
   assert.ok(!readdir(h2.skillsDir).includes("fresh-eyes"), "and must stay out of the guided preset");
 });
 
@@ -354,7 +366,7 @@ test("an unknown name warns rather than degrading silently", (t) => {
 
   const custom = path.join(h.home, "skills.txt");
   writeFileSync(custom, "ghost | no-such-folder | desc | on,on\nttp | ttp | desc | on,on\n");
-  const { stdout, status } = run(["--for=developer", "-y"], {
+  const { stdout, status } = run(["--advanced", "-y"], {
     home: h.home,
     env: { CLAUDE_SKILLS_LIST_FILE: custom },
   });
@@ -375,14 +387,14 @@ test("beta wins: a name in beta-features.txt is not installed by a track default
     custom,
     "seatbelt | seatbelt, seatbelts | desc | on,on\ndebrief | debrief | desc | on,on\nttp | ttp | desc | on,on\n",
   );
-  for (const track of ["developer", "nontechnical"]) {
+  for (const mode of ["--advanced", "--quick"]) {
     const home = makeHome();
     t.after(home.cleanup);
-    run([`--for=${track}`, "-y"], { home: home.home, env: { CLAUDE_SKILLS_LIST_FILE: custom } });
+    run([mode, "-y"], { home: home.home, env: { CLAUDE_SKILLS_LIST_FILE: custom } });
     const got = readdir(home.skillsDir);
-    assert.ok(!got.includes("seatbelt"), `${track}: beta must win over a track default`);
-    assert.ok(!got.includes("debrief"), `${track}: beta must win over a track default`);
-    assert.ok(got.includes("ttp"), `${track}: a non-beta neighbour must still install`);
+    assert.ok(!got.includes("seatbelt"), `${mode}: beta must win over an install default`);
+    assert.ok(!got.includes("debrief"), `${mode}: beta must win over an install default`);
+    assert.ok(got.includes("ttp"), `${mode}: a non-beta neighbour must still install`);
   }
 });
 
@@ -390,11 +402,11 @@ test("running twice is idempotent and leaves CLAUDE.md byte-identical", (t) => {
   const h = makeHome();
   t.after(h.cleanup);
 
-  run(["--for=nontechnical", "-y", "--add-instructions=clear-responses"], { home: h.home });
+  run(["--quick", "-y", "--add-instructions=clear-responses"], { home: h.home });
   const first = readFileSync(h.claudeMd, "utf8");
   const firstLinks = readdir(h.skillsDir);
 
-  const { stdout } = run(["--for=nontechnical", "-y", "--add-instructions=clear-responses"], { home: h.home });
+  const { stdout } = run(["--quick", "-y", "--add-instructions=clear-responses"], { home: h.home });
   assert.equal(readFileSync(h.claudeMd, "utf8"), first, "second run rewrote CLAUDE.md");
   assert.deepEqual(readdir(h.skillsDir), firstLinks);
   assert.match(stdout, /ready|keep/i);
@@ -408,7 +420,7 @@ test("CLAUDE.md is backed up before it is first modified", (t) => {
   const original = "# my notes\n\nsomething I wrote myself\n";
   writeFileSync(h.claudeMd, original);
 
-  run(["--for=developer", "-y", "--add-instructions=clear-responses"], { home: h.home });
+  run(["--advanced", "-y", "--add-instructions=clear-responses"], { home: h.home });
 
   assert.ok(existsSync(`${h.claudeMd}.bak`), "no backup was written");
   assert.equal(readFileSync(`${h.claudeMd}.bak`, "utf8"), original, "backup does not hold the original");
@@ -437,7 +449,7 @@ test("a moved clone has its stale links repaired, never silently dropped", (t) =
   // and walk straight to Confirm: fresh-eyes stays ticked, so it takes the repair path.
   const DOWN = "\x1b[B";
   const keys = DOWN.repeat(8) + "\r" + DOWN.repeat(3) + "\r" + DOWN.repeat(2) + "\r" + "\r";
-  const { status, stdout } = runInteractive(["--for=developer"], { home: h.home, stdin: keys });
+  const { status, stdout } = runInteractive(["--advanced"], { home: h.home, stdin: keys });
   assert.equal(status, 0, stdout);
 
   // lstat, not existsSync: existsSync FOLLOWS the link, and this one deliberately dangled, so it

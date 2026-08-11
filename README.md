@@ -199,24 +199,25 @@ node install.mjs --uninstall   # remove what it installed
 Because the skills are linked rather than copied, editing one in this repo updates it live in
 every Claude session. Commit and push to share the change.
 
-#### Two sets
+#### Quick or advanced
 
-The first question is which skills this machine gets, because the right set is not the same for
-someone building the software and someone reporting problems with it. It is asked in those terms
-— what you end up with — rather than how much work each answer is, so that picking the smaller
-set is a decision rather than a shortcut.
+The first screen is the old Express-versus-Advanced fork every installer has had for thirty
+years. It works because the audience is named in the option itself: people who customise their
+machine pick Advanced because it says it is for them, and everyone else takes Quick.
 
-| Answer | What you get |
+| Install | Who it is for |
 |---|---|
-| **All 8 — I'll pick from a checklist** | The full collection, opened on sensible developer defaults. Tick and untick whatever you like. The default answer, and the right one for anyone who writes code here. |
-| **Only the 4 for reporting problems** | `/raise-issue`, `/ttp`, `/reground`, `/memory-audit`, plus plain-English replies. No checklists. It names, on screen, the four developer skills it leaves out, and the Ready summary lists every skill before anything is touched. |
+| **Advanced install** | Developers. Every skill, and you pick which ones from a checklist. This is the default answer. |
+| **Quick install** | People who do not write code. A small set for describing problems and writing them up — `/raise-issue`, `/ttp`, `/reground`, `/memory-audit`, plus plain-English replies. Nothing to choose. |
 
-Answer it up front with a flag:
+The screen names the developer skills Quick leaves out, so choosing it is a decision rather than
+a shortcut, and the Ready summary lists every skill by name before anything is touched.
+
+Skip the question with a flag:
 
 ```sh
-node install.mjs --for=developer      # the full checklist
-node install.mjs --for=nontechnical   # only the problem-reporting skills
-node install.mjs --for=someone-else   # an alias for nontechnical — identical install
+node install.mjs --advanced   # every skill, via the checklist
+node install.mjs --quick      # the non-technical install
 ```
 
 The flag only seeds the answers. It never skips the Ready confirmation, it never installs a
@@ -257,7 +258,7 @@ installed from inside Claude Code with no terminal and no clone. Nothing is live
 marketplace is published. See [PUBLISHING.md](PUBLISHING.md) for what the files do and how to
 turn them on.
 
-Worth being straight about how that relates to the track above. The `--for=someone-else` track is
+Worth being straight about how that relates to the track above. The `--quick` track is
 a **handover tool**: it makes the job quick for a developer sitting at a colleague's machine, but
 it still needs a terminal, git, Node, a paid Claude seat and two clones, so it does not reach a
 non-technical person on its own. The plugin route is the self-serve fix — two lines pasted into a
