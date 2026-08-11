@@ -2,7 +2,8 @@
 name: clear-responses
 title: Clear responses
 summary: short, plain wording in replies to you. Never touches code or files.
-default: off
+dev: off
+nontech: on
 ---
 ## Clear responses
 
