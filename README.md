@@ -16,6 +16,9 @@ Each skill lives under `skills/<name>/SKILL.md` and is the single source of trut
 script links them into the global skills directory (`~/.claude/skills/`) so Claude loads
 them in every session, on every machine.
 
+> [!TIP]
+> **Not a developer? Start here → [SETUP-FOR-A-COLLEAGUE.md](SETUP-FOR-A-COLLEAGUE.md).** The honest answer is that you should ask a developer to set this up for you: it takes a terminal, two clones, and a paid Claude seat to get going. That page is the checklist for them to work through on your machine. It ends with the one thing you type: `/raise-issue`.
+
 > [!NOTE]
 > These work best **alongside** other skill collections. I run them next to [Matt Pocock's skills](https://github.com/mattpocock/skills) and [Garry Tan's gstack](https://github.com/garrytan/gstack) for in-depth planning; the skills here add lifecycle gates around them. The installer can run both of their installers for you — off unless you tick them.
 
@@ -28,6 +31,7 @@ order — though most are useful on their own, too.
 | Command | What it does in the flow |
 |---|---|
 | `/seatbelt` *(beta)* | **Set the permissions.** Once per repo, before anything else. Decides what Claude can do here without asking and what it can never do, so the rest of this flow can run on auto instead of stopping to ask you. Skip it and `/goal-workflow` either interrupts constantly or runs with no brakes. |
+| `/raise-issue` *(as needed)* | **Where the work comes from.** Whoever noticed the problem — usually not you — turns what they saw into an issue that names the actual code, so the plan below starts from something real instead of a forwarded message. |
 | Any planning command, skill, or process | **Plan.** Start with a planning session — however you prefer to do it — and write the plan and any supporting docs to files. |
 | `/assumption-inventory` | **Ground the plan in reality.** Verify what the plan assumes about the project itself: which files actually exist, what may be edited, what must not be touched — the technical terrain, not just the goals. |
 | `/ttp` | **Switch to implementation mode.** The decisions are made — turn on *To the Point* so replies lead with the substance and stay focused on shipping, not re-litigating. This is where it shines: mid-build, you want progress, not discussion. |
@@ -81,10 +85,38 @@ one repo on different terms. Ships a tested `guard.mjs` hook that fails closed a
 still alive at session start.
 
 > [!IMPORTANT]
-> This is the only skill here that **writes** files; everything else is read-only. It stops Claude over-reaching. It is not a lock against a person who dismantles their own setup — and it says so, to your face, in the setup report.
+> Two skills here have side effects, and they are different in kind. `/seatbelt` **writes files** — settings and a hook, inside your repo, on your machine. `/raise-issue` goes further and writes **outside** it, filing an issue your whole team can see. Everything else in this collection is read-only. Both side effects happen only after you confirm them. `/seatbelt` stops Claude over-reaching; it is not a lock against a person who dismantles their own setup — and it says so, to your face, in the setup report.
 
 **When to use:** setting a project up for AI-assisted development, handing a repo to a
 non-technical builder, or any time you want to run auto mode without wondering what it might do.
+
+### `/raise-issue` (alias `/report-issue`)
+
+Takes the words a non-technical person actually uses — "the dashboard", "the thing that sends
+the emails" — and resolves them to real code, building a **term map**: their word, the project's
+word, and the `file:line` evidence for the match. Ambiguous terms are settled by asking what they
+*saw*, never by showing them a symbol name. That map is what makes the resulting issue worth a
+developer's time, because it arrives already pointing at the code.
+
+The term map then does a second job: it is the duplicate key. A text search over issue titles
+cannot tell that "the export button spins forever" and "my March invoice never downloaded" are
+one bug. A shared code location can. No tracker's own dedupe can do this, because no tracker has
+repo context at the moment the issue is being written. The duplicate check runs on every issue
+and offers three outcomes — comment on the existing one, file a linked issue when two reports
+touch the same area but may not share a cause, or file normally. It never merges silently.
+
+The interview runs every time, however clear the request looked, in plain English and capped so
+it does not turn into an interrogation. Before drafting, a triage gate asks whether this deserves
+an issue at all, and it will say no: not a defect, already reported, not a code problem, or still
+too thin to act on. It advises, never refuses — filing anyway is always one keystroke away.
+
+> [!IMPORTANT]
+> This is the one skill here Claude may offer **on its own**, without the command being typed — that is the only way it reaches someone who does not know it exists. Nothing is ever filed without an explicit yes to the finished issue.
+
+**When to use:** something looks wrong and you want it in the team's tracker properly, written
+in the codebase's own vocabulary. Off by default on the developer track; on for the
+non-technical one. See [SETUP-FOR-A-COLLEAGUE.md](SETUP-FOR-A-COLLEAGUE.md) to set it up for
+someone else.
 
 ### `/goal-workflow`
 
@@ -136,9 +168,19 @@ technical audit. Report only; never edits.
 **When to use:** you suspect memory has gone stale, or want an overview of what Claude
 remembers.
 
+### `/debrief` — beta
+
+Reads back through your past Claude sessions to find the corrections you keep repeating, asks you
+why each one mattered, and can write the answers up as project rules. Ships a companion MCP tool,
+which the installer builds and connects for you when you tick it.
+
+**When to use:** you notice you are correcting Claude the same way every week and want that turned
+into something the project remembers.
+
 ## ⚙️ Install
 
-Requires [Node.js](https://nodejs.org/). Clone, then run the installer:
+Requires [git](https://git-scm.com/downloads) and [Node.js](https://nodejs.org/). Clone, then run
+the installer:
 
 ```sh
 git clone https://github.com/adamlinscott/claude-skills.git
@@ -156,6 +198,39 @@ node install.mjs --uninstall   # remove what it installed
 
 Because the skills are linked rather than copied, editing one in this repo updates it live in
 every Claude session. Commit and push to share the change.
+
+#### Two tracks
+
+The first question is who the setup is for, because the right set of skills is not the same for
+someone building the software and someone reporting problems with it.
+
+| Track | What it does |
+|---|---|
+| **You write code** | The checklist wizard, opened on sensible developer defaults. Tick and untick whatever you like. |
+| **You don't, or you're setting this up for someone who doesn't** | No checklists. Applies the non-technical defaults — `/raise-issue`, `/ttp`, `/reground`, `/memory-audit`, plus plain-English replies — and shows the same Ready summary, naming every skill, before it touches anything. |
+
+Answer it up front with a flag:
+
+```sh
+node install.mjs --for=developer      # the checklist wizard
+node install.mjs --for=nontechnical   # non-technical defaults, no checklists
+node install.mjs --for=someone-else   # the same, plus what to do next on their machine
+```
+
+The flag only seeds the answers. It never skips the Ready confirmation, it never installs a
+third-party extra on its own, and a track default can only ever **add** to what you already have
+— choosing a track cannot uninstall a skill you were using. Removing things stays with
+`--uninstall`, which always shows you a list first, whatever `--for` says.
+
+Two details worth knowing before you automate it. With no terminal to prompt in and no flag you
+get the developer defaults, which now means *the skills that track defaults to* rather than
+literally all of them — `/raise-issue` is off for developers, so it will not appear. And an
+unattended run (`-y`, or no terminal) never switches on anything still in development, so the
+plain-English replies — currently a beta feature — need either a real run you can watch or an
+explicit `--beta`.
+
+If you are running this on a colleague's machine, the installer is one step of about nine.
+[SETUP-FOR-A-COLLEAGUE.md](SETUP-FOR-A-COLLEAGUE.md) is the rest.
 
 ### 📝 Global instructions
 
@@ -176,10 +251,36 @@ re-running updates it in place and never touches anything else in that file.
 ### Plugin install (scaffolded, not yet published)
 
 `.claude-plugin/` contains marketplace and plugin manifests so this collection can one day be
-installed from inside Claude Code with no terminal and no clone — which is the only route that
-reaches the non-technical audience `/seatbelt --vibe` is written for. Nothing is live until the
+installed from inside Claude Code with no terminal and no clone. Nothing is live until the
 marketplace is published. See [PUBLISHING.md](PUBLISHING.md) for what the files do and how to
 turn them on.
+
+Worth being straight about how that relates to the track above. The `--for=someone-else` track is
+a **handover tool**: it makes the job quick for a developer sitting at a colleague's machine, but
+it still needs a terminal, git, Node, a paid Claude seat and two clones, so it does not reach a
+non-technical person on its own. The plugin route is the self-serve fix — two lines pasted into a
+session they are already in — and it is the one that deletes most of
+[SETUP-FOR-A-COLLEAGUE.md](SETUP-FOR-A-COLLEAGUE.md). It is not published yet.
+
+## 🧪 Tests
+
+The installer links and unlinks directories in your home folder and rewrites a global config
+file, so it has a suite. No dependencies, no framework:
+
+```sh
+npm test
+```
+
+Every test spawns the real `install.mjs` as a child process with `HOME` and `USERPROFILE` pointed
+at a throwaway directory, then asserts on what actually landed on disk. CI runs it on Linux and
+Windows, because the link type differs between them and junctions are the harder half.
+
+Two environment variables exist for that harness, and are read nowhere else:
+
+| Variable | Effect |
+|---|---|
+| `CLAUDE_SKILLS_FORCE_PROMPT=1` | Run the arrow-key menus even when stdin is not a terminal, so a test can drive them with piped keystrokes. Set this outside a test and the installer will wait for input that never comes. |
+| `CLAUDE_SKILLS_LIST_FILE` | Read the skill list from somewhere other than `skills.txt`, so a test can use a fixture. |
 
 ## 📄 License
 

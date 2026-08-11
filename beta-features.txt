@@ -1,7 +1,17 @@
 # Features that are still in development.
 #
-# These are LEFT OUT of a normal install. They appear together in the installer's first
-# question, and are only applied when the person installing ticks them.
+# These are LEFT OUT of a normal install. On the "Let me choose" setup they appear together in
+# their own question, and are only applied when the person installing ticks them.
+#
+# Two deliberate exceptions, so this file does not overstate its own rule:
+#
+#   • A guided setup ("Set it up for me") shows no checklists at all, so a beta feature marked
+#     nontech:on IS applied without a tick — but it is always named, and labelled beta, in the
+#     Ready summary before anything happens. Nothing is applied silently; the difference is that
+#     the disclosure is a summary line rather than a checkbox.
+#   • An unattended run (-y, or no terminal) never enables a beta feature whatever the setup
+#     says, unless --beta is passed. Nothing still in development turns itself on with nobody
+#     watching.
 #
 # One per line, as:  <kind> <name>
 #

@@ -8,6 +8,7 @@ url: https://github.com/mattpocock/skills
 requires: claude=https://claude.com/claude-code
 command: claude plugins install mattpocock-skills
 next: Run /setup-matt-pocock-skills once in each repository — it asks which issue tracker you use and where your docs live.
+nontech_fallback: Everything else is ready. /raise-issue still works on its own — it will just write a simpler issue than it would with this installed.
 ---
 Specs, tickets, triage, and getting oriented in code you did not write — the planning end this
 repo deliberately leaves to you.
