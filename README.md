@@ -38,6 +38,7 @@ order — though most are useful on their own, too.
 | `/goal-workflow` | **Build.** The long, expensive bulk of the work — an autonomous loop that implements the plan to a written contract, verifying as it goes, until the invariants hold. (Run it as-is the first time; it will stop and walk you through the one-time setup it needs.) |
 | `/fresh-eyes` | **Verify.** Confirm the build actually completed to spec, and surface any bugs or oversights that slipped in, via a blind reconciliation against the intent. |
 | `/reground` | **Recover (as needed).** On longer follow-on sessions, if you start drifting from the main task, halt and re-anchor to codebase evidence before continuing. |
+| `/brief-me` | **Re-enter (as needed).** You came back on Monday to a session you left on Friday. Get a plain-English briefing on what it is, where it got to, and what it is waiting on from you, before you touch anything. |
 
 > [!TIP]
 > Most of these skills are useful standalone — you don't have to run the whole chain. Reach for `/assumption-inventory` before any long task, or `/fresh-eyes` after any finished diff.
@@ -153,6 +154,22 @@ compaction.
 
 **When to use:** the agent has gone off course, hallucinated files or APIs, or overbuilt.
 
+### `/brief-me`
+
+You left the session on Friday and came back on Monday. Reading the last message does not help:
+it was written for someone who was here five minutes ago, and leans on pronouns, on shorthand
+coined mid-session, and on file names introduced hours back. It continues the thread; it does
+not introduce it.
+
+Prints one short briefing that puts you back in the chair — what the session is, where it got
+to, what is on disk right now, what it needs from you split into *decide* / *tell me* / *do*,
+and the single next step if you just say go. It checks git and the files before it narrates, so
+a half-applied edit or a branch that moved under you gets named rather than smoothed over, and
+anything it is only recalling gets marked as recalled. Report only; it writes nothing and does
+not resume the work.
+
+**When to use:** you have come back to a long-running session and have no idea where you were.
+
 ### `/context-audit`
 
 Audits the context injected into every session (`CLAUDE.md`, `CONTEXT.md`, `docs/`, agents,
@@ -208,7 +225,7 @@ machine pick Advanced because it says it is for them, and everyone else takes Si
 | Install | Who it is for |
 |---|---|
 | **Advanced install** | Developers. Every skill, and you pick which ones from a checklist. This is the default answer. |
-| **Simple install** | People who do not write code. A small set for describing problems and writing them up — `/raise-issue`, `/ttp`, `/memory-audit` — plus plain-English replies in every project on the machine. Nothing to choose. |
+| **Simple install** | People who do not write code. A small set for describing problems, writing them up, and finding your place again — `/raise-issue`, `/ttp`, `/brief-me`, `/memory-audit` — plus plain-English replies in every project on the machine. Nothing to choose. |
 
 > [!WARNING]
 > **Simple is not a smaller Advanced, and if you write code you do not want it.** It is a

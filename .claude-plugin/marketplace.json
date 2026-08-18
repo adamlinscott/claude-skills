@@ -9,7 +9,7 @@
     {
       "name": "claude-skills",
       "source": "./",
-      "description": "Skills that add lifecycle gates around planning and building with Claude Code: assumption-inventory, fresh-eyes, goal-workflow, reground, ttp, context-audit, memory-audit, debrief, seatbelt, and raise-issue.",
+      "description": "Skills that add lifecycle gates around planning and building with Claude Code: assumption-inventory, fresh-eyes, goal-workflow, reground, brief-me, ttp, context-audit, memory-audit, debrief, seatbelt, and raise-issue.",
       "author": { "name": "Adam Linscott" },
       "homepage": "https://github.com/adamlinscott/claude-skills",
       "repository": "https://github.com/adamlinscott/claude-skills",
@@ -17,6 +17,7 @@
       "keywords": ["skills", "planning", "review", "permissions", "guardrails", "security", "issues"],
       "skills": [
         "./skills/assumption-inventory",
+        "./skills/brief-me",
         "./skills/context-audit",
         "./skills/debrief",
         "./skills/fresh-eyes",
