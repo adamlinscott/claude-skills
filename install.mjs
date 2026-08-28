@@ -44,7 +44,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
-import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, style, wrap } from "./lib/wizard.mjs";
+import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, readKey, style, wrap } from "./lib/wizard.mjs";
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoSkillsDir = path.join(repoRoot, "skills");
@@ -167,6 +167,7 @@ if (unknownFlags.length) {
     if (plan.instructions) applyInstructionBlocks(plan.instructions, plan.mayRemoveInstructions);
     await runExtras(plan.extras, plan.guided);
     printFarewell(plan);
+    await offerStar();
   }
 }
 
@@ -291,6 +292,51 @@ function printFarewell(plan = {}) {
     console.log(`  ${style.dim(`  Someone can add it with: ${extra.command}`)}`);
   }
   console.log("");
+}
+
+// ── A star, if it was any use ───────────────────────────────────────────────────────────────────
+
+// Two lines at the very bottom, after the install has already finished and nothing depends on the
+// answer. One key either way, and any key that is not yes means no — it must never read as another
+// step of the setup, or as something that has to be dismissed correctly.
+//
+// Skipped entirely unless it can actually be acted on: no terminal, --accept-defaults (they asked
+// to be asked nothing), an uninstall, or no gh on the machine. An ask that ends in "now go and do
+// it yourself in a browser" is worse than not asking.
+const STAR_REPO_FALLBACK = "adamlinscott/claude-skills";
+
+/** owner/name for the repo this installer came from, read from the plugin manifest. */
+function starRepo() {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(repoRoot, ".claude-plugin", "plugin.json"), "utf8"));
+    const url = typeof meta.repository === "string" ? meta.repository : meta.repository?.url || "";
+    const match = url.match(/github\.com[/:]([^/]+\/[^/.]+)/);
+    if (match) return match[1];
+  } catch {
+    // A missing or malformed manifest is not worth a word on screen at this point.
+  }
+  return STAR_REPO_FALLBACK;
+}
+
+async function offerStar() {
+  if (uninstall || acceptDefaults || !canPrompt() || !commandExists("gh")) return;
+  const repo = starRepo();
+
+  console.log(`  ${style.dim("If these turn out to be useful, a star helps other people find them.")}`);
+  console.log(`  ${style.dim("Enter or Space to star · any other key to finish")}`);
+
+  const key = await readKey();
+  closeInput();
+  const yes = key && (key.name === "return" || key.name === "enter" || key.name === "space" || key.str === " ");
+  console.log("");
+  if (!yes) return;
+
+  // --silent: the API returns the starred repo as JSON, and nobody wants it on their screen.
+  const res = spawnSync("gh", ["api", "--silent", "--method", "PUT", `user/starred/${repo}`], { stdio: "ignore" });
+  if (!res.error && res.status === 0) console.log(`  ${style.green("Starred.")} Thank you.
+`);
+  else console.log(`  ${style.dim(`Could not star it from here — https://github.com/${repo}`)}
+`);
 }
 
 // ── Questionnaire ───────────────────────────────────────────────────────────────────────────────
