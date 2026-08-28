@@ -65,4 +65,8 @@ reground | reground | Stops Claude when it has wandered off the task or started 
 
 seatbelt | seatbelt, seatbelts | Decides up front what Claude may do in a project without asking, and what it must never do. Set it once, then let Claude run without watching every step. | off,off
 
+ship-it | ship-it | Takes the work from a finished session all the way out — merges it, releases it, and checks each environment is really running it, production last. If the release would carry other people's unreleased work along with it, it tells you whose and asks before touching production. Developer setups only. | on,off
+
+ship-it-now | ship-it-now | The same as /ship-it, but it does not stop to ask before deploying other people's unreleased work — it names whose work is going out and carries straight on to production. Needs /ship-it installed alongside it. Developer setups only. | on,off
+
 ttp | ttp, to-the-point | Makes Claude's replies short and direct — the answer first, the detail only if you ask for it. Big decisions still come back to you. | on,on

@@ -37,6 +37,7 @@ order — though most are useful on their own, too.
 | `/ttp` | **Switch to implementation mode.** The decisions are made — turn on *To the Point* so replies lead with the substance and stay focused on shipping, not re-litigating. This is where it shines: mid-build, you want progress, not discussion. |
 | `/goal-workflow` | **Build.** The long, expensive bulk of the work — an autonomous loop that implements the plan to a written contract, verifying as it goes, until the invariants hold. (Run it as-is the first time; it will stop and walk you through the one-time setup it needs.) |
 | `/fresh-eyes` | **Verify.** Confirm the build actually completed to spec, and surface any bugs or oversights that slipped in, via a blind reconciliation against the intent. |
+| `/ship-it` | **Ship.** Get the verified work all the way out — merged, released, and confirmed running in every environment, production last. If the release would also carry unreleased work by other people, it names whose and asks before production. |
 | `/reground` | **Recover (as needed).** On longer follow-on sessions, if you start drifting from the main task, halt and re-anchor to codebase evidence before continuing. |
 | `/brief-me` | **Re-enter (as needed).** You came back on Monday to a session you left on Friday. Get a plain-English briefing on what it is, where it got to, and what it is waiting on from you, before you touch anything. |
 
@@ -53,6 +54,29 @@ Report-only by default; `--fix` / `--iterate` apply changes.
 
 **When to use:** work is complete and you want unbiased confirmation nothing was missed
 before shipping.
+
+### `/ship-it` (and `/ship-it-now`)
+
+Merged is not shipped, and a green deploy job is not proof anything is running. This grounds
+itself first — the branches this session wrote, the PRs behind them (including the closed-unmerged
+ones that look done and aren't), the environments the repo actually defines in its own CI/CD
+files, and the route from branch to production — then lands the work, releases it, and verifies
+each environment against the deployed SHA rather than against the job going green.
+
+The part that earns its keep is the ride-along check. On most repos a release carries everything
+sitting unreleased on the target branch, which routinely includes work by other developers and
+other agent sessions. Before production it works out what else is going out, summarises in a few
+lines whose work it is and what it does, and asks. Merge conflicts are resolved at low effort and
+in passing; it stops for a conflict only where the two sides genuinely want different behaviour,
+or where resolving either way would quietly remove what the other side added.
+
+`/ship-it-now` is the same skill with that one question turned off — it still prints who is
+riding along, it just doesn't wait for you, and it needs `/ship-it` installed beside it. Both are
+offered on the developer setup only — merging and deploying to production is not a thing to hand
+someone who cannot judge what came back. Both take no arguments by default; an optional scope
+override (`only staging`) narrows which environments it deploys to.
+
+**When to use:** the work is done and verified and you want it live, not just merged.
 
 ### `/ttp` (To the Point — also `/to-the-point`)
 
@@ -86,7 +110,7 @@ one repo on different terms. Ships a tested `guard.mjs` hook that fails closed a
 still alive at session start.
 
 > [!IMPORTANT]
-> Two skills here have side effects, and they are different in kind. `/seatbelt` **writes files** — settings and a hook, inside your repo, on your machine. `/raise-issue` goes further and writes **outside** it, filing an issue your whole team can see. Everything else in this collection is read-only. Both side effects happen only after you confirm them. `/seatbelt` stops Claude over-reaching; it is not a lock against a person who dismantles their own setup — and it says so, to your face, in the setup report.
+> Three skills here have side effects, and they are different in kind. `/seatbelt` **writes files** — settings and a hook, inside your repo, on your machine. `/raise-issue` goes further and writes **outside** it, filing an issue your whole team can see. `/ship-it` goes furthest of all: it **merges and deploys**, ending at production. Everything else in this collection is read-only. All three happen only after you confirm them — with the deliberate exception of `/ship-it-now`, which is that confirmation waived on purpose, by you, in the command you typed. `/seatbelt` stops Claude over-reaching; it is not a lock against a person who dismantles their own setup — and it says so, to your face, in the setup report.
 
 **When to use:** setting a project up for AI-assisted development, handing a repo to a
 non-technical builder, or any time you want to run auto mode without wondering what it might do.
