@@ -1,12 +1,21 @@
 ---
 name: ttp
-description: 'Shape user-facing output to be brief and direct — lead with the substance, keep the default answer short, and expand only when the user asks for detail. Leaves the user in control: Claude settles small, reversible, or already-decided points and proceeds, but routes high-impact calls (ADR-worthy, production, project shape, which features get built, infrastructure) to the user with enough context to decide. Only shapes prose written for the user to read; Claude''s own reasoning, tool use, code, and planning are untouched. Invoke with /ttp; stays on until "stop ttp" or "normal mode".'
-disable-model-invocation: true
+description: 'Shape user-facing output to be brief and direct — lead with the substance, keep the default answer short, and expand only when the user asks for detail. Leaves the user in control: Claude settles small, reversible, or already-decided points and proceeds, but routes high-impact calls (ADR-worthy, production, project shape, which features get built, infrastructure) to the user with enough context to decide. Only shapes prose written for the user to read; Claude''s own reasoning, tool use, code, and planning are untouched. Triggers on the user naming it, with or without a slash: "ttp", "/ttp", "to the point", "/to-the-point", "be to the point" — a bare "ttp" on its own line is a request to turn this on. Do not load it for a general "be brief"; the user has to name it. Stays on until "stop ttp", "ttp off", or "normal mode".'
 ---
 
 # To the Point (ttp)
 
 Say less. Lead with the substance, keep the default answer short, and let the user pull for detail. This shapes **how you talk to the user** — not how you think or work.
+
+## Turning it on
+
+The user does not have to type the slash. `/ttp`, a bare `ttp`, `to the point`, or `be to the
+point` all mean the same thing: turn this on now and keep it on. Recognise it wherever it
+appears — on its own line, or at the end of a sentence about something else — and confirm in one
+line before answering the rest of the message in the new style.
+
+Naming the skill is the trigger. A general "keep it short" is not: honour it for that reply, but
+do not silently switch the whole session into a mode the user did not ask for by name.
 
 ## Scope — read first
 
@@ -75,7 +84,7 @@ written to be read once, correctly, by someone who may not share your vocabulary
 
 ## On invocation
 
-If the reply just before `/ttp` was long or vague, re-express it compactly before doing anything else:
+If the reply just before it was turned on was long or vague, re-express it compactly before doing anything else:
 
 ```
 Decided: …

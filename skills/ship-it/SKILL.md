@@ -123,3 +123,19 @@ Close with a short report: what shipped, which PRs merged, which environments ar
 running which commit, anything deliberately skipped, any conflict you resolved on your own
 judgement, and anything still outstanding. If the work did not fully ship, say so in the first
 line rather than the last.
+
+## 8. Close-out check, after the ship (optional)
+
+Once the report is out and the environments are confirmed, run `/are-we-done` if it is
+installed. Skip this silently if it is not: never a prerequisite, never installed on the fly.
+
+**After, not before.** `/ship-it` is often used deliberately to push work that is still in
+testing, with a dirty tree and known gaps. A close-out sweep run before landing would flag every
+one of those as undecided and argue with a user who has already decided — the fastest way to
+make both skills annoying. Run afterwards, the same sweep is information rather than an
+obstacle: the release is out, and the question changes from *may I ship?* to *what is left, now
+that shipping is no longer the thing occupying you?*
+
+It never gates the ship and never reverses one. Anything it surfaces is next session's work, or
+the user's call — including a blocker, which by this point is a known-shipped defect to decide
+about, not a reason to hold a release that has already gone.
