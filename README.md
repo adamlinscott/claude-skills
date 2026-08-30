@@ -225,6 +225,20 @@ not resume the work.
 
 **When to use:** you have come back to a long-running session and have no idea where you were.
 
+### `/check-skill-updates`
+
+Skills are installed as links, not copies, so the collection updates the moment the clone they
+point at does — and nothing tells you when that clone has fallen behind. This checks, and offers
+to pull.
+
+Deliberately quiet. It speaks only when there is actually an update: up to date, offline, or a
+clone that is dirty or on a branch all produce silence rather than a status line nobody asked for.
+It checks at most once a day, and once you have said no to a version it never raises that version
+again. Other skills call it at a natural close — `/are-we-done` on a clean answer, `/ship-it` once
+the release is verified, `/brief-me` on re-entry — and never next to a blocker or a failed ship.
+
+**When to use:** directly, when you want to know if you are current; otherwise it finds you.
+
 ### `/context-audit`
 
 Audits the context injected into every session (`CLAUDE.md`, `CONTEXT.md`, `docs/`, agents,
@@ -270,6 +284,13 @@ node install.mjs --uninstall   # remove what it installed
 
 Because the skills are linked rather than copied, editing one in this repo updates it live in
 every Claude session. Commit and push to share the change.
+
+**Staying up to date is `git pull`, not a re-install.** The links point at this clone, so pulling
+updates every installed skill at once; re-running the installer is for adding or removing skills,
+and never refreshes content because there is no copy to refresh. The one exception is the optional
+instruction blocks, which really are copied into your global `CLAUDE.md` — `node install.mjs
+--refresh` rewrites those and repairs any dangling link, without adding or removing anything.
+`/check-skill-updates` does all of it for you, and tells you when there is something to pull.
 
 #### Simple or advanced
 

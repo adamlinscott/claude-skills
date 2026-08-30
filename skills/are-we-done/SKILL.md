@@ -78,6 +78,10 @@ One exception, only when something was deferred: a paste-ready `Parked:` block m
 parking outlives the session that decided it. Still read-only — you print it, the user places it,
 and `/raise-issue` files any of it that deserves a tracked issue.
 
+A clean close is also the one moment worth mentioning a waiting skills update: on shape A only, run
+`/check-skill-updates` if it is installed and append its single line. Never on B or C — an update
+offer beside an unanswered question or a blocker dilutes both.
+
 **B — Ambiguous items exist (no blockers).** Ask, via the **AskUserQuestion** tool — one question
 per ambiguous item, max four, each offering the real options (do it now / defer / won't do).
 Open with the tool call; do not narrate the questions in prose first. Then stop and wait; the

@@ -113,6 +113,7 @@ const KNOWN_FLAGS = [
   "--add-instructions",
   "--remove-instructions",
   "--skip-instructions",
+  "--refresh",
   "--extras",
   "--accept-defaults",
   "--yes",
@@ -128,6 +129,12 @@ const uninstall = has("--uninstall");
 const forceBeta = has("--beta");
 const forceNoBeta = has("--no-beta");
 const skipInstructions = has("--skip-instructions");
+// Re-link what is ALREADY linked and refresh the instruction blocks already present. Adds
+// nothing, removes nothing, asks nothing. This is what an update runs after a pull: skills are
+// links, so their content is already current, but a link can dangle (the clone moved) and an
+// instruction block is a real copy that has to be rewritten to change. Deliberately NOT -y,
+// which links this track's DEFAULTS and would silently add skills the user never ticked.
+const refresh = has("--refresh");
 const addInstructions = flagValue("--add-instructions");
 const removeInstructions = flagValue("--remove-instructions");
 const extrasArg = flagValue("--extras");
@@ -157,6 +164,9 @@ if (unknownFlags.length) {
 } else if (showHelp) {
   printBanner();
   printHelp();
+} else if (refresh) {
+  printBanner();
+  refreshInstalled();
 } else {
   const plan = await buildPlan();
   if (!plan) {
@@ -222,6 +232,12 @@ function printHelp() {
   console.log(`                                Available: ${names}`);
   console.log("  --remove-instructions=<names> Remove these blocks. Comma-separated, or 'all'.");
   console.log("  --skip-instructions           Do not ask about them, and leave any already there.");
+  console.log("");
+  console.log("  --refresh                     Re-link the skills you already have and rewrite the");
+  console.log("                                instruction blocks you already use, then stop. Adds");
+  console.log("                                nothing, removes nothing, asks nothing. Run it after");
+  console.log("                                a git pull. Skills are links, so their content is");
+  console.log("                                already up to date either way.");
   console.log("");
   console.log("  --extras=<names>              Also run these other people's installers, once this");
   console.log("                                repo's own skills are in. Comma-separated, 'all', or");
@@ -1141,6 +1157,31 @@ function report(group, state, note) {
   const colour = state === "PROBLEM" ? style.yellow : state === "skipped" || state === "kept" ? style.dim : style.green;
   const alias = group.folders.length > 1 ? style.dim(` +${group.folders.length - 1} alias`) : "";
   console.log(`  ${colour(state.padEnd(9))} ${group.name}${alias}${note ? ` ${style.dim(note)}` : ""}`);
+}
+
+/**
+ * --refresh: repair what is already installed, change nothing else.
+ *
+ * Only groups that are ALREADY linked are touched, and only ever by re-linking them; a group the
+ * user does not have stays absent. Instruction blocks are rewritten from the repo, but only the
+ * ones already in CLAUDE.md, and mayRemove is false so nothing can disappear. The result is safe
+ * to run unattended after a pull, which is exactly what the update path does.
+ */
+function refreshInstalled() {
+  console.log("  Refreshing what is already installed. Nothing is added or removed.\n");
+  const groups = loadSkillGroups();
+  let touched = 0;
+  for (const group of groups) {
+    if (!isGroupLinked(group)) continue;
+    touched++;
+    const outcomes = group.folders.map(linkFolder);
+    if (outcomes.includes("problem")) continue;
+    report(group, outcomes.includes("repaired") ? "repaired" : "ready", "");
+  }
+  if (!touched) console.log(`  ${style.dim("No skills from this repo are linked. Run the installer without --refresh first.")}`);
+  const blocks = loadInstructionBlocks();
+  if (blocks.length) applyInstructionBlocks(readInstalledBlockNames(blocks), false);
+  console.log("");
 }
 
 /** Link one folder. Returns "ready" | "installed" | "repaired" | "problem". */

@@ -53,6 +53,13 @@ If all three are empty, one line: `Nothing — say go.`
 
 **If you just say go** — the single next concrete step. Not the rest of the plan.
 
+## 2b. One optional footnote
+
+If `/check-skill-updates` is installed, run it after the brief and append its single line if it has
+one. Coming back after time away is when an update is most likely to be waiting and least likely to
+interrupt anything. Skip it silently if it is not installed, and drop it entirely if the brief had
+to report a half-applied edit or an incoherent tree — that is the user's first problem, not this.
+
 ## 3. Two more sections, only when they have content
 
 Render these only if there is something real to put in them. Omit them silently otherwise.

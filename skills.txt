@@ -51,6 +51,8 @@ assumption-inventory | assumption-inventory | Before a long job, checks what the
 
 brief-me | brief-me | Catches you up on a session you have lost the thread of — after a distraction, or over a weekend. Explains in plain English what you were doing, where it got to, what state it is in now, and what it is waiting on from you. Changes nothing. | on,on
 
+check-skill-updates | check-skill-updates | Checks whether the skills on your machine are behind the copy they were installed from, and offers to bring them up to date. Mentions it at most once a day, only when you are between tasks, and never again once you have said no to a version. | on,on
+
 context-audit | context-audit | Reviews the instructions and notes Claude reads in a project, and reports what is bloated, broken, or contradicting itself. Only reports; changes nothing. | on,off
 
 debrief | debrief | Reads back through your past Claude sessions to find the corrections you keep repeating, asks you why, and can write the answers up as project rules. | off,off
