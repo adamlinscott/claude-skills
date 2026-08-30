@@ -139,3 +139,6 @@ that shipping is no longer the thing occupying you?*
 It never gates the ship and never reverses one. Anything it surfaces is next session's work, or
 the user's call — including a blocker, which by this point is a known-shipped defect to decide
 about, not a reason to hold a release that has already gone.
+
+If the ship was clean and `/check-skill-updates` is installed, run it last and append its one line.
+Skip it after a ship that did not fully land: the user has something real to deal with.
