@@ -37,6 +37,7 @@ order — though most are useful on their own, too.
 | `/ttp` | **Switch to implementation mode.** The decisions are made — turn on *To the Point* so replies lead with the substance and stay focused on shipping, not re-litigating. This is where it shines: mid-build, you want progress, not discussion. |
 | `/goal-workflow` | **Build.** The long, expensive bulk of the work — an autonomous loop that implements the plan to a written contract, verifying as it goes, until the invariants hold. (Run it as-is the first time; it will stop and walk you through the one-time setup it needs.) |
 | `/fresh-eyes` | **Verify.** Confirm the build actually completed to spec, and surface any bugs or oversights that slipped in, via a blind reconciliation against the intent. |
+| `/are-we-done` | **Close the loop.** Before you call it a session, confirm nothing is still undecided — no half-decided suggestion, no unanswered question, no marker the diff left behind. A clean sweep answers in one line; otherwise it names the blockers or asks you about the open calls. |
 | `/ship-it` | **Ship.** Get the verified work all the way out — merged, released, and confirmed running in every environment, production last. If the release would also carry unreleased work by other people, it names whose and asks before production. |
 | `/reground` | **Recover (as needed).** On longer follow-on sessions, if you start drifting from the main task, halt and re-anchor to codebase evidence before continuing. |
 | `/brief-me` | **Re-enter (as needed).** You came back on Monday to a session you left on Friday. Get a plain-English briefing on what it is, where it got to, and what it is waiting on from you, before you touch anything. |
@@ -54,6 +55,32 @@ Report-only by default; `--fix` / `--iterate` apply changes.
 
 **When to use:** work is complete and you want unbiased confirmation nothing was missed
 before shipping.
+
+### `/are-we-done`
+
+A close-out gate, not a review. It asks one question — *can this session close?* — where done
+means **nothing is still undecided**, not that everything is finished. An item parked with a
+reason is closed; an item nobody ruled on is not, however small.
+
+It sweeps the same six sources every run: the todo list, the promises the session made to itself
+("leaving that for now", questions you never answered), the state of the work tree, `TODO`
+markers the diff itself introduced, whether tests actually ran *after* the last edit, and every
+issue or PR number mentioned — each resolved to its real title, never left as a bare `#123`.
+Then each hit lands in exactly one bucket: done, won't do, deferred, blocker, or undecided.
+
+It is strict by default — a dirty tree and a suite not re-run since the last edit are open points
+— but the floor lifts on evidence about how your project actually works: if CI runs the suite on
+every push and this session pushed, testing was not left undecided. Where it sees a stable
+pattern it can offer, once, to remember it for the project, so later sessions inherit the floor.
+It never assumes; and if the session was compacted it says so rather than reporting a source it
+can only half-read as clean.
+
+A clean sweep gets two lines and no more, plus a paste-ready `Parked:` block if anything was
+deferred, so the parking outlives the session that decided it (`/raise-issue` files whatever
+deserves a tracked issue). Blockers get a flat list — what broke, where, what it blocks. Genuinely open calls come back as questions with real options — do it
+now, defer, won't do — so the decision is yours to make rather than to approve. Read-only: it fixes nothing and decides nothing for you.
+
+**When to use:** the work looks finished and you are about to end the session, ship, or hand off.
 
 ### `/ship-it` (and `/ship-it-now`)
 
@@ -86,6 +113,10 @@ already-decided points and proceeds, but routes high-impact calls (architectural
 project shape, which features get built) up to you, one question at a time. Your reasoning,
 tool use, code, and plans are untouched — it compresses the report, never the work. Persists
 until "stop ttp" or "normal mode".
+
+No slash needed: a bare `ttp` or `to the point`, on its own or tacked onto the end of another
+message, turns it on. Naming it is the trigger — a general "keep it short" is honoured for that
+reply without switching the session into a mode you did not ask for.
 
 Also shapes the sentences themselves — one idea per sentence, active voice, one word per concept,
 no stacked nouns — borrowed from controlled-language practice, with precision ranked above

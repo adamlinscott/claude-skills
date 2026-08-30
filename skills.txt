@@ -45,6 +45,8 @@
 # A folder with no line here still installs, on its own, with no description. Blank lines and
 # lines starting with # are ignored. The installer reads this at run time.
 
+are-we-done | are-we-done | Checks whether a session can actually close: sweeps the todo list, the loose ends in the conversation, the state of your files, and any issue numbers mentioned, then tells you either "yes, done" in one line or exactly what is still undecided. Changes nothing. | on,off
+
 assumption-inventory | assumption-inventory | Before a long job, checks what the plan takes for granted — which files exist, what may be changed, what "finished" means — and asks you about anything it had to guess. | on,off
 
 brief-me | brief-me | Catches you up on a session you have lost the thread of — after a distraction, or over a weekend. Explains in plain English what you were doing, where it got to, what state it is in now, and what it is waiting on from you. Changes nothing. | on,on
