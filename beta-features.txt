@@ -22,6 +22,7 @@
 # instruction moves to the installer's "Other features" question. Blank lines and lines
 # starting with # are ignored. The installer reads this at run time; it never needs editing.
 
+skill        check-skill-updates
 skill        debrief
 skill        seatbelt
 instruction  clear-responses
