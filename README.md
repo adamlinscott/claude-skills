@@ -225,7 +225,7 @@ not resume the work.
 
 **When to use:** you have come back to a long-running session and have no idea where you were.
 
-### `/check-skill-updates`
+### `/check-skill-updates` — beta
 
 Skills are installed as links, not copies, so the collection updates the moment the clone they
 point at does — and nothing tells you when that clone has fallen behind. This checks, and offers
@@ -236,6 +236,9 @@ clone that is dirty or on a branch all produce silence rather than a status line
 It checks at most once a day, and once you have said no to a version it never raises that version
 again. Other skills call it at a natural close — `/are-we-done` on a clean answer, `/ship-it` once
 the release is verified, `/brief-me` on re-entry — and never next to a blocker or a failed ship.
+
+Beta while it is being lived with: left out of a normal install unless you tick it, and applied on
+the guided setup only after being named and labelled beta in the summary.
 
 **When to use:** directly, when you want to know if you are current; otherwise it finds you.
 
