@@ -144,10 +144,19 @@ Rules that hold on every run:
 
 ## 4. Pin the scope, in writing
 
-Write the scope note to `.claude/build-it/scope-<id>.md` and show it in the conversation. Template
-in [REFERENCE.md](REFERENCE.md). Run `git check-ignore -v` on the path and say which way it went:
-an ignored scope note lives on one machine only, which is fine for a solo build and wrong if you
-meant a reviewer to read it. State it once; do not ask about it.
+Write the scope note **outside the repository** and show it in the conversation. Template in
+[REFERENCE.md](REFERENCE.md). Put it in this session's scratchpad directory if the environment
+names one, otherwise `~/.claude/build-it/<repo-name>/scope-<id>.md`, creating the directory if
+needed. Say the path once so the user can open it.
+
+**It never goes in the repo and it is never committed.** A scope note records decisions taken at
+one moment against one state of the code; committed, it becomes a stale plan sitting in the tree
+forever, contradicting the code around it and trusted by whoever finds it next. It is working
+context for this build and the review that follows it, not a project artefact. So: never write it
+under the working tree, never `git add` it, and never include it in a commit — not with
+`--commit`, not when the user asks for a commit later, not as "just this once". If the user
+explicitly asks for a copy inside the repo, that is theirs to decide: write it where they say and
+tell them once that it will go stale.
 
 It has four parts, and the second is the one that earns the file:
 
@@ -201,8 +210,9 @@ costs time rather than saving it.
 
 **Git posture.** By default this skill makes **no commits** — it builds in the working tree and
 leaves version control to the user. With `--commit`, commit at logical points on a feature branch,
-branching first if the current branch is the default one. It never pushes, and never opens a PR;
-that is `/ship-it`.
+branching first if the current branch is the default one. Commit code only: the scope note lives
+outside the tree and stays out of every commit. It never pushes, and never opens a PR; that is
+`/ship-it`.
 
 **If the scope note turns out to be wrong** — the real change is bigger than it looked, or a
 blocker sits outside the boundary — stop and say so. Update the note, show what changed, and get a
@@ -238,6 +248,8 @@ an afternoon nobody agreed to.
   cheaper than discovering mid-build that the destination was never agreed.
 - **The scope note is written before the code, not after.** Written afterwards it is a summary of
   what happened, which is exactly the thing it exists to prevent.
+- **The scope note never enters the repository.** It is written outside the working tree and never
+  committed. Plans committed to a repo go stale silently and mislead the next reader.
 - **Report in plain English.** The person who filed the ticket may not read code. File paths are
   evidence; they are not an explanation.
 

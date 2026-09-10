@@ -68,7 +68,8 @@ answer were "you decide".
 
 ## §3 Scope note template
 
-Written to `.claude/build-it/scope-<id>.md` before any code.
+Written before any code, outside the repository — this session's scratchpad directory, or
+`~/.claude/build-it/<repo-name>/scope-<id>.md`. Never committed.
 
 ```markdown
 # Scope — <id> <title>
@@ -163,7 +164,7 @@ that disagrees with the diff is worse than none, because the next reader trusts 
 
 <One or two sentences: what now works that did not before.>
 
-**Scope note:** `.claude/build-it/scope-<id>.md`
+**Scope note:** `<path outside the repo>` (not committed)
 
 **Done**
 - [x] <Will change item> — <where>
