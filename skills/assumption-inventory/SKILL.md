@@ -1,6 +1,42 @@
 ---
 name: assumption-inventory
-description: Surface and confirm the load-bearing assumptions behind a task before a long or expensive run — goal, root, what may be edited, what is off-limits, what done means, and open questions — separating what can be cited from what is being guessed, so bad direction is caught before time is burned. Also pressure-tests the plan's acceptance criteria, flagging any that are weak or built on unproven assumptions, and asks the blocking uncertainties (scope boundaries, interpretations, soft "done" bars) as structured questions. Use at the start of a multi-step or high-cost task, when resuming ambiguous or handed-off work, or whenever the target is not crisply stated and you are about to commit to a long run.
+description: '[Adam Skills] DEPRECATED — superseded by /build-it. Do not use for new work. Surfaced the load-bearing assumptions behind a task before a long run — goal, root, what may be edited, what is off-limits, what done means, open questions — tagging each as cited fact or guess, and gating the load-bearing guesses on confirmation. Its six slots are now the four headings of the scope note /build-it writes before any code, so running both duplicated most of a pass; the root and platform check and the cite-or-flag discipline moved across with it. Kept installable only so existing setups are redirected rather than broken. If invoked, say it is deprecated and offer /build-it instead.'
+disable-model-invocation: true
+---
+
+# Assumption Inventory — DEPRECATED
+
+> **This skill is deprecated. Use [`/build-it`](../build-it/SKILL.md) instead.**
+>
+> If someone has invoked this, do not run the protocol below. Tell them in two lines that it is
+> retired and why, then offer `/build-it` — pointed at a ticket number if they have one, or at a
+> plan file, a spec, or just a description of the work if they do not. Run this one only if they
+> explicitly say they want it anyway, having been told.
+>
+> **Why it was retired.** It was built as the preflight for a long autonomous run, and the run it
+> fed (`/goal-workflow`) is retired too. `/build-it` now does the same work earlier and in one
+> pass: its scope note carries this skill's six slots as four headings — *Building* for the goal,
+> *Will change* for what may be edited, *Will not change* for what is off-limits, *Done when* for
+> the completion bar — and its interview surfaces the open questions. Running both meant filling
+> the same inventory twice.
+>
+> **What moved across rather than being lost:**
+>
+> - The **root, workspace and platform check** — is this the right repo, does the change stop at
+>   its edge, what must this actually run on — is now step 2 of `/build-it`.
+> - The **cite-or-flag discipline** — tag every claim `[cited: file:line]` or `[assumption]`,
+>   because "can I point at what makes this true?" is a stricter test than "am I unsure?" — is now
+>   step 4, and the scope-note template carries the tags.
+> - The **catalog of assumptions that feel like facts** — local auth, stale ADR contracts,
+>   single-platform, done-means-code-written — is in `/build-it`'s REFERENCE.
+>
+> **What did not move:** the critique of a plan's *existing* acceptance criteria as unmeasurable
+> or unproven. `/build-it` asks you what done looks like; it does not audit a bar someone else
+> already wrote. If you find you miss that, it is worth raising as its own small skill rather than
+> reviving this one.
+
+The original protocol follows, unchanged, for anyone who deliberately chooses to run it.
+
 ---
 
 # Assumption Inventory

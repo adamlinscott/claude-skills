@@ -1,6 +1,6 @@
 ---
 name: brief-me
-description: 'Print a plain-English re-entry briefing for a user who has lost the thread of a long-running session — after a distraction, overnight, or over a weekend. Re-explains what the session is, where it got to, what state the work is in right now, what Claude is waiting on from the user, and the single next step. Grounds every claim in git and files on disk before narrating, so it re-explains the session rather than inventing a tidy story of it. Report only: it writes nothing and never resumes work. Invoke with /brief-me.'
+description: '[Adam Skills] Print a plain-English re-entry briefing for a user who has lost the thread of a long-running session — after a distraction, overnight, or over a weekend. Re-explains what the session is, where it got to, what state the work is in right now, what Claude is waiting on from the user, and the single next step. Grounds every claim in git and files on disk before narrating, so it re-explains the session rather than inventing a tidy story of it. Report only: it writes nothing and never resumes work. Invoke with /brief-me.'
 disable-model-invocation: true
 allowed-tools: Read, Grep, Glob, Bash
 ---

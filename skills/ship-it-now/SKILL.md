@@ -1,6 +1,6 @@
 ---
 name: ship-it-now
-description: '[skips confirmation] The unattended form of /ship-it. Gets this conversation''s work merged and deployed to every environment the repo has, production included — and does NOT stop to confirm when the release also carries unreleased work by other developers or other agent sessions. Identical to /ship-it in every other respect: same grounding in branches, PRs and environments, same verification, same merge-conflict policy. Takes no arguments by default; an optional scope override such as "only staging" limits which environments it deploys to. Invoke with /ship-it-now when you already know what is on the target branch and do not want to be asked.'
+description: '[Adam Skills] [skips confirmation] The unattended form of /ship-it. Gets this conversation''s work merged and deployed to every environment the repo has, production included — and does NOT stop to confirm when the release also carries unreleased work by other developers or other agent sessions. Identical to /ship-it in every other respect: same grounding in branches, PRs and environments, same verification, same merge-conflict policy. Takes no arguments by default; an optional scope override such as "only staging" limits which environments it deploys to. Invoke with /ship-it-now when you already know what is on the target branch and do not want to be asked.'
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---

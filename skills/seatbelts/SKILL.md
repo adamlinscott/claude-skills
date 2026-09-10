@@ -1,6 +1,6 @@
 ---
 name: seatbelts
-description: Alias for the seatbelt skill. Sets up the security foundation that lets you run Claude Code fast — auto mode, custom tools, minimal interruptions — without it doing something irreversible you never asked for. Two modes, one for developers and one for non-technical vibe coders. Use when setting up a project for AI-assisted development, when handing a repo to a non-technical builder, or when the user says they want Claude to stop breaking things, worries it will delete their work, or wants to run auto mode with confidence.
+description: '[Adam Skills] Alias for the seatbelt skill. Sets up the security foundation that lets you run Claude Code fast — auto mode, custom tools, minimal interruptions — without it doing something irreversible you never asked for. Two modes, one for developers and one for non-technical vibe coders. Use when setting up a project for AI-assisted development, when handing a repo to a non-technical builder, or when the user says they want Claude to stop breaking things, worries it will delete their work, or wants to run auto mode with confidence.'
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 disable-model-invocation: true
 ---

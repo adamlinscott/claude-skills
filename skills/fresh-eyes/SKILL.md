@@ -1,6 +1,6 @@
 ---
 name: fresh-eyes
-description: Fresh-context audit of a finished diff against the conversation's stated intent. A subagent with zero conversation history reviews the diff blind — reporting what it believes the change does, its quality, and any oversights — then the main context reconciles that blind read against what the work was actually meant to do, and surfaces any assumption about real-world behaviour that the code cannot settle. Use when a chunk of work is complete and you want fresh eyes to confirm nothing was missed, scope is fully covered, and no oversights or bugs slipped through, before moving on or shipping.
+description: '[Adam Skills] Fresh-context audit of a finished diff against the conversation''s stated intent. A subagent with zero conversation history reviews the diff blind — reporting what it believes the change does, its quality, and any oversights — then the main context reconciles that blind read against what the work was actually meant to do, and surfaces any assumption about real-world behaviour that the code cannot settle. Use when a chunk of work is complete and you want fresh eyes to confirm nothing was missed, scope is fully covered, and no oversights or bugs slipped through, before moving on or shipping.'
 ---
 
 # fresh-eyes
@@ -14,6 +14,17 @@ Not *only* a bug-hunt. The primary lens is completeness and intent — did the c
 what it was meant to, fully. Catching bugs and oversights is a secondary byproduct of
 that check, welcome but not the goal. For a dedicated correctness sweep, use
 `/code-review` or `/codex review` instead.
+
+**Why this is not the verification pass you were told to delete.** Current prompting guidance
+says to strip explicit verification instructions — "double-check your answer", "add a final
+verification step", "use a subagent to verify" — because the model already self-checks and the
+instruction compounds into wasted passes. That is correct, and it does not describe this skill.
+Those instructions ask the *same* context to look at its own work again, which is the pass that
+adds nothing. This skill's value is not the second look; it is that the second reader **has never
+seen the conversation**, so it cannot inherit the premise the first reader was working from. That
+is a different instrument, and no amount of self-checking substitutes for it. Keep the isolation;
+it is the whole mechanism. What the guidance *does* bite on here is quantity — see the fan-out
+guardrail below.
 
 **Know what this instrument cannot see.** It measures the gap between two readings, so
 it is blind to any error the two share. If the intent itself is wrong, a faithful
@@ -87,6 +98,16 @@ Run these steps in order. Do not skip step 1 — it is the integrity gate.
    Assumptions only the user can confirm → Verdict (`DONE` / `DONE_WITH_CONCERNS` /
    `GAPS`).
 
+   **Report everything you found, ranked by severity — do not pre-filter to the serious
+   ones.** A blind read's whole value is that it noticed something the author could not,
+   and a conservatism filter throws exactly those away: told to be selective, the judgement
+   that gets worse is *what counts as serious*, not what gets reported. Rank honestly and
+   let the user draw the line.
+
+   **Then keep the report to the length the findings need.** Every section earns its place
+   by having content; an empty one is omitted, not filled. A clean audit is a short report,
+   and padding a `DONE` verdict out to a full template makes the next one harder to read.
+
 6. **Decide what happens next.**
    - If `--fix` or `--iterate` was passed, proceed into that mode now (see Modes).
    - If neither flag was passed, STOP and ask the user whether to fix the in-scope gaps,
@@ -104,9 +125,12 @@ passed, the skill does NOT modify anything — it reports, then asks (step 6).
 
 - **(no flag) — report only.** Produce the report and stop. Strictly read-only.
 - **`--fix`.** After the report, fix the in-scope gaps, then re-audit once.
-- **`--iterate`.** Fix-and-re-audit loop, bounded to **3 rounds max**. End with a final
+- **`--iterate`.** Fix-and-re-audit loop, bounded to **2 rounds max**. End with a final
   overview: what was implemented, what remains in scope, what is deferred out of scope.
-  See [REFERENCE.md](REFERENCE.md) for the loop.
+  See [REFERENCE.md](REFERENCE.md) for the loop. Two rounds, not three: a gap that
+  survived one honest fix-and-re-audit is usually a gap the loop cannot close, and the
+  third round almost always spends a full blind audit confirming that. Surfacing it to
+  the user is both cheaper and more useful than another pass.
 
 **Non-fixable findings.** Behavioural assumptions and reductions in breadth are never
 auto-resolved, in any mode. `--fix` and `--iterate` must surface them and move on, never
@@ -124,9 +148,13 @@ survive the loop intact rather than being tidied away by it.
   claim to be tested, not as context (see [REFERENCE.md](REFERENCE.md)).
 - Only `--fix`/`--iterate`, or explicit user approval at step 6, may modify the tree.
   With no flag and no approval, the skill is strictly read-only.
-- One blind agent is enough for most diffs. For a large or high-stakes diff, fan out
-  2–3 with distinct lenses (does-it-work / completeness / bugs-and-edge-cases) and
-  reconcile all of them — see [REFERENCE.md](REFERENCE.md).
+- **One blind agent, by default and nearly always.** The isolation is what does the work
+  here, and isolation does not compound: a second and third agent reading the same diff
+  mostly re-derive the first one's findings at triple the cost, and the reconciliation
+  step then has three near-identical reports to weigh instead of one clear read. Fan out
+  to 2–3 lensed agents (does-it-work / completeness / bugs-and-edge-cases) only when the
+  diff is genuinely too large for one agent to hold — hundreds of lines across unrelated
+  modules — and say why you did. See [REFERENCE.md](REFERENCE.md) for the lenses.
 
 ## Relationship to other skills
 
@@ -135,8 +163,11 @@ survive the loop intact rather than being tidied away by it.
 plan-preflight skill (cold read of a plan before implementation) may follow; this
 skill stays diff-only.
 
-`assumption-inventory` is the front half of the same problem — it surfaces load-bearing
-assumptions *before* a long run, where they are cheap to correct. If a fresh-eyes report
-keeps landing behavioural assumptions late, that is a signal to run
-`assumption-inventory` at the start of the next piece of work rather than to grow this
-skill toward it.
+`/build-it` is the front half of the same problem. Its scope note — written before any
+code, naming what will and will not change, and tagging each claim as cited or assumed —
+is the cheap place to catch a load-bearing assumption, and it is also the best thing to
+audit this diff against. If a fresh-eyes report keeps landing behavioural assumptions
+late, that is a signal to start the next piece of work through `/build-it` rather than to
+grow this skill toward it.
+
+(`assumption-inventory` used to hold that role and is now retired into `/build-it`.)
