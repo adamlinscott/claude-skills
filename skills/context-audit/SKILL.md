@@ -1,6 +1,6 @@
 ---
 name: context-audit
-description: Audits a repository's Claude context-injection setup — CLAUDE.md, CONTEXT.md, docs/, .claude/agents/, and the per-project memory directory. Reports bloat, broken links, orphaned docs, security risks, missing rules in subagent prompts, and conflicts between memory and project instructions. Use when the user asks to audit their Claude setup, asks "what's wrong with my CLAUDE.md", wants to know if their agents/memory/docs are configured well, or wants to improve Claude's effectiveness in this repository.
+description: '[Adam Skills] Audits a repository''s Claude context-injection setup — CLAUDE.md, CONTEXT.md, docs/, .claude/agents/, and the per-project memory directory. Reports bloat, broken links, orphaned docs, security risks, missing rules in subagent prompts, and conflicts between memory and project instructions. Use when the user asks to audit their Claude setup, asks "what''s wrong with my CLAUDE.md", wants to know if their agents/memory/docs are configured well, or wants to improve Claude''s effectiveness in this repository.'
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
@@ -48,6 +48,61 @@ Distinguish:
 - **Personal style preferences** the user has explicitly classified as their own (preferred idioms, formatting choices, etc.) — do not flag.
 - **Agent-behaviour rules** (e.g. "don't run deep git archaeology", "don't pipe tool output through ad-hoc scripts") — memory is the correct home; do not flag.
 
+### Legacy prompting patterns
+
+Instructions age badly. Each Claude generation ships with its own prompting notes, and some of
+that advice **inverts** — a line that fixed a real problem two model releases ago now causes the
+opposite one. Nobody goes back and deletes those lines, so a mature `CLAUDE.md` accumulates them,
+and they are invisible precisely because they used to work.
+
+Flag each of the following, quoting the line and saying what it now causes:
+
+- **Mandated self-verification** — "double-check your answer", "always re-verify before
+  responding", "include a final verification step for any non-trivial task", "use a subagent to
+  verify your work". Current models self-check; the instruction compounds with that and spends
+  extra passes on work that was already correct. Fix: delete rather than reword.
+- **Anti-laziness and thoroughness prompting** — "always be thorough", "if in doubt, use
+  \<tool\>", "default to using \<tool\>", "read as many files as you can before answering". Written
+  when tools under-triggered. They now over-trigger. Fix: narrow to when the tool actually helps
+  ("use \<tool\> when it would clarify the problem"), or delete.
+- **Shouted emphasis** — `CRITICAL:`, `YOU MUST`, `NEVER EVER`, ALL-CAPS imperatives, and
+  emphasis stacked on ordinary instructions. Models are far more responsive to the system prompt
+  than the generation these were written for, so the volume now buys over-triggering rather than
+  compliance. Fix: normal prose — "Use this when…" instead of "CRITICAL: You MUST use this
+  when…".
+- **Conservatism filters on review instructions** — "only report high-severity issues", "be
+  conservative", "don't flag minor problems". Taken literally, these make the model report *less*
+  rather than judge better, and the findings lost are the marginal ones a human would have wanted
+  to see. Fix: ask for everything, ranked, and filter in a separate pass.
+- **Mandated subagent fan-out** — "always delegate to subagents", "spawn an agent per module",
+  "use parallel agents for exploration". Models now delegate readily on their own; the standing
+  advice is to damp it. Fix: state when delegation *is* warranted, or delete.
+- **Blanket anti-formatting blocks** — long "never use bullet points / headers / bold" sections.
+  Written against models that over-formatted. Newer ones under-format, and a block like this
+  suppresses structure the content needed. Fix: replace with a rule about when formatting helps.
+- **Narration suppression** — "hold all findings for the final response", "do not comment
+  between tool calls". These now produce an agent that goes silent for minutes. Fix: say what a
+  good update looks like instead.
+- **Stale model identifiers**, in context files *and* in code the docs point at — `claude-3-*`,
+  `claude-*-4-5`, or any pinned model string that is no longer current. Also flag `budget_tokens`
+  and manual extended-thinking config, which is deprecated in favour of effort. Verify against
+  the `claude-api` skill or current docs rather than from memory; do not assert an ID is stale
+  without checking.
+- **Instructions not to think or reason.** Rare, but worth catching: they increase internal-tag
+  leakage into visible output rather than reducing reasoning. Fix: delete; control cost with
+  effort instead.
+
+**Do not flag a safety gate as over-emphasis.** This is the failure mode of this whole section,
+and it is worse than the problem it solves. "Never publish without explicit confirmation", "never
+force-push", "always show the user the finished text before filing" are load-bearing controls on
+irreversible or externally-visible actions, and their emphasis is doing real work. The test is
+what the line protects: emphasis on **an irreversible or outward-facing act** stays; emphasis on
+**an ordinary working instruction** is the thing to dial down. When you are unsure which one you
+are looking at, leave it and say why.
+
+State plainly at the top of this section which model generation's guidance you are applying, and
+that these are calibrations rather than errors — the lines were correct when written.
+
 ### Bloat
 - CLAUDE.md sections over ~20 lines covering a single domain that most sessions don't touch. Recommend moving the detail to `docs/<domain>/` and replacing with a one-line pointer.
 - Repeated explanations of the same concept across CLAUDE.md, agent files, and docs.
@@ -86,6 +141,11 @@ Read: CLAUDE.md, CONTEXT.md, N docs files, M agent files, K memory files.
 ## Missing rules in subagents
 - **[gap]** `memory/feedback_<rule>.md` — universal rule, not in `<coding-agent>.md`. Every subagent session starts blind to this. Fix: add a rule body to the agent prompt under Coding guidelines.
 
+## Legacy prompting patterns
+Calibrated against <model generation> guidance. These were correct when written.
+- **[legacy]** `CLAUDE.md:112` — "always double-check your work before responding". Current models self-verify; this adds passes over work already correct. Fix: delete.
+- **[legacy]** `.claude/agents/<agent>.md:8` — "CRITICAL: You MUST use the search tool". Over-triggers now. Fix: "Use the search tool when…".
+
 ## Bloat
 - **[bloat]** `CLAUDE.md:320-336` — 17-line section relevant to ~5% of sessions. Fix: move to `docs/<topic>/<detail>.md` and replace with a one-line pointer.
 
@@ -100,7 +160,7 @@ Read: CLAUDE.md, CONTEXT.md, N docs files, M agent files, K memory files.
 - **[gap]** `<module>/` has no `README.md` and no `docs/<topic>/` reference in CLAUDE.md.
 
 ## Summary
-N findings — S security, C conflicts, G subagent gaps, B bloat, L broken/orphan, T stale, D coverage.
+N findings — S security, C conflicts, G subagent gaps, P legacy prompting, B bloat, L broken/orphan, T stale, D coverage.
 Highest priority: <one-line recommendation>.
 ```
 
@@ -111,3 +171,15 @@ Highest priority: <one-line recommendation>.
 - If a section has zero findings, omit it entirely — don't list "Security: none".
 - End with a Summary line giving counts and the single highest-priority recommendation.
 - Do not propose to "apply the fixes" — the audit is purely diagnostic. The user reads it and decides.
+
+**Report everything you find, ranked — do not apply a severity filter.** A setup audit is read
+once, by someone deciding what to change; the marginal findings are exactly the ones they can
+weigh and you cannot. Rank honestly by severity and let them draw the line. Suppressing the small
+stuff does not make the report sharper, it makes it shorter and less useful.
+
+**One finding, one bullet.** Each is a path, a one-line cause, and a concrete fix — three lines
+at most, and usually one. Do not expand a finding into a paragraph explaining the principle
+behind it, do not restate the same finding under two sections, and do not add a closing
+commentary after the Summary. This report scales with the number of problems found, and a clean
+setup should produce a short page. A long report about a healthy repo is a failure of the audit,
+not a thorough one.

@@ -1,9 +1,39 @@
 ---
 name: goal-workflow
-description: Run a settled implementation goal as a bounded autonomous build loop — lock the goal from the conversation and any docs written this session, front-load every decision, map the terrain, write a completion-invariant contract before any code, then loop (building with explicit Agent-tool fan-out, committing at intervals, verifying at milestones with fresh-eyes against the contract) until the invariants hold, and close out. Gated on a `--confirm` flag asserting the user has manually set ultracode effort and auto-accept mode (a skill can set neither); without the flag it stops, gives the setup steps, and offers two paths — a managed `--confirm` run, or a copy-pasteable `/goal` command that hands the work to native goal + workflow orchestration. An optional `--commit` flag (default off) enables commit-at-intervals and push-at-milestones in both the managed run and the generated command; without it, nothing is committed. Use when a plan is settled and you want Claude to implement it end-to-end on its own — typically after a planning skill — or whenever the user says goal-workflow.
+description: '[Adam Skills] DEPRECATED — superseded by /build-it. Do not use for new work. Ran a settled goal as a bounded autonomous build loop: locked the goal, front-loaded decisions, wrote a completion-invariant contract before any code, then looped with explicit Agent-tool fan-out and fresh-eyes verification at every milestone until the invariants held. It gated on ultracode effort, mandated subagent fan-out, and verified repeatedly — three patterns that current Claude models make redundant or actively counterproductive, which is why it underperformed and was retired. Kept installable only so existing setups are redirected rather than broken. If invoked, say it is deprecated and offer /build-it instead.'
+disable-model-invocation: true
 ---
 
-# Goal Workflow
+# Goal Workflow — DEPRECATED
+
+> **This skill is deprecated. Use [`/build-it`](../build-it/SKILL.md) instead.**
+>
+> If someone has invoked this, do not run the workflow below. Tell them in two lines that it is
+> retired and why, then offer `/build-it` — pointed at a ticket number if they have one, or at
+> the plan file this session produced if they do not. Run it only if they explicitly say they
+> want this one anyway, having been told.
+>
+> **Why it was retired.** Three of its load-bearing design decisions are now counter-guidance
+> for the models it runs on:
+>
+> - It **hard-gated on ultracode effort.** Current guidance is to start at the default and step
+>   up only where a measurement shows a gain; low and medium hold quality on most work at a
+>   fraction of the cost. Forcing maximum effort made every run expensive by construction.
+> - It **mandated explicit Agent-tool fan-out.** Models now delegate readily on their own, and
+>   the standing advice is to damp that down rather than require it. The mandate produced
+>   subagents on work that one context could have finished faster.
+> - It **verified at every milestone, again in a bounded fix loop, and again at closeout.**
+>   Explicit repeated-verification instructions are the single clearest "remove this" in the
+>   current prompting guidance: they compound with self-checking the model already does, and
+>   cost tokens and latency without improving the result.
+>
+> `/build-it` keeps the one idea here that was always right — **write the scope down before
+> writing any code** — and drops the rest. It starts from a ticket number, asks only what the
+> ticket and the code cannot answer, pins what will and will not change, builds, and stops.
+
+The original workflow follows, unchanged, for anyone who deliberately chooses to run it.
+
+---
 
 Turn a settled goal into a **bounded implementation loop, then force proof, then fix or
 close.** This is the implementation-phase sibling to `assumption-inventory` (before),

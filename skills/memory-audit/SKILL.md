@@ -1,6 +1,6 @@
 ---
 name: memory-audit
-description: Audit Claude's per-user memory for this project and produce a report. Asks at the start whether the user wants a non-technical summary or a full technical audit. Never edits memory — produces a report only. Usage: /memory-audit
+description: '[Adam Skills] Audit Claude''s per-user memory for this project and produce a report. Asks at the start whether the user wants a non-technical summary or a full technical audit. Never edits memory — produces a report only. Usage: /memory-audit'
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion
 ---
 
@@ -123,6 +123,17 @@ After the per-entry list, report:
 If any of the memories are classified not as "Keep", end the technical report with a prioritised action list: which
 entries to address first, and whether the recommended
 next step is editing the entry, moving it elsewhere, or dropping it.
+
+## Report length
+
+Both formats are per-entry and fixed-shape, which makes them easy to pad without noticing. Hold
+each entry to the shape given above and no more: one plain sentence per field in the
+non-technical format, one sentence of rationale per classification in the technical one. Do not
+add a preamble explaining what a memory audit is, do not restate an entry's content before
+judging it, and do not append closing commentary after the prioritised action list.
+
+A memory directory with six healthy entries should produce a short report. Length here should
+track the number of memories and the number of problems, never the effort spent looking.
 
 ## After the report
 

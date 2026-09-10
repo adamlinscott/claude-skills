@@ -45,6 +45,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, readKey, style, wrap } from "./lib/wizard.mjs";
+import { blockPattern, applyBlocks, detectEol } from "./lib/claude-md.mjs";
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoSkillsDir = path.join(repoRoot, "skills");
@@ -52,6 +53,7 @@ const repoInstructionsDir = path.join(repoRoot, "instructions");
 const repoToolsDir = path.join(repoRoot, "tools");
 const betaListFile = path.join(repoRoot, "beta-features.txt");
 const skillsListFile = path.join(repoRoot, "skills.txt");
+const deprecatedListFile = path.join(repoRoot, "deprecated.txt");
 const repoExtrasDir = path.join(repoRoot, "extras");
 
 // Problems found while READING the config files: a line naming folders that do not exist, a
@@ -394,6 +396,18 @@ async function buildPlan() {
     .map((f) => f.name);
   const linkedStable = stableGroups.filter(isGroupLinked).map((g) => g.name);
 
+  // Retired skills. Named in deprecated.txt rather than deleted, so anyone who already has one
+  // gets redirected instead of finding a command that quietly stopped existing.
+  const deprecatedNames = loadDeprecatedNames();
+  const isDeprecated = (name) => deprecatedNames.has(name);
+  // The ones actually sitting on this machine — the only ones worth saying anything about. On a
+  // clean install this is empty and the whole retirement path costs nothing.
+  const deprecatedLinked = stableGroups.filter((g) => isDeprecated(g.name) && linkedStable.includes(g.name)).map((g) => g.name);
+  // Explicitly agreed removals. Kept apart from the checklist's prune set because the two are
+  // authorised differently: prune means "you saw a ticked box and cleared it", this means "you
+  // answered a question that named this skill". The second works on tracks where no checklist runs.
+  const retire = new Set();
+
   const screen = () => {
     clearScreen();
     printBanner();
@@ -508,7 +522,10 @@ async function buildPlan() {
   const prune = { skills: askSkills, beta: askBeta, instructions: askOptional };
 
   // What this track would switch on, before anything already installed is folded in.
-  const trackSkills = stableGroups.filter((g) => g.defaults[track]).map((g) => g.name);
+  // A retired skill is never switched on by a track, whatever its defaults column still says.
+  // The column is the belt; this is the braces, and it means retiring something is one line in
+  // deprecated.txt rather than a line there plus a defaults edit that is easy to forget.
+  const trackSkills = stableGroups.filter((g) => g.defaults[track] && !isDeprecated(g.name)).map((g) => g.name);
   const trackBlocks = blocks.filter((b) => b.defaults[track]).map((b) => b.name);
   // Beta stays off on a flag-driven run whatever the track says — an unattended run never
   // enables something still in development. Interactively it is named and labelled in the
@@ -534,13 +551,50 @@ async function buildPlan() {
 
   if (interactive) {
     try {
+      // — Retired skills —
+      // Only ever asked when one is actually installed here, and never during an uninstall, where
+      // every checkbox already means removal and this question would just be a second, differently
+      // worded way to answer the same thing. Not counted as a numbered step: like the install-mode
+      // fork, it exists only on some runs, and a counter that changes shape between machines is
+      // worse than no counter on this screen.
+      if (deprecatedLinked.length && !uninstall) {
+        screen();
+        const answer = await chooseAction({
+          heading: deprecatedLinked.length === 1 ? "A skill you have has been retired" : "Some skills you have have been retired",
+          body: [
+            ...deprecatedLinked.flatMap((name) => {
+              const group = groupNamed(name);
+              return [style.yellow(`  /${name}`), ...wrap(group?.description || NO_DESCRIPTION, 80).map((l) => `    ${style.dim(l)}`), ""];
+            }),
+            ...wrap(
+              "Retired skills stay in the repo and keep working, so nothing breaks if you leave them. They are no longer maintained, and they are not installed on new machines.",
+              84,
+            ).map((l) => style.dim(l)),
+          ],
+          items: [
+            { value: "remove", label: deprecatedLinked.length === 1 ? "Remove it" : "Remove them", hint: "recommended — the replacement is named above" },
+            { value: "keep", label: "Keep for now", hint: "leave it installed; you will be asked again next time" },
+          ],
+          initial: "remove",
+        });
+        // Escape and Ctrl-C arrive as null. Cancelling the run must not be read as "keep",
+        // because the run does not continue at all — return, exactly as the mode fork does.
+        if (!answer) return null;
+        if (answer === "remove") {
+          for (const name of deprecatedLinked) {
+            retire.add(name);
+            selectedSkills.delete(name);
+          }
+        }
+      }
+
       // — Skills —
       if (askSkills) {
         screen();
         const picked = await multiSelect({
           heading: `Skills${stepLabel()}`,
           note: uninstall ? "Tick the ones to remove." : "Tick the ones you want available in Claude.",
-          items: stableGroups.map((g) => ({ value: g.name, label: g.name, details: g.description || NO_DESCRIPTION })),
+          items: stableGroups.map((g) => ({ value: g.name, label: g.name, hint: isDeprecated(g.name) ? "deprecated" : "", details: g.description || NO_DESCRIPTION })),
           selected: [...selectedSkills],
         });
         if (!picked) return null;
@@ -618,7 +672,7 @@ Runs: ${e.command}`,
       screen();
       const go = await chooseAction({
         heading: `Ready${stepLabel()}`,
-        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks, guided }),
+        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks, guided, retire }),
         items: [
           { value: "go", label: uninstall ? "Remove them" : "Install", hint: "apply the changes above" },
           { value: "cancel", label: "Cancel", hint: "change nothing" },
@@ -648,7 +702,7 @@ Runs: ${e.command}`,
       wantInstructions = unionFloor([...installedBlocks], [...trackBlocks.filter((n) => !betaBlockNames.has(n)), ...fromBeta]);
     } else wantInstructions = new Set([...installedBlocks, ...fromBeta]);
 
-    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks, guided })) {
+    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks, guided, retire })) {
       console.log(`  ${line}`);
     }
     console.log("");
@@ -673,6 +727,9 @@ Runs: ${e.command}`,
     betaSkills,
     selectedBeta,
     newlyEnabledBeta,
+    // Removals the user agreed to by name, rather than by clearing a checkbox. applySkillLinks
+    // treats this as its own authorisation, so it works on tracks where no checklist ran.
+    retire,
     instructions: wantInstructions,
     // A block may be taken away only when the user saw it — on the "Other features" checklist,
     // or because they named it themselves with --remove-instructions, or because this is an
@@ -692,7 +749,7 @@ Runs: ${e.command}`,
  * with two rows can never report on only one of them. The optional lines cover only the non-beta
  * blocks, which keeps each feature in exactly one place.
  */
-function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks = [], guided = false }) {
+function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks = [], guided = false, retire = new Set() }) {
   const verb = uninstall ? "remove" : "install";
   const lines = [];
   const names = (items) => items.map((i) => i.label).join(", ");
@@ -712,10 +769,15 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
   } else {
     const newSkills = chosenSkills.filter((n) => !linkedStable.includes(n));
     const keptSkills = chosenSkills.filter((n) => linkedStable.includes(n));
-    const droppedSkills = stableSkills.filter((n) => !selectedSkills.has(n) && linkedStable.includes(n) && prune.skills);
+    // `prune.skills` OR `retire`: the checklist is one way to authorise a removal, and answering
+    // the retirement question is the other. The guided track has no checklist, so without the
+    // second clause a removal the user explicitly agreed to would happen unannounced.
+    const droppedSkills = stableSkills.filter((n) => !selectedSkills.has(n) && linkedStable.includes(n) && (prune.skills || retire.has(n)));
     if (newSkills.length) lines.push(`install ${plural(newSkills.length, "skill")}${nameThem(newSkills)}`);
     if (keptSkills.length) lines.push(`keep ${plural(keptSkills.length, "skill")}${nameThem(keptSkills)}`);
     if (droppedSkills.length) lines.push(`remove ${plural(droppedSkills.length, "skill")}: ${droppedSkills.join(", ")}`);
+    const retiring = droppedSkills.filter((n) => retire.has(n));
+    if (retiring.length) lines.push(`  ${retiring.join(", ")} ${retiring.length === 1 ? "is" : "are"} retired — removing as you asked`);
     if (!chosenSkills.length && !droppedSkills.length) lines.push("install no skills");
   }
 
@@ -931,6 +993,31 @@ function isGroupLinked(group) {
 }
 
 /**
+ * Retired skills, read from deprecated.txt. Returns a Set of skills.txt names.
+ *
+ * Deprecation is deliberately NOT deletion: a removed folder leaves anyone who already installed
+ * it holding a command that has silently stopped existing. A named one keeps working, says it is
+ * retired, and points at its replacement.
+ *
+ * Anything named here that no longer exists as a group is dropped rather than warned about — a
+ * skill that has finished its retirement and been deleted is the expected end state of this file,
+ * not a misconfiguration.
+ */
+function loadDeprecatedNames() {
+  if (!fs.existsSync(deprecatedListFile)) return new Set();
+  return new Set(
+    fs
+      .readFileSync(deprecatedListFile, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"))
+      .map((line) => line.split(/\s+/))
+      .filter(([kind, name]) => kind === "skill" && name)
+      .map(([, name]) => name),
+  );
+}
+
+/**
  * Beta features, read from beta-features.txt so this script never needs editing.
  * Returns [{ kind, name }] — kind is "skill", "instruction", or anything added to KIND_LABELS.
  */
@@ -1116,7 +1203,12 @@ function applySkillLinks(plan) {
       // Per-kind: a beta skill may only be pruned if the BETA checklist ran, a stable one only
       // if the skills checklist ran. On the guided track neither did, so neither can be removed.
       const mayPrune = isBeta ? plan.prune.beta : plan.prune.skills;
-      if (mayPrune && isGroupLinked(group)) {
+      // A retirement the user agreed to by name is its own authorisation, and a stronger one than
+      // an empty checkbox: they were shown this skill, told it was retired, and said remove it.
+      // Without this it would depend on the skills checklist having run, so answering "remove
+      // them" on the guided track would silently do nothing.
+      const agreedRetirement = plan.retire?.has(group.name);
+      if ((mayPrune || agreedRetirement) && isGroupLinked(group)) {
         // unlinkFolder, NOT a bare rmSync over group.folders. isGroupLinked is `.some()`, so one
         // of our links makes the whole group read as present — but the other folders in it may be
         // a real directory somebody else put there. A blind recursive force-delete would take
@@ -1126,7 +1218,10 @@ function applySkillLinks(plan) {
         // one place bypassing that guard.
         const outcomes = group.folders.map(unlinkFolder);
         const kept = outcomes.filter((o) => o === "foreign").length;
-        report(group, "removed", kept ? `(unticked; left ${kept} not installed by this repo)` : "(unticked)");
+        // Say WHICH answer removed it. "unticked" is a lie on the retirement path, where the user
+        // never saw a checkbox for this skill and answered a question instead.
+        const because = agreedRetirement ? "retired" : "unticked";
+        report(group, "removed", kept ? `(${because}; left ${kept} not installed by this repo)` : `(${because})`);
       } else {
         report(group, "skipped", isBeta ? "(beta)" : "");
       }
@@ -1347,21 +1442,6 @@ function printManualMcpInstructions(name, cfg, distCli, linked) {
 // idempotent (re-running replaces the marked region) and surgical (nothing outside it is read,
 // rewritten, or reordered). Nothing is ever enabled without an explicit yes.
 
-function markerFor(name, edge) {
-  return `<!-- claude-skills:${name} ${edge} -->`;
-}
-
-function escapeRe(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Matches a managed block INCLUDING the blank lines around it, so removal leaves no gap. */
-function blockPattern(name) {
-  return new RegExp(
-    `(?:\\r?\\n)*${escapeRe(markerFor(name, "start"))}[\\s\\S]*?${escapeRe(markerFor(name, "end"))}(?:\\r?\\n)*`,
-  );
-}
-
 /** Minimal `key: value` frontmatter split. Returns the body verbatim (frontmatter stripped). */
 function parseFrontmatter(raw) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
@@ -1403,42 +1483,6 @@ function readInstalledBlockNames(blocks) {
   return new Set(blocks.filter((b) => blockPattern(b.name).test(content)).map((b) => b.name));
 }
 
-function renderBlock(block, eol) {
-  return [
-    markerFor(block.name, "start"),
-    `<!-- Managed by claude-skills — source: instructions/${block.file}. Edits inside this block are`,
-    `     overwritten on the next \`node install.mjs\`. Remove with \`node install.mjs --uninstall\`. -->`,
-    ...block.body.split(/\r?\n/),
-    markerFor(block.name, "end"),
-  ].join(eol);
-}
-
-/** The managed region as it currently stands in `content`, or null. Used to detect drift. */
-function extractBlock(content, name) {
-  const m = blockPattern(name).exec(content);
-  return m ? m[0].trim() : null;
-}
-
-function withBlock(content, block, eol) {
-  const rendered = renderBlock(block, eol);
-  if (blockPattern(block.name).test(content)) {
-    return tidyEnds(content.replace(blockPattern(block.name), `${eol}${eol}${rendered}${eol}${eol}`), eol);
-  }
-  const base = content.replace(/(?:\r?\n)+$/, "");
-  return tidyEnds((base ? base + eol + eol : "") + rendered, eol);
-}
-
-function withoutBlock(content, name, eol) {
-  if (!blockPattern(name).test(content)) return content;
-  return tidyEnds(content.replace(blockPattern(name), `${eol}${eol}`), eol);
-}
-
-/** Trim leading/trailing blank lines and end with exactly one newline. Only touches the edges. */
-function tidyEnds(content, eol) {
-  const trimmed = content.replace(/^(?:\r?\n)+/, "").replace(/(?:\r?\n)+$/, "");
-  return trimmed ? trimmed + eol : "";
-}
-
 /**
  * @param desired    block names that should be present afterwards
  * @param mayRemove  whether a block that is installed but not desired may be taken away. False
@@ -1452,26 +1496,24 @@ function applyInstructionBlocks(desired, mayRemove = true) {
   const existed = fs.existsSync(globalClaudeMd);
   const content = existed ? fs.readFileSync(globalClaudeMd, "utf8") : "";
 
-  // Match whatever the file already uses so a Windows-authored CLAUDE.md stays CRLF throughout.
-  const eol = /\r\n/.test(content) ? "\r\n" : "\n";
-  const installed = new Set(blocks.filter((b) => blockPattern(b.name).test(content)).map((b) => b.name));
+  // The whole edit is one pure transform in lib/claude-md.mjs, tested by
+  // `node tools/instructions/verify.mjs`. This function only does the I/O around it.
+  const { next, actions, warnings } = applyBlocks(content, blocks, desired, mayRemove);
 
-  let next = content;
-  const actions = [];
-  for (const b of blocks) {
-    if (desired.has(b.name)) {
-      const before = extractBlock(next, b.name);
-      next = withBlock(next, b, eol);
-      const after = extractBlock(next, b.name);
-      if (before === null) actions.push(`turned on  ${b.title}`);
-      else if (before !== after) actions.push(`refreshed  ${b.title}`);
-      else actions.push(`ready      ${b.title}`);
-    } else if (installed.has(b.name) && mayRemove) {
-      next = withoutBlock(next, b.name, eol);
-      actions.push(`turned off ${b.title}`);
-    }
-  }
   for (const a of actions) console.log(`  ${a}`);
+  for (const w of warnings) console.log(`  ${style.yellow("WARNING  ")} ${w}`);
+
+  // Belt and braces: re-running the transform on its own output must be a no-op. If it is not,
+  // something is wrong with the block logic, and the safe move is to write nothing at all — a
+  // CLAUDE.md that grows a little on every install is exactly the failure this code exists to
+  // prevent, and it is far better caught here than noticed six months later.
+  const settled = applyBlocks(next, blocks, desired, mayRemove).next;
+  if (settled !== next) {
+    console.log(`  ${style.yellow("WARNING  ")} the CLAUDE.md edit did not settle after one pass — leaving the file untouched.`);
+    console.log(`            Run \`node tools/instructions/verify.mjs\` for detail; nothing was changed.`);
+    return;
+  }
+
   if (next === content) return; // nothing to do, so nothing to back up
 
   // Back up ONLY now, when the content is genuinely about to change, and overwrite each time so

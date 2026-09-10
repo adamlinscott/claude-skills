@@ -1,6 +1,6 @@
 ---
 name: report-issue
-description: Alias for the raise-issue skill. Turns "this is broken" into a well-formed issue in the team's tracker, written in the codebase's own vocabulary — a few plain-English questions, a check of which part of the code is being described, a duplicate check, then filing it once the person says yes. Built for someone who uses the product and does not read code. Invoke with /report-issue.
+description: '[Adam Skills] Alias for the raise-issue skill. Turns "this is broken" into a well-formed issue in the team''s tracker, written in the codebase''s own vocabulary — a few plain-English questions, a check of which part of the code is being described, a duplicate check, then filing it once the person says yes. Built for someone who uses the product and does not read code. Invoke with /report-issue.'
 allowed-tools: Read, Glob, Grep, Bash, Write, AskUserQuestion
 disable-model-invocation: true
 ---

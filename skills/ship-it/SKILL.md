@@ -1,6 +1,6 @@
 ---
 name: ship-it
-description: 'Get the work done in this conversation all the way out — merged, and deployed to every environment the repo has, production included. Grounds itself first in the branches written during this session, the open and closed PRs behind them, and the environments and CI/CD workflows the repo actually defines, then lands and releases the work and verifies each environment is running the commit. If the release would carry other people''s unreleased changes along with it, summarises whose work rides along and asks for confirmation before touching production. Takes no arguments by default; an optional scope override such as "only staging" limits which environments it deploys to. Invoke with /ship-it.'
+description: '[Adam Skills] Get the work done in this conversation all the way out — merged, and deployed to every environment the repo has, production included. Grounds itself first in the branches written during this session, the open and closed PRs behind them, and the environments and CI/CD workflows the repo actually defines, then lands and releases the work and verifies each environment is running the commit. If the release would carry other people''s unreleased changes along with it, summarises whose work rides along and asks for confirmation before touching production. Takes no arguments by default; an optional scope override such as "only staging" limits which environments it deploys to. Invoke with /ship-it.'
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
 ---

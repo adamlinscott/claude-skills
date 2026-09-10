@@ -91,7 +91,7 @@ spaces, and no chance a chatty `~/.bashrc` corrupts the hook's stdout.
 ```
 
 Never use `"matcher": "*"` — the hook then runs on every tool call in every session, including
-`/goal-workflow` fan-outs that issue thousands. Add an `if` filter (permission-rule syntax, e.g.
+a long `/build-it` run that issues thousands. Add an `if` filter (permission-rule syntax, e.g.
 `"Bash(git *)"`) if you need to narrow further.
 
 Also register a liveness check, so a renamed guard or a missing `node` is loud rather than silent:

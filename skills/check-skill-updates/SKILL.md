@@ -1,6 +1,6 @@
 ---
 name: check-skill-updates
-description: 'Check whether the installed copy of this skills collection is behind its remote, and offer to update it. Runs a script that resolves the clone the skills are linked from, respects a once-a-day rate limit and a remembered refusal, and reports one of: up to date, N commits behind, unsafe to touch, or offline. Only "behind" is ever mentioned to the user; everything else is silent. On a yes it pulls and re-links, changing nothing about which skills are installed. Use when the user asks whether their skills are up to date, or when another skill reaches a natural close and wants to mention a waiting update.'
+description: '[Adam Skills] Check whether the installed copy of this skills collection is behind its remote, and offer to update it. Runs a script that resolves the clone the skills are linked from, respects a once-a-day rate limit and a remembered refusal, and reports one of: up to date, N commits behind, unsafe to touch, or offline. Only "behind" is ever mentioned to the user; everything else is silent. On a yes it pulls and re-links, changing nothing about which skills are installed. Use when the user asks whether their skills are up to date, or when another skill reaches a natural close and wants to mention a waiting update.'
 allowed-tools: Bash, Read
 ---
 

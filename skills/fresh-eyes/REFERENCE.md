@@ -47,8 +47,12 @@ line turns the report to noise. It is also the only item that can catch a premis
 author and every prior reviewer already share, because it asks what the world would have
 to look like rather than whether the code matches the stated intent.
 
-For a large or high-stakes diff, run 2–3 agents with one lens each instead of one
-general agent:
+**The single general agent above is the default.** Only when a diff is genuinely too
+large for one agent to hold in context — hundreds of lines across unrelated modules —
+run 2–3 agents with one lens each instead. Reach for this because the material does not
+fit, never because the change feels important: three agents over a diff one could have
+read produce three overlapping reports, cost three times as much, and make the
+reconciliation harder rather than sharper.
 - **does-it-work** — trace the happy path and the main failure paths end to end.
 - **completeness** — what looks unfinished, untested, or stubbed?
 - **bugs-and-edge-cases** — adversarially hunt the shadow paths and boundaries.
@@ -104,7 +108,7 @@ Reconcile all of their reports against the pre-registered intent.
 
 This loop runs ONLY when `--fix`/`--iterate` was passed, or the user approved fixing at
 step 6. It is the one path allowed to modify the tree. `--fix` runs a single round;
-`--iterate` runs up to 3. After the report:
+`--iterate` runs up to 2. After the report:
 
 1. Take the `Left to do — in scope` items and the material oversights. Never take items
    from `Assumptions only you can confirm` — carry them forward untouched into every
@@ -114,7 +118,7 @@ step 6. It is the one path allowed to modify the tree. `--fix` runs a single rou
    substantial fix to a fresh agent to keep the implementer unbiased. Do not pull
    out-of-scope leftovers into this pass.
 3. Re-run steps 2–5 of the workflow on the new change.
-4. Stop when the verdict is `DONE`, after the round limit (`--fix` = 1, `--iterate` = 3),
+4. Stop when the verdict is `DONE`, after the round limit (`--fix` = 1, `--iterate` = 2),
    or when only `DONE_WITH_CONCERNS` remains — report surviving concerns, do not loop
    further on them.
 5. **Final overview:** what was implemented across all rounds, what remains in scope,
@@ -122,4 +126,4 @@ step 6. It is the one path allowed to modify the tree. `--fix` runs a single rou
    behavioural assumption still awaiting confirmation — stated as questions to the user.
 
 Convergence guard: if the same gap survives two consecutive rounds, stop looping and
-report it as an unresolved concern rather than burning the third round on it.
+report it as an unresolved concern rather than spending another blind audit on it.

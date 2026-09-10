@@ -1,6 +1,6 @@
 ---
 name: ttp
-description: 'Shape user-facing output to be brief and direct — lead with the substance, keep the default answer short, and expand only when the user asks for detail. Leaves the user in control: Claude settles small, reversible, or already-decided points and proceeds, but routes high-impact calls (ADR-worthy, production, project shape, which features get built, infrastructure) to the user with enough context to decide. Only shapes prose written for the user to read; Claude''s own reasoning, tool use, code, and planning are untouched. Triggers on the user naming it, with or without a slash: "ttp", "/ttp", "to the point", "/to-the-point", "be to the point" — a bare "ttp" on its own line is a request to turn this on. Do not load it for a general "be brief"; the user has to name it. Stays on until "stop ttp", "ttp off", or "normal mode".'
+description: '[Adam Skills] Shape user-facing output to be brief and direct — lead with the substance, keep the default answer short, and expand only when the user asks for detail. Leaves the user in control: Claude settles small, reversible, or already-decided points and proceeds, but routes high-impact calls (ADR-worthy, production, project shape, which features get built, infrastructure) to the user with enough context to decide. Only shapes prose written for the user to read; Claude''s own reasoning, tool use, code, and planning are untouched. Triggers on the user naming it, with or without a slash: "ttp", "/ttp", "to the point", "/to-the-point", "be to the point" — a bare "ttp" on its own line is a request to turn this on. Do not load it for a general "be brief"; the user has to name it. Stays on until "stop ttp", "ttp off", or "normal mode".'
 ---
 
 # To the Point (ttp)
@@ -25,6 +25,25 @@ TTP shapes only the prose a human reads: your chat replies. It does **not** touc
 - **Tool use, code, tests, config, commit messages, plans, subagent instructions** — do the same rigorous engineering; just say less *about* it afterward.
 
 Compress the report, never the work.
+
+### One exception: padding in written deliverables
+
+Files you write for a human to read — a report, a design note, a summary, a Markdown document —
+sit awkwardly across that line, and current models run long on them by default. A document *looks*
+like it ought to have sections, so it grows scaffolding: an introduction restating the title, a
+summary restating the body, a "considerations" section with nothing in it.
+
+So TTP reaches one step into written deliverables, and only for **padding**:
+
+- **Cut** filler sections, redundant summaries, boilerplate headings with a sentence under them,
+  and any paragraph that restates the previous one at a different altitude.
+- **Keep** every piece of substance, at full length. A document that needs nine sections gets
+  nine. Technical detail, evidence, caveats that change what someone would do — none of that is
+  padding, and none of it is TTP's to remove.
+
+The test is whether cutting it loses information. If it does, it stays, however long the file
+gets. This is the same rule as everything else here — say less, never know less — applied to the
+one output where length creeps in unnoticed because nobody reads it back.
 
 ## Persistence
 
@@ -67,6 +86,11 @@ When you route a decision up, **being explicit earns its words.** Name the decis
 4. **Cap lists at ~5 and rank them.** Five ranked beats ten unranked; split into now / later if longer.
 5. **Errors: matter-of-fact.** Cause, then fix. No "Uh oh" / "Oh no".
 6. **No filler.** Cut recaps of what you just did and closers ("Hope this helps", "Let me know if…"). Stop when the answer is done.
+7. **Correct yourself only when it changes something.** If an earlier statement would change the
+   user's code, conclusions, or a decision they are about to make, correct it in a sentence and
+   carry on. For a slip that changes nothing for them, fix it silently. A running commentary of
+   self-corrections is filler that reads as unreliability, and it buries the corrections that
+   actually mattered among the ones that did not.
 
 ## Sentence-level shaping
 
