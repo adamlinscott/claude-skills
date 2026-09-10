@@ -1,0 +1,32 @@
+# Skills that are retired.
+#
+# A deprecated skill is NOT deleted. Deleting it leaves anyone who already installed it with a
+# command that has silently stopped existing and no explanation of where it went — which is a
+# worse outcome than a slow, signposted retirement. So it stays in the repo, keeps working if
+# someone insists, and spends its retirement telling people what to use instead.
+#
+# What a line here does, on top of whatever skills.txt says:
+#
+#   • Marks the row "deprecated" on the install checklist, so the label is visible at the moment
+#     someone is choosing.
+#   • Offers to remove it, once, on any interactive run where it is currently installed. Answered
+#     yes, it is unlinked whether or not the skills checklist itself ran; answered no, it is left
+#     alone and not asked about again in that run.
+#   • Never installs it on its own. A deprecated skill is only ever present because someone
+#     already had it, or deliberately ticked it.
+#
+# Set its skills.txt defaults to `off,off` as well. This file changes what the installer SAYS and
+# OFFERS; the defaults column is what stops a fresh machine picking it up, and the two are
+# separate on purpose — a skill can be retired without being ripped out from under anyone.
+#
+# Also start its SKILL.md description with `DEPRECATED —` (after the package tag) and put a
+# banner at the top of the body naming the replacement. The installer cannot reach a session that
+# already has the skill linked; the skill's own text is the only thing that can.
+#
+# One per line, as:  skill <name from skills.txt>
+#
+# Delete a line to un-retire something. Blank lines and lines starting with # are ignored. The
+# installer reads this at run time; it never needs editing.
+
+skill        goal-workflow
+skill        assumption-inventory

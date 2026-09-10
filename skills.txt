@@ -42,14 +42,23 @@
 # And whatever the route, check what the skill PRINTS. A report of file:line citations is no use
 # to someone who does not read code, however correct the diagnosis.
 #
+# RETIRING A SKILL
+# Set its defaults to `off,off`, start its description here with "DEPRECATED — use /x instead",
+# and add a line for it to deprecated.txt. That last file is what makes the installer label it on
+# the checklist and offer, once, to remove it from a machine that still has it. Do not delete the
+# folder: a removed skill leaves anyone who installed it holding a command that silently stopped
+# existing. See deprecated.txt for the whole reasoning.
+#
 # A folder with no line here still installs, on its own, with no description. Blank lines and
 # lines starting with # are ignored. The installer reads this at run time.
 
 are-we-done | are-we-done | Checks whether a session can actually close: sweeps the todo list, the loose ends in the conversation, the state of your files, and any issue numbers mentioned, then tells you either "yes, done" in one line or exactly what is still undecided. Changes nothing. | on,off
 
-assumption-inventory | assumption-inventory | Before a long job, checks what the plan takes for granted — which files exist, what may be changed, what "finished" means — and asks you about anything it had to guess. | on,off
+assumption-inventory | assumption-inventory | DEPRECATED — use /build-it instead. Before a long job, checked what the plan took for granted — which files exist, what may be changed, what "finished" means — and asked you about anything it had to guess. /build-it now does the same work as part of pinning scope, so running both filled the same form twice. Kept only so existing installs point somewhere. | off,off
 
 brief-me | brief-me | Catches you up on a session you have lost the thread of — after a distraction, or over a weekend. Explains in plain English what you were doing, where it got to, what state it is in now, and what it is waiting on from you. Changes nothing. | on,on
+
+build-it | build-it | Builds a piece of work from wherever it is written down — a ticket number, a plan file, the plan you just agreed in the conversation, or a description typed straight after the command. No issue tracker needed. It reads the source and the code it points at, asks you whatever neither of those answered — the why, above all — then writes down exactly which files it will change and which it will not, and builds to that. If the job turns out to be big and still vague, it says so and suggests planning it properly first. | on,off
 
 check-skill-updates | check-skill-updates | Checks whether the skills on your machine are behind the copy they were installed from, and offers to bring them up to date. Mentions it at most once a day, only when you are between tasks, and never again once you have said no to a version. | on,on
 
@@ -59,7 +68,7 @@ debrief | debrief | Reads back through your past Claude sessions to find the cor
 
 fresh-eyes | fresh-eyes | Gets a second Claude to read your finished work with no memory of the conversation, then compares that reading against what you actually asked for. Catches what was missed. | on,off
 
-goal-workflow | goal-workflow | Hands Claude a settled plan and lets it build the whole thing on its own, checking its own work as it goes. Long-running, and it will use a lot of tokens. | on,off
+goal-workflow | goal-workflow | DEPRECATED — use /build-it instead. Handed Claude a settled plan and let it build the whole thing on its own. It forced maximum effort, always split the work across sub-agents, and re-checked itself at every step — all of which current Claude models either do on their own or are actively slowed down by, which is why it stopped performing well. Kept only so existing installs point somewhere. | off,off
 
 memory-audit | memory-audit | Tells you what Claude remembers about a project and whether any of it has gone stale. Only reports; changes nothing. | on,on
 

@@ -9,25 +9,38 @@
     {
       "name": "claude-skills",
       "source": "./",
-      "description": "Skills that add lifecycle gates around planning and building with Claude Code: assumption-inventory, fresh-eyes, goal-workflow, reground, brief-me, ttp, context-audit, memory-audit, debrief, seatbelt, and raise-issue.",
-      "author": { "name": "Adam Linscott" },
+      "description": "Skills that add lifecycle gates around planning, building and shipping with Claude Code: build-it, fresh-eyes, are-we-done, ship-it, reground, brief-me, ttp, context-audit, memory-audit, check-skill-updates, debrief, seatbelt, and raise-issue.",
+      "author": {
+        "name": "Adam Linscott"
+      },
       "homepage": "https://github.com/adamlinscott/claude-skills",
       "repository": "https://github.com/adamlinscott/claude-skills",
       "license": "MIT",
-      "keywords": ["skills", "planning", "review", "permissions", "guardrails", "security", "issues"],
+      "keywords": [
+        "skills",
+        "planning",
+        "review",
+        "permissions",
+        "guardrails",
+        "security",
+        "issues"
+      ],
       "skills": [
-        "./skills/assumption-inventory",
+        "./skills/are-we-done",
         "./skills/brief-me",
+        "./skills/build-it",
+        "./skills/check-skill-updates",
         "./skills/context-audit",
         "./skills/debrief",
         "./skills/fresh-eyes",
-        "./skills/goal-workflow",
         "./skills/memory-audit",
         "./skills/raise-issue",
         "./skills/reground",
         "./skills/report-issue",
         "./skills/seatbelt",
         "./skills/seatbelts",
+        "./skills/ship-it",
+        "./skills/ship-it-now",
         "./skills/to-the-point",
         "./skills/ttp"
       ]

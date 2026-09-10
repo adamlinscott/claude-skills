@@ -26,3 +26,4 @@ skill        check-skill-updates
 skill        debrief
 skill        seatbelt
 instruction  clear-responses
+instruction  model-calibration
