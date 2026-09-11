@@ -1,6 +1,6 @@
 ---
 name: debrief
-description: '[Adam Skills] BETA / under development. Mine the current project''s Claude Code sessions for recurring corrections, then interrogate them — consolidate clusters into themes, ask a SET of open "why" questions per theme, self-answer the evidence-answerable ones and forward the developer-only ones to the user, record confirmed answers, and optionally export a CLAUDE.md of principles. Use when the user says "/debrief", "debrief my sessions", "what patterns do you see in how I work", or wants to refresh / interrogate their developer-context corpus. Drives the `debrief` CLI entirely via bash — NO manual paths, NO MCP registration required.'
+description: '[Adam''s Skills] BETA / under development. Mine the current project''s Claude Code sessions for recurring corrections, then interrogate them — consolidate clusters into themes, ask a SET of open "why" questions per theme, self-answer the evidence-answerable ones and forward the developer-only ones to the user, record confirmed answers, and optionally export a CLAUDE.md of principles. Use when the user says "/debrief", "debrief my sessions", "what patterns do you see in how I work", or wants to refresh / interrogate their developer-context corpus. Drives the `debrief` CLI entirely via bash — NO manual paths, NO MCP registration required.'
 ---
 
 # debrief (BETA)

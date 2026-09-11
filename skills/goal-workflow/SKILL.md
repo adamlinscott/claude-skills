@@ -1,6 +1,6 @@
 ---
 name: goal-workflow
-description: '[Adam Skills] DEPRECATED — superseded by /build-it. Do not use for new work. Ran a settled goal as a bounded autonomous build loop: locked the goal, front-loaded decisions, wrote a completion-invariant contract before any code, then looped with explicit Agent-tool fan-out and fresh-eyes verification at every milestone until the invariants held. It gated on ultracode effort, mandated subagent fan-out, and verified repeatedly — three patterns that current Claude models make redundant or actively counterproductive, which is why it underperformed and was retired. Kept installable only so existing setups are redirected rather than broken. If invoked, say it is deprecated and offer /build-it instead.'
+description: '[Adam''s Skills] DEPRECATED — superseded by /build-it. Do not use for new work. Ran a settled goal as a bounded autonomous build loop: locked the goal, front-loaded decisions, wrote a completion-invariant contract before any code, then looped with explicit Agent-tool fan-out and fresh-eyes verification at every milestone until the invariants held. It gated on ultracode effort, mandated subagent fan-out, and verified repeatedly — three patterns that current Claude models make redundant or actively counterproductive, which is why it underperformed and was retired. Kept installable only so existing setups are redirected rather than broken. If invoked, say it is deprecated and offer /build-it instead.'
 disable-model-invocation: true
 ---
 

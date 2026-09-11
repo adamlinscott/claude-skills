@@ -1,6 +1,6 @@
 ---
 name: assumption-inventory
-description: '[Adam Skills] DEPRECATED — superseded by /build-it. Do not use for new work. Surfaced the load-bearing assumptions behind a task before a long run — goal, root, what may be edited, what is off-limits, what done means, open questions — tagging each as cited fact or guess, and gating the load-bearing guesses on confirmation. Its six slots are now the four headings of the scope note /build-it writes before any code, so running both duplicated most of a pass; the root and platform check and the cite-or-flag discipline moved across with it. Kept installable only so existing setups are redirected rather than broken. If invoked, say it is deprecated and offer /build-it instead.'
+description: '[Adam''s Skills] DEPRECATED — superseded by /build-it. Do not use for new work. Surfaced the load-bearing assumptions behind a task before a long run — goal, root, what may be edited, what is off-limits, what done means, open questions — tagging each as cited fact or guess, and gating the load-bearing guesses on confirmation. Its six slots are now the four headings of the scope note /build-it writes before any code, so running both duplicated most of a pass; the root and platform check and the cite-or-flag discipline moved across with it. Kept installable only so existing setups are redirected rather than broken. If invoked, say it is deprecated and offer /build-it instead.'
 disable-model-invocation: true
 ---
 

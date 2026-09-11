@@ -1,6 +1,6 @@
 ---
 name: fresh-eyes
-description: '[Adam Skills] Fresh-context audit of a finished diff against the conversation''s stated intent. A subagent with zero conversation history reviews the diff blind — reporting what it believes the change does, its quality, and any oversights — then the main context reconciles that blind read against what the work was actually meant to do, and surfaces any assumption about real-world behaviour that the code cannot settle. Use when a chunk of work is complete and you want fresh eyes to confirm nothing was missed, scope is fully covered, and no oversights or bugs slipped through, before moving on or shipping.'
+description: '[Adam''s Skills] Fresh-context audit of a finished diff against the conversation''s stated intent. A subagent with zero conversation history reviews the diff blind — reporting what it believes the change does, its quality, and any oversights — then the main context reconciles that blind read against what the work was actually meant to do, and surfaces any assumption about real-world behaviour that the code cannot settle. Use when a chunk of work is complete and you want fresh eyes to confirm nothing was missed, scope is fully covered, and no oversights or bugs slipped through, before moving on or shipping.'
 ---
 
 # fresh-eyes

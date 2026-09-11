@@ -1,6 +1,6 @@
 ---
 name: context-audit
-description: '[Adam Skills] Audits a repository''s Claude context-injection setup — CLAUDE.md, CONTEXT.md, docs/, .claude/agents/, and the per-project memory directory. Reports bloat, broken links, orphaned docs, security risks, missing rules in subagent prompts, and conflicts between memory and project instructions. Use when the user asks to audit their Claude setup, asks "what''s wrong with my CLAUDE.md", wants to know if their agents/memory/docs are configured well, or wants to improve Claude''s effectiveness in this repository.'
+description: '[Adam''s Skills] Audits a repository''s Claude context-injection setup — CLAUDE.md, CONTEXT.md, docs/, .claude/agents/, and the per-project memory directory. Reports bloat, broken links, orphaned docs, security risks, missing rules in subagent prompts, and conflicts between memory and project instructions. Use when the user asks to audit their Claude setup, asks "what''s wrong with my CLAUDE.md", wants to know if their agents/memory/docs are configured well, or wants to improve Claude''s effectiveness in this repository.'
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

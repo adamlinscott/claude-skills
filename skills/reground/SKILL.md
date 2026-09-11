@@ -1,6 +1,6 @@
 ---
 name: reground
-description: '[Adam Skills] Halt a drifting agent and re-anchor it to codebase evidence for the current task, clearing speculative context without a full compaction. Use when the agent has gone off course, hallucinated files/APIs/behavior, or started over-building beyond what was asked — or when the user types /reground or says "stop", "re-ground", "re-crown", "I don''t see evidence for that", or "you''re building something we don''t need".'
+description: '[Adam''s Skills] Halt a drifting agent and re-anchor it to codebase evidence for the current task, clearing speculative context without a full compaction. Use when the agent has gone off course, hallucinated files/APIs/behavior, or started over-building beyond what was asked — or when the user types /reground or says "stop", "re-ground", "re-crown", "I don''t see evidence for that", or "you''re building something we don''t need".'
 ---
 
 # Reground

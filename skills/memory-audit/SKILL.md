@@ -1,6 +1,6 @@
 ---
 name: memory-audit
-description: '[Adam Skills] Audit Claude''s per-user memory for this project and produce a report. Asks at the start whether the user wants a non-technical summary or a full technical audit. Never edits memory — produces a report only. Usage: /memory-audit'
+description: '[Adam''s Skills] Audit Claude''s per-user memory for this project and produce a report. Asks at the start whether the user wants a non-technical summary or a full technical audit. Never edits memory — produces a report only. Usage: /memory-audit'
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion
 ---
 

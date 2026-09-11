@@ -355,7 +355,7 @@ instruction blocks, which really are copied into your global `CLAUDE.md` — `no
 
 #### Two conventions worth knowing
 
-**Every skill here is tagged.** Each `SKILL.md` description starts with `[Adam Skills]`, so when
+**Every skill here is tagged.** Each `SKILL.md` description starts with `[Adam's Skills]`, so when
 you are scrolling a skill list in Claude — mixed in with gstack, Matt Pocock's, and whatever else
 you have installed — you can see at a glance which collection a skill came from. It is a label
 only; it changes nothing about when a skill triggers.
