@@ -77,7 +77,7 @@ judgment.
 **Recommendation:** One of: *Keep* / *Discuss with the team* / *Remove*.
 ────────────────────────────────────────
 
-After all entries, write a short overall summary in 3–5 sentences:
+After all entries, write a short overall summary covering:
 
 - How many memories there are
 - Whether the set looks healthy or cluttered

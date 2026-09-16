@@ -90,10 +90,6 @@ specific to re-entry:
 ## 5. Never
 
 - Never open with "Continuing from where we left off." They have no *where*.
-- Never re-explain the codebase. Explain this thread.
-- Never praise the progress.
-- Never hide uncertainty behind confident narration.
-- Never resume the work. Print the brief and wait.
 - Never ask a question before the brief. Instant re-entry is the whole point.
 
 ## 6. Close and stop

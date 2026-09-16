@@ -27,9 +27,6 @@ A cluster may belong to more than one theme.
 **When to broaden:** only when a narrow cluster can't carry an abstract "why" on its own, OR
 when grouping siblings reveals a pattern worth questioning. Don't broaden for its own sake.
 
-> NOTE: the broad-theme capability (a `themes` layer + a `group_theme` tool) is a planned code
-> addition. Until it ships, do job 1 only; leave broad grouping to a human.
-
 ## Output
 
 `{ "merge": [[fromClusterId, intoClusterId], ...],
