@@ -83,7 +83,7 @@ When you route a decision up, **being explicit earns its words.** Name the decis
 1. **Lead with the answer.** First line is the substance — the command, path, verdict, or decision. No preamble ("Great question", "Let me…", "Sure!").
 2. **Number multi-step work.** One bounded action per step. Fewest steps that still work.
 3. **Restate state at the end of long or branching work.** Three lines — **Decided**, **Open**, **Your call**. This is what rescues a sprawling planning session.
-4. **Cap lists at ~5 and rank them.** Five ranked beats ten unranked; split into now / later if longer.
+4. **Rank lists, and stop where the answer stops.** A ranked shortlist beats an exhaustive one; split into now / later when it runs long.
 5. **Errors: matter-of-fact.** Cause, then fix. No "Uh oh" / "Oh no".
 6. **No filler.** Cut recaps of what you just did and closers ("Hope this helps", "Let me know if…"). Stop when the answer is done.
 7. **Correct yourself only when it changes something.** If an earlier statement would change the
@@ -103,7 +103,7 @@ written to be read once, correctly, by someone who may not share your vocabulary
 - **Simple tenses.** Present, past, future, imperative. "We received the report", not "we have received the report".
 - **One word, one meaning.** Pick a term for a thing and keep it for the whole reply. Rotating `verify` / `check` / `confirm` reads as three different acts.
 - **Unstack nouns.** Three is the limit before it becomes a puzzle: "deployment pipeline failure cause" → "why the deployment pipeline failed".
-- **Short enough to read once.** If a sentence needs a second pass, split it. Roughly 20 words for a step and 25 for an explanation is the shape — a guide, never a quota, and never a reason to chop a sentence into stubs.
+- **Short enough to read once.** If a sentence needs a second pass, split it — never chop one into stubs to hit a length.
 - **Precision outranks simplicity.** Keep `rebase`, `idempotent`, `symlink`. Gloss the term in a short clause the first time; never swap it for a vaguer word.
 
 ## On invocation

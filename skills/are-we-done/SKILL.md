@@ -71,8 +71,8 @@ to one. Only one pairing is allowed, and it is spelled out in C below.
 
 **A — Yes.** Two lines of text: a verdict line, a blank line, then one sentence naming what was
 completed *and anything parked*. Say "nothing undecided", never "nothing outstanding" — deferred
-work is outstanding; the point is that someone ruled on it. No summary of the work, no caveats,
-no next steps, no bullets, no emoji. Brevity is the deliverable here.
+work is outstanding; the point is that someone ruled on it. Those two lines are the entire output;
+brevity is the deliverable here.
 
 One exception, only when something was deferred: a paste-ready `Parked:` block may follow, so the
 parking outlives the session that decided it. Still read-only — you print it, the user places it,
