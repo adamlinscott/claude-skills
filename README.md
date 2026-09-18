@@ -406,7 +406,26 @@ third-party extra on its own, and a track default can only ever **add** to what 
 — choosing a track cannot uninstall a skill you were using. Removing things stays with
 `--uninstall`, which always shows you a list first, whatever `--for` says.
 
-Two details worth knowing before you automate it. With no terminal to prompt in and no flag you
+One question on the developer track is not about skills at all. `/ship-it` and `/ship-it-now`
+finish by merging a pull request, and Claude Code stops to ask before every merge — it cannot tell
+that you typed the command that authorises it. The installer offers to add a single rule,
+`Bash(gh pr merge:*)`, to your global `~/.claude/settings.json` so those skills run start to
+finish:
+
+```sh
+node install.mjs --allow-pr-merge      # answer it up front
+node install.mjs --no-allow-pr-merge   # take the rule away again
+```
+
+It is off unless you ask for it, on every setup — no track turns it on, and `-y` alone will not.
+It is only offered when a ship-it skill is going on the machine, never on the Simple install, and
+`--uninstall` takes it away with everything else. Read the scope before you say yes: the rule is
+a user-level one, so it applies in **every project on the machine and every session**, not only
+while a ship-it skill is running. There is no conditional form. Merging still needs your push
+rights on the remote, and a merge can be reverted, which is why this one is offerable where
+force-push and delete are not.
+
+Two more details worth knowing before you automate it. With no terminal to prompt in and no flag you
 get the developer defaults, which now means *the skills that track defaults to* rather than
 literally all of them — `/raise-issue` is off for developers, so it will not appear. And an
 unattended run (`-y`, or no terminal) never switches on anything still in development, so the
