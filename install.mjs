@@ -75,6 +75,22 @@ const KIND_LABELS = { skill: "skill", instruction: "global instruction", agent: 
 const NO_DESCRIPTION = "No description yet — add a line for it in skills.txt.";
 const globalSkillsDir = path.join(homedir(), ".claude", "skills");
 const globalClaudeMd = path.join(homedir(), ".claude", "CLAUDE.md");
+const globalSettings = path.join(homedir(), ".claude", "settings.json");
+
+// The one permission rule this installer will write, and the skills that need it.
+//
+// /ship-it and /ship-it-now merge a PR as the last step before a release. Claude Code's auto mode
+// classifier blocks `gh pr merge` as "Merge Without Review" — correctly, in general: it cannot see
+// that the user typed the command that authorises exactly this. The rule below tells it. It is the
+// ONLY thing in this installer that widens what Claude may do without asking, so it is opt-in on
+// every path, never a track default, and removed again on --uninstall.
+//
+// Scope honestly: this is a USER-level rule, so it applies in every repo on the machine and in
+// every session, not only while a ship-it skill is running. There is no conditional form. A merge
+// needs push rights on the remote and is revertible, which is why it is offerable at all — but the
+// question on screen has to say what it actually buys.
+const PR_MERGE_RULE = "Bash(gh pr merge:*)";
+const PR_MERGE_SKILLS = ["ship-it", "ship-it-now"];
 const linkType = process.platform === "win32" ? "junction" : "dir";
 
 // Beta skills that also ship a companion tool in ./tools/<name>. Wiring one up takes steps that
@@ -115,6 +131,8 @@ const KNOWN_FLAGS = [
   "--add-instructions",
   "--remove-instructions",
   "--skip-instructions",
+  "--allow-pr-merge",
+  "--no-allow-pr-merge",
   "--refresh",
   "--extras",
   "--accept-defaults",
@@ -131,6 +149,11 @@ const uninstall = has("--uninstall");
 const forceBeta = has("--beta");
 const forceNoBeta = has("--no-beta");
 const skipInstructions = has("--skip-instructions");
+// Answers the merge-permission question up front, in either direction. Flag-driven so an
+// unattended run can opt IN deliberately — this is the one thing here that widens what Claude
+// may do, so it never rides in on a track default or a bare -y.
+const forcePrMerge = has("--allow-pr-merge");
+const forceNoPrMerge = has("--no-allow-pr-merge");
 // Re-link what is ALREADY linked and refresh the instruction blocks already present. Adds
 // nothing, removes nothing, asks nothing. This is what an update runs after a pull: skills are
 // links, so their content is already current, but a link can dangle (the clone moved) and an
@@ -177,6 +200,7 @@ if (unknownFlags.length) {
     applySkillLinks(plan);
     applyBetaTools(plan);
     if (plan.instructions) applyInstructionBlocks(plan.instructions, plan.mayRemoveInstructions);
+    applyPrMergePermission(plan.prMerge);
     await runExtras(plan.extras, plan.guided);
     printFarewell(plan);
     await offerStar();
@@ -234,6 +258,14 @@ function printHelp() {
   console.log(`                                Available: ${names}`);
   console.log("  --remove-instructions=<names> Remove these blocks. Comma-separated, or 'all'.");
   console.log("  --skip-instructions           Do not ask about them, and leave any already there.");
+  console.log("");
+  console.log("  --allow-pr-merge              Let Claude merge pull requests without stopping to");
+  console.log("                                ask, so /ship-it and /ship-it-now run start to");
+  console.log("                                finish. Adds one rule to your global settings, and");
+  console.log("                                it applies in EVERY project on this machine, not");
+  console.log("                                only while a ship-it skill is running. Off unless");
+  console.log("                                you ask for it, on every setup.");
+  console.log("  --no-allow-pr-merge           Take that rule away again.");
   console.log("");
   console.log("  --refresh                     Re-link the skills you already have and rewrite the");
   console.log("                                instruction blocks you already use, then stop. Adds");
@@ -488,6 +520,18 @@ async function buildPlan() {
   // choices — one stray keypress ticks a third party's installer. They are named in the closing
   // message instead, as an optional next step.
   const askExtras = interactive && !guided && extras.length > 0 && !uninstall && extrasArg === undefined;
+  // Only worth asking when a ship-it skill is actually in play on this machine — already linked,
+  // or switched on by this track's defaults. Computed from the same two facts the Skills
+  // checklist opens on, so the step count stays honest without waiting for that answer.
+  //
+  // Never on the guided track: Simple is the setup that CONSTRAINS a machine, and both ship-it
+  // entries in skills.txt are marked "Developer setups only". Not asked again once the rule is
+  // there — re-running must not keep offering something the user already has.
+  const prMergeRelevant = PR_MERGE_SKILLS.some(
+    (n) => linkedStable.includes(n) || stableGroups.some((g) => g.name === n && g.defaults[track] && !isDeprecated(n)),
+  );
+  const askPrMerge =
+    interactive && !guided && !uninstall && prMergeRelevant && !forcePrMerge && !forceNoPrMerge && !prMergeAllowed();
   // The install-mode question is NOT counted. It renders before this number can be known — it is
   // the thing that decides it — so it cannot label itself, and counting it would produce a screen
   // with no counter followed by "(2 of 2)". It is the fork, not a step.
@@ -495,6 +539,7 @@ async function buildPlan() {
     (askSkills ? 1 : 0) +
     (askBeta ? 1 : 0) +
     (askOptional ? 1 : 0) +
+    (askPrMerge ? 1 : 0) +
     (askExtras ? 1 : 0) +
     (interactive ? 1 : 0);
   let stepNumber = 0;
@@ -539,6 +584,9 @@ async function buildPlan() {
   // actually have, so a choice made last time is not silently undone by re-running.
   let selectedSkills = new Set(uninstall || linkedStable.length ? linkedStable : trackSkills);
   let wantInstructions; // Set of block names, or null to leave the CLAUDE.md step alone entirely
+  // true to add the merge rule, false to remove it, null to leave settings.json alone. Null is
+  // the default on every path that did not ask and was not told.
+  let wantPrMerge = forcePrMerge ? true : forceNoPrMerge ? false : uninstall ? false : null;
   // Never selected on your behalf: these run someone else's installer. No track defaults one.
   let selectedExtras = new Set(resolveExtrasFlag(extras));
 
@@ -648,6 +696,41 @@ async function buildPlan() {
         wantInstructions = new Set([...optionalBlocks.filter((b) => installedBlocks.has(b.name)).map((b) => b.name), ...fromBeta]);
       }
 
+      // — The ship-it merge permission —
+      // A yes/no, not a checkbox: it is one consequential choice, and a checklist row that Enter
+      // toggles is the wrong shape for the only thing here that widens what Claude may do.
+      if (askPrMerge) {
+        screen();
+        const picked = await chooseAction({
+          heading: `Let Claude merge pull requests${stepLabel()}`,
+          // wrap() collapses every run of whitespace, so a blank line between paragraphs has to
+          // be assembled here rather than written as \n\n inside one string.
+          body: [
+            ...wrap(
+              "/ship-it and /ship-it-now merge the PR as the last step before a release. Claude Code " +
+                "normally stops and asks first, because it cannot tell that you typed the command that " +
+                "authorises it. Saying yes adds one rule to your global settings so those skills run " +
+                "without stopping.",
+              72,
+            ),
+            "",
+            ...wrap(
+              "It applies in every project on this machine, in every session — not only while a " +
+                "ship-it skill is running. Merging still needs your push rights on the remote, and a " +
+                "merge can be reverted. You can undo this with --no-allow-pr-merge.",
+              72,
+            ),
+          ],
+          items: [
+            { value: "no", label: "No", hint: "Claude asks before every merge (default)" },
+            { value: "yes", label: "Yes", hint: `adds ${PR_MERGE_RULE}` },
+          ],
+          initial: "no",
+        });
+        if (!picked) return null;
+        wantPrMerge = picked === "yes";
+      }
+
       // — Other people's collections —
       if (askExtras) {
         screen();
@@ -672,7 +755,7 @@ Runs: ${e.command}`,
       screen();
       const go = await chooseAction({
         heading: `Ready${stepLabel()}`,
-        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks, guided, retire }),
+        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire }),
         items: [
           { value: "go", label: uninstall ? "Remove them" : "Install", hint: "apply the changes above" },
           { value: "cancel", label: "Cancel", hint: "change nothing" },
@@ -702,7 +785,7 @@ Runs: ${e.command}`,
       wantInstructions = unionFloor([...installedBlocks], [...trackBlocks.filter((n) => !betaBlockNames.has(n)), ...fromBeta]);
     } else wantInstructions = new Set([...installedBlocks, ...fromBeta]);
 
-    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks, guided, retire })) {
+    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire })) {
       console.log(`  ${line}`);
     }
     console.log("");
@@ -735,6 +818,7 @@ Runs: ${e.command}`,
     // or because they named it themselves with --remove-instructions, or because this is an
     // uninstall. The guided track shows no such checklist, so it can only ever add.
     mayRemoveInstructions: prune.instructions || uninstall || removeInstructions !== undefined,
+    prMerge: wantPrMerge,
     prune,
     guided,
     wantsHandover,
@@ -749,7 +833,7 @@ Runs: ${e.command}`,
  * with two rows can never report on only one of them. The optional lines cover only the non-beta
  * blocks, which keeps each feature in exactly one place.
  */
-function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, extras, selectedExtras, blocks = [], guided = false, retire = new Set() }) {
+function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set() }) {
   const verb = uninstall ? "remove" : "install";
   const lines = [];
   const names = (items) => items.map((i) => i.label).join(", ");
@@ -821,6 +905,19 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
     if (enabling.length) {
       lines.push(`  ${enabling.map((b) => b.title).join(", ")} changes how Claude writes in EVERY project`);
       lines.push(`  on this machine. Undo with: node install.mjs --uninstall`);
+    }
+  }
+
+  // The only line here that reports a WIDENING of what Claude may do, so it says so in those
+  // terms and names the scope. Stated on every run that changes the rule, in either direction.
+  // Report only a real change: --uninstall sets this false on every machine, including the many
+  // that never had the rule, and a summary promising to remove something absent is noise.
+  if (prMerge !== null && prMerge !== undefined && prMerge !== prMergeAllowed()) {
+    if (prMerge) {
+      lines.push(`allow: ${PR_MERGE_RULE} — Claude may merge a PR without asking,`);
+      lines.push(`  in EVERY project on this machine. Undo with: node install.mjs --no-allow-pr-merge`);
+    } else {
+      lines.push(`remove: ${PR_MERGE_RULE} — Claude asks before merging again`);
     }
   }
 
@@ -1434,6 +1531,88 @@ function printManualMcpInstructions(name, cfg, distCli, linked) {
       2,
     ),
   );
+}
+
+// ── The ship-it merge permission ────────────────────────────────────────────────────────────────
+// One rule, in the user's global ~/.claude/settings.json. Same posture as the CLAUDE.md blocks:
+// surgical (only permissions.allow is touched, and only our own entry within it), idempotent
+// (re-running is a no-op), backed up before any destructive write, and never silent.
+
+/** Is the rule already in the user's global settings? Unreadable or malformed counts as "no". */
+function prMergeAllowed() {
+  return readGlobalSettings().settings?.permissions?.allow?.includes(PR_MERGE_RULE) ?? false;
+}
+
+/**
+ * Read the global settings file.
+ *
+ * `malformed` is the case that matters: a settings.json we cannot parse must never be rewritten
+ * from scratch, because that would silently discard every rule the user has. The caller reports
+ * and does nothing instead.
+ */
+function readGlobalSettings() {
+  if (!fs.existsSync(globalSettings)) return { settings: {}, raw: "", existed: false, malformed: false };
+  const raw = fs.readFileSync(globalSettings, "utf8");
+  if (!raw.trim()) return { settings: {}, raw, existed: true, malformed: false };
+  try {
+    const settings = JSON.parse(raw);
+    // A valid JSON file that is not an object (an array, a bare string) is as unsafe to merge
+    // into as an unparseable one.
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      return { settings: {}, raw, existed: true, malformed: true };
+    }
+    return { settings, raw, existed: true, malformed: false };
+  } catch {
+    return { settings: {}, raw, existed: true, malformed: true };
+  }
+}
+
+/**
+ * @param desired  true to add the rule, false to remove it, null to leave the file alone.
+ */
+function applyPrMergePermission(desired) {
+  if (desired === null || desired === undefined) return;
+
+  const { settings, raw, existed, malformed } = readGlobalSettings();
+  if (malformed) {
+    console.log(`  ${style.yellow("WARNING  ")} ${globalSettings} is not valid JSON — leaving it untouched.`);
+    console.log(`            Add ${PR_MERGE_RULE} to permissions.allow by hand, or fix the file and re-run.`);
+    return;
+  }
+
+  const allow = Array.isArray(settings.permissions?.allow) ? settings.permissions.allow : [];
+  const present = allow.includes(PR_MERGE_RULE);
+  if (desired === present) return; // already in the state asked for
+
+  const nextAllow = desired ? [...allow, PR_MERGE_RULE] : allow.filter((r) => r !== PR_MERGE_RULE);
+  const next = { ...settings, permissions: { ...settings.permissions, allow: nextAllow } };
+  // Do not leave an empty `allow: []` behind on removal if we are the only reason it existed.
+  if (!desired && nextAllow.length === 0 && Object.keys(next.permissions).length === 1) delete next.permissions;
+  if (next.permissions && Object.keys(next.permissions).length === 0) delete next.permissions;
+
+  // Same rule the CLAUDE.md path follows: if the file held nothing but our rule, leave no empty
+  // husk behind. Only reachable when every other key is already gone, so it cannot discard a
+  // setting the user still has.
+  const emptied = Object.keys(next).length === 0;
+  const serialised = emptied ? "" : `${JSON.stringify(next, null, 2)}\n`;
+  if (serialised === raw) return;
+
+  if (existed && raw.trim()) {
+    try {
+      fs.writeFileSync(`${globalSettings}.bak`, raw);
+    } catch (err) {
+      console.log(`  ${style.yellow("WARNING  ")} could not back up ${globalSettings} — ${err.message}`);
+      console.log(`            Continuing, because you asked for this change.`);
+    }
+  }
+
+  if (emptied) {
+    if (existed) fs.rmSync(globalSettings, { force: true });
+  } else {
+    fs.mkdirSync(path.dirname(globalSettings), { recursive: true });
+    fs.writeFileSync(globalSettings, serialised);
+  }
+  console.log(`  ${desired ? "allowed" : "removed"}  ${PR_MERGE_RULE}  (${globalSettings})`);
 }
 
 // ── Managed instruction blocks ──────────────────────────────────────────────────────────────────
