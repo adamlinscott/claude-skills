@@ -2,7 +2,7 @@
 #
 # One line per checkbox:
 #
-#   <name> | <folders> | <what it does> | <dev>,<nontech>
+#   <name> | <folders> | <what it does> | <dev>,<nontech> | <agents it needs>
 #
 #   name         what the installer shows, and what beta-features.txt refers to.
 #   folders      comma-separated folder names under ./skills that this entry installs.
@@ -19,6 +19,10 @@
 #                everything here wants: available to a developer, not part of the guided setup.
 #                Anything unparseable resolves to OFF, never on — a typo must never quietly
 #                install something on someone's machine.
+#
+#   agents       optional. Comma-separated names from agents.txt that this skill hands a step to.
+#                Whenever the skill is installed, these agents are ticked too, and the Agents
+#                checklist says which skill needs each one. Leave it off when the skill uses none.
 #
 # A track default can only ever ADD. Neither setup removes a skill you already have; only a
 # checklist you actually saw can do that.
@@ -58,28 +62,28 @@ assumption-inventory | assumption-inventory | DEPRECATED — use /build-it inste
 
 brief-me | brief-me | Catches you up on a session you have lost the thread of — after a distraction, or over a weekend. Explains in plain English what you were doing, where it got to, what state it is in now, and what it is waiting on from you. Changes nothing. | on,on
 
-build-it | build-it | Builds a piece of work from wherever it is written down — a ticket number, a plan file, the plan you just agreed in the conversation, or a description typed straight after the command. No issue tracker needed. It reads the source and the code it points at, asks you whatever neither of those answered — the why, above all — then writes down exactly which files it will change and which it will not, and builds to that. If the job turns out to be big and still vague, it says so and suggests planning it properly first. | on,off
+build-it | build-it | Builds a piece of work from wherever it is written down — a ticket number, a plan file, the plan you just agreed in the conversation, or a description typed straight after the command. No issue tracker needed. It reads the source and the code it points at, asks you whatever neither of those answered — the why, above all — then writes down exactly which files it will change and which it will not, and builds to that. If the job turns out to be big and still vague, it says so and suggests planning it properly first. | on,off | scout, worker, worker-light
 
 check-skill-updates | check-skill-updates | Checks whether the skills on your machine are behind the copy they were installed from, and offers to bring them up to date. Mentions it at most once a day, only when you are between tasks, and never again once you have said no to a version. | on,on
 
-context-audit | context-audit | Reviews the instructions and notes Claude reads in a project, and reports what is bloated, broken, or contradicting itself. Only reports; changes nothing. | on,off
+context-audit | context-audit | Reviews the instructions and notes Claude reads in a project, and reports what is bloated, broken, or contradicting itself. Only reports; changes nothing. | on,off | scout
 
 debrief | debrief | Reads back through your past Claude sessions to find the corrections you keep repeating, asks you why, and can write the answers up as project rules. | off,off
 
-fresh-eyes | fresh-eyes | Gets a second Claude to read your finished work with no memory of the conversation, then compares that reading against what you actually asked for. Catches what was missed. | on,off
+fresh-eyes | fresh-eyes | Gets a second Claude to read your finished work with no memory of the conversation, then compares that reading against what you actually asked for. Catches what was missed. | on,off | reviewer, worker
 
 goal-workflow | goal-workflow | DEPRECATED — use /build-it instead. Handed Claude a settled plan and let it build the whole thing on its own. It forced maximum effort, always split the work across sub-agents, and re-checked itself at every step — all of which current Claude models either do on their own or are actively slowed down by, which is why it stopped performing well. Kept only so existing installs point somewhere. | off,off
 
-memory-audit | memory-audit | Tells you what Claude remembers about a project and whether any of it has gone stale. Only reports; changes nothing. | on,on
+memory-audit | memory-audit | Tells you what Claude remembers about a project and whether any of it has gone stale. Only reports; changes nothing. | on,on | scout
 
-raise-issue | raise-issue, report-issue | Turns "the export button is broken" into a proper issue on your team's tracker. Asks a few plain questions, works out which part of the code you mean, checks nobody has reported it already, and shows you the finished issue before it files anything. | off,on
+raise-issue | raise-issue, report-issue | Turns "the export button is broken" into a proper issue on your team's tracker. Asks a few plain questions, works out which part of the code you mean, checks nobody has reported it already, and shows you the finished issue before it files anything. | off,on | scout
 
 reground | reground | Stops Claude when it has wandered off the task or started inventing files and APIs, and pins it back to what is really in your code. | on,off
 
 seatbelt | seatbelt, seatbelts | Decides up front what Claude may do in a project without asking, and what it must never do. Set it once, then let Claude run without watching every step. | off,off
 
-ship-it | ship-it | Takes the work from a finished session all the way out — merges it, releases it, and checks each environment is really running it, production last. If the release would carry other people's unreleased work along with it, it tells you whose and asks before touching production. Developer setups only. | on,off
+ship-it | ship-it | Takes the work from a finished session all the way out — merges it, releases it, and checks each environment is really running it, production last. If the release would carry other people's unreleased work along with it, it tells you whose and asks before touching production. Developer setups only. | on,off | reviewer
 
-ship-it-now | ship-it-now | The same as /ship-it, but it does not stop to ask before deploying other people's unreleased work — it names whose work is going out and carries straight on to production. Needs /ship-it installed alongside it. Developer setups only. | on,off
+ship-it-now | ship-it-now | The same as /ship-it, but it does not stop to ask before deploying other people's unreleased work — it names whose work is going out and carries straight on to production. Needs /ship-it installed alongside it. Developer setups only. | on,off | reviewer
 
 ttp | ttp, to-the-point | Makes Claude's replies short and direct — the answer first, the detail only if you ask for it. Big decisions still come back to you. | on,on

@@ -16,9 +16,10 @@
 # One per line, as:  <kind> <name>
 #
 #   skill        <name from skills.txt>
+#   agent        <name from agents.txt>
 #   instruction  <file name in ./instructions, without the .md>
 #
-# Move something out of beta by deleting its line — a skill then installs by default, and an
+# Move something out of beta by deleting its line — a skill or agent then installs by default, and an
 # instruction moves to the installer's "Other features" question. Blank lines and lines
 # starting with # are ignored. The installer reads this at run time; it never needs editing.
 

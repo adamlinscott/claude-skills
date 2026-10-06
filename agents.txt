@@ -1,0 +1,41 @@
+# How the installer lists the agents.
+#
+# An agent is a separate Claude that your session hands one kind of job to — finding code, looking something up,
+# building, reviewing — with its own model and effort level, so cheap jobs run on a cheap model and
+# judgement runs on a strong one without anyone switching by hand. Each lives in
+# ./agents/<name>/<name>.md and is linked into ~/.claude/agents/<name>/, exactly as skills are.
+#
+# One line per checkbox, the same format as skills.txt:
+#
+#   <name> | <folders> | <what it does> | <dev>,<nontech>
+#
+#   name         what the installer shows, and what beta-features.txt / deprecated.txt refer to.
+#   folders      the folder under ./agents this entry installs (normally the same as the name).
+#   description  written for the PERSON INSTALLING. The description inside the agent's own file is
+#                written to help Claude decide when to delegate, and makes a poor answer to "what
+#                is this?".
+#   defaults     on/off for each of the two setups, exactly as in skills.txt. Unparseable is OFF.
+#
+# The model and effort level are NOT set here. They live in each agent's own frontmatter, which is
+# the one place to tune them: change it, push, and every teammate's `git pull` picks it up. The
+# installer reads them from there to show on the checklist.
+#
+# A skill that hands a step to an agent lists it in skills.txt's fifth column. The installer ticks
+# those agents automatically whenever the skill is installed; a developer can still untick one,
+# and the skill then falls back to a general-purpose agent for that step.
+#
+# Retire an agent the same way as a skill: `off,off` here, "DEPRECATED — …" at the start of its
+# description, and an `agent <name>` line in deprecated.txt. Mark one as in development with an
+# `agent <name>` line in beta-features.txt.
+#
+# Blank lines and lines starting with # are ignored. The installer reads this at run time.
+
+reviewer | reviewer | Reads finished work with no idea why it was made, and reports what the code really does, what is missing, and where its comments have gone stale. Used by /fresh-eyes and /ship-it. | on,on
+
+researcher | researcher | Looks up facts outside your code — library docs, API limits, versions — and brings them back with links to where it found them. | on,on
+
+scout | scout | Finds where things live in the code, quickly and cheaply, and returns a list of file locations. Used by /build-it, /raise-issue, /memory-audit and /context-audit. | on,on
+
+worker | worker | Builds a change whose scope is already agreed, making the engineering calls inside it. Used by /build-it and /fresh-eyes. | on,on
+
+worker-light | worker-light | A cheaper builder for purely mechanical changes — renames, fields that follow an existing pattern, tests to stated cases. Stops if a design decision turns up. Used by /build-it. | on,on
