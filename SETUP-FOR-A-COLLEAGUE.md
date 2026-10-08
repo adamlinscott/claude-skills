@@ -91,8 +91,9 @@ node install.mjs --simple
 ```
 
 `--simple` is the non-technical install: it skips every checklist, installs only the
-problem-reporting skills, and sets Claude up to write in plain English everywhere on this
-machine. You still get the Ready summary; nothing on disk changes until you confirm it, so read
+problem-reporting skills and the agents they hand work to, and sets Claude up to write in plain
+English everywhere on this machine. The agents get one line on the Ready summary: they work behind
+the scenes, and your colleague never runs one directly. You still get the Ready summary; nothing on disk changes until you confirm it, so read
 it before you accept.
 
 Both the choosing screen and the Ready summary carry a warning telling a developer not to pick

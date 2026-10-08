@@ -1,6 +1,6 @@
 {
   "name": "claude-skills",
-  "description": "Skills that add lifecycle gates around planning and building with Claude Code: ground a plan in reality, verify a finished diff with fresh eyes, audit injected context, set up per-repo permissions so you can run auto mode with confidence, and turn a non-technical colleague's bug report into a well-formed issue written in the codebase's own vocabulary.",
+  "description": "Skills and agents that add lifecycle gates around planning and building with Claude Code, with each kind of job running on its own model and effort: ground a plan in reality, verify a finished diff with fresh eyes, audit injected context, set up per-repo permissions so you can run auto mode with confidence, and turn a non-technical colleague's bug report into a well-formed issue written in the codebase's own vocabulary.",
   "author": { "name": "Adam Linscott", "url": "https://github.com/adamlinscott" },
   "homepage": "https://github.com/adamlinscott/claude-skills",
   "repository": "https://github.com/adamlinscott/claude-skills",
