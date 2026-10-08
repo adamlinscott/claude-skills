@@ -4,8 +4,9 @@ Detailed prompts and templates for the [SKILL.md](SKILL.md) workflow.
 
 ## Blind subagent prompt (step 3)
 
-Spawn with the Agent tool (`general-purpose`, or `Explore` for read-only). The agent
-must have NO knowledge of the conversation or the intended outcome. Hand it only the
+Spawn the `reviewer` agent (Agent tool, `subagent_type: reviewer`), or `general-purpose` if it
+is not installed — say which in a line. The prompt below is complete either way, so the fallback
+loses nothing but the tuned model. The agent must have NO knowledge of the conversation or the intended outcome. Hand it only the
 change captured in step 2 — paste the diff, tell it the exact `git diff` command to
 run, or (in the no-git / session-reconstructed case) give it the list of changed file
 paths to read cold. Never pass conversation history or planning docs. Use this prompt:
@@ -49,7 +50,7 @@ to look like rather than whether the code matches the stated intent.
 
 **The single general agent above is the default.** Only when a diff is genuinely too
 large for one agent to hold in context — hundreds of lines across unrelated modules —
-run 2–3 agents with one lens each instead. Reach for this because the material does not
+run 2–3 `reviewer` agents with one lens each instead. Reach for this because the material does not
 fit, never because the change feels important: three agents over a diff one could have
 read produce three overlapping reports, cost three times as much, and make the
 reconciliation harder rather than sharper.
@@ -114,8 +115,9 @@ step 6. It is the one path allowed to modify the tree. `--fix` runs a single rou
    from `Assumptions only you can confirm` — carry them forward untouched into every
    subsequent round and into the final overview. Acting on an unconfirmed assumption is
    how a wrong premise gets built deeper instead of caught.
-2. Apply the fixes — main context for trivial mechanical changes, or delegate a
-   substantial fix to a fresh agent to keep the implementer unbiased. Do not pull
+2. Apply the fixes — main context for trivial mechanical changes, or hand a substantial fix
+   to the `worker` agent (`general-purpose` if it is not installed) to keep the implementer
+   unbiased. Give it the in-scope items and the files; it does not commit unless told to. Do not pull
    out-of-scope leftovers into this pass.
 3. Re-run steps 2–5 of the workflow on the new change.
 4. Stop when the verdict is `DONE`, after the round limit (`--fix` = 1, `--iterate` = 2),
