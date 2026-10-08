@@ -82,6 +82,9 @@ Pinned <date>, before implementation.
 <One paragraph, in the project's vocabulary. What changes from the user's point of view,
 and the approach taken.>
 
+Mechanical: <yes | no> — yes only when no design choice is left; it sends the build to
+worker-light instead of worker.
+
 ## Why
 
 <One or two sentences. From the source if it said; from the interview if it did not.
