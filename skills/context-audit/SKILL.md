@@ -1,7 +1,7 @@
 ---
 name: context-audit
 description: '[Adam''s Skills] Audits a repository''s Claude context-injection setup — CLAUDE.md, CONTEXT.md, docs/, .claude/agents/, and the per-project memory directory. Reports bloat, broken links, orphaned docs, security risks, missing rules in subagent prompts, settings that override agents'' model or effort, and conflicts between memory and project instructions. Use when the user asks to audit their Claude setup, asks "what''s wrong with my CLAUDE.md", wants to know if their agents/memory/docs are configured well, or wants to improve Claude''s effectiveness in this repository.'
-allowed-tools: Read, Grep, Glob, Bash
+allowed-tools: Read, Grep, Glob, Bash, Agent
 ---
 
 # Context audit
@@ -132,6 +132,13 @@ that these are calibrations rather than errors — the lines were correct when w
 - Repeated explanations of the same concept across CLAUDE.md, agent files, and docs.
 - CLAUDE.md over ~400 lines total — every session pays the token cost.
 - Agent prompts over ~800 lines that include content most invocations won't use.
+
+**The next three checks are lookups, not judgement.** Collect what they need while reading —
+every file cited by a CLAUDE.md or agent file, every path or symbol a memory or doc names, the
+top-level modules, and the docs under `docs/` — and hand it to the `scout` agent in one call
+(Agent tool, `subagent_type: scout`; `general-purpose` if it is not installed, and say so in a
+line). It returns what exists, what is missing, and what references each doc, with `path:line`.
+Turning those results into findings stays with you.
 
 ### Broken or missing links
 - Files referenced from CLAUDE.md or an agent file that do not exist on disk (`Glob` to verify each citation).
