@@ -92,7 +92,7 @@ ADR or design doc, which records a decision rather than a guarantee that it is s
 
 This is not preparation for building; it is preparation for **asking**. Every question you can
 answer from the code is a question you must not spend on the human. Their attention is the scarce
-resource here, and there is a hard cap of four questions coming.
+resource here.
 
 ## 3. Ask whatever the source and the code left unanswered
 
