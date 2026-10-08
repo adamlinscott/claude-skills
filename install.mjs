@@ -633,7 +633,19 @@ async function buildPlan() {
   }
 
   // What the summary needs to account for every agent, read at the moment it is drawn.
-  const agentSummary = () => ({ stable: stableAgents, linked: linkedAgents, selected: selectedAgents, needed: uninstall ? new Map() : neededAgents(), retire: retireAgents });
+  // The same check applyLinks makes, run before the Ready screen so it never promises an agent
+  // that linking will then refuse.
+  const agentClashes = () => {
+    const clashes = new Map();
+    if (uninstall) return clashes;
+    for (const name of selectedAgents) {
+      const group = agentNamed(name);
+      const file = group && findAgentClash(group);
+      if (file) clashes.set(name, { agentName: group.agentName, file });
+    }
+    return clashes;
+  };
+  const agentSummary = () => ({ stable: stableAgents, linked: linkedAgents, selected: selectedAgents, needed: uninstall ? new Map() : neededAgents(), retire: retireAgents, clashes: agentClashes() });
 
   if (interactive) {
     try {
@@ -965,8 +977,9 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
       if (removing.length) lines.push(`remove ${plural(removing.length, "agent")}: ${removing.join(", ")}`);
       if (left.length) lines.push(`leave ${plural(left.length, "agent")}: ${left.join(", ")}`);
     } else {
-      const added = chosen.filter((n) => !agents.linked.includes(n));
-      const kept = chosen.filter((n) => agents.linked.includes(n));
+      const clashing = chosen.filter((n) => agents.clashes.has(n));
+      const added = chosen.filter((n) => !agents.linked.includes(n) && !agents.clashes.has(n));
+      const kept = chosen.filter((n) => agents.linked.includes(n) && !agents.clashes.has(n));
       const dropped = agents.stable.filter((n) => !agents.selected.has(n) && agents.linked.includes(n) && (prune.agents || agents.retire.has(n)));
       if (guided) {
         // No checklist on this track, so this line is all the reader learns. The noun stays the
@@ -980,6 +993,11 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
         if (kept.length) lines.push(`keep ${plural(kept.length, "agent")}`);
       }
       if (dropped.length) lines.push(`remove ${plural(dropped.length, "agent")}: ${dropped.join(", ")}`);
+      for (const name of clashing) {
+        const { agentName, file } = agents.clashes.get(name);
+        lines.push(style.yellow(`skip ${name}: you already have an agent called "${agentName}" at`));
+        lines.push(style.yellow(`  ${file}. Rename or remove it, then run this again.`));
+      }
       // A chosen skill hands a step to an agent that was unticked. Allowed — the skill falls back
       // to a general-purpose agent — but it should be a decision someone saw, not a surprise.
       for (const [agent, skills] of agents.needed) {
