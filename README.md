@@ -12,27 +12,30 @@
 
 </div>
 
-Each skill lives under `skills/<name>/SKILL.md` and is the single source of truth; an install
-script links them into the global skills directory (`~/.claude/skills/`) so Claude loads
-them in every session, on every machine.
+Each skill lives under `skills/<name>/SKILL.md`, and each agent under `agents/<name>/<name>.md`.
+These are the single source of truth: an install script links them into `~/.claude/skills/` and
+`~/.claude/agents/` so Claude loads them in every session, on every machine.
 
-## ✨ Latest update — recalibrated for Claude Opus 5 and Fable 5.1
+## ✨ Latest update — agents, each on its own model and effort
 
-Prompting advice ages, and some of it inverts. The whole collection has been read back through
-against Anthropic's current guidance: newer models already check their own work, delegate, and
-reason without being told to, so the effort moves earlier — into planning and scoping, which is
-also what lets a run sit at a *lower* thinking effort and still land it.
+Switching between Opus and Sonnet, or between high and medium effort, by hand as the work
+changes is exactly the kind of thing nobody remembers to do. So the collection now ships
+**agents**: separate Claudes your session hands one kind of job to, each pinned to the model and
+effort that job deserves. Finding code runs on Haiku, routine edits on Sonnet, and building and
+reviewing on Opus, with nobody touching `/model`.
 
-- **New — `/build-it`.** Point it at a ticket, a plan file, or just say what you want built. It
-  asks what the source and the code can't answer, pins what will and won't change, then builds.
-- **New — `model-calibration`.** Anthropic's own prompt snippets, verbatim, in your global
-  `CLAUDE.md`: reply length, narration, delegation, scope.
-- **Updated —** `/context-audit` now flags instructions in *your* repo that have aged the same
-  way. `/fresh-eyes` fans out less, `/ttp` reaches written files, reports got shorter.
-- **Retired —** `/goal-workflow` and `/assumption-inventory`, both superseded by `/build-it`.
-  Nothing is deleted when it retires: it stays working and says what to use instead.
+- **New — five agents.** `scout`, `researcher`, `worker`, `worker-light` and `reviewer`. See
+  [Agents](#-agents).
+- **Updated — skills use them.** `/fresh-eyes` reviews on `reviewer`. `/build-it` maps the code
+  with `scout` and builds with `worker`. `/raise-issue` and the two audits look things up with
+  `scout`. `/ship-it` reads other people's unreleased commits with `reviewer`.
+- **Updated — the installer** links the agents the same way it links skills, ticks the ones your
+  skills need, and warns you if a setting would quietly override their tuning.
+- **Earlier — recalibrated for Opus 5 and Fable 5.1.** That added `/build-it` and the
+  `model-calibration` instructions, and retired `/goal-workflow` and `/assumption-inventory`.
 
-Already installed? `git pull` is the whole update — the skills are linked, not copied.
+Already installed? `git pull`, then re-run `node install.mjs` once to add the agents. After that,
+`git pull` is the whole update: skills and agents are linked, not copied.
 
 > [!TIP]
 > **Not a developer? Start here → [SETUP-FOR-A-COLLEAGUE.md](SETUP-FOR-A-COLLEAGUE.md).** The honest answer is that you should ask a developer to set this up for you: it takes a terminal, two clones, and a paid Claude seat to get going. That page is the checklist for them to work through on your machine. It ends with the one thing you type: `/raise-issue`.
@@ -324,6 +327,38 @@ which the installer builds and connects for you when you tick it.
 **When to use:** you notice you are correcting Claude the same way every week and want that turned
 into something the project remembers.
 
+## 🤖 Agents
+
+An agent is a separate Claude that your session hands one kind of job to. It has its own
+instructions, its own tools, and its own **model and effort level**. That last part is the point:
+the job, not whatever your session happens to be set to, decides how much intelligence a step gets.
+
+| Agent | Model · effort | Its job | Used by |
+|---|---|---|---|
+| `scout` | Haiku | Finds where things live in the code and returns file locations, each marked confirmed or likely. | `/build-it`, `/raise-issue`, `/memory-audit`, `/context-audit` |
+| `researcher` | Sonnet · medium | Looks up facts outside your code (docs, API limits, versions) with links to its sources. | Claude, when a decision waits on an outside fact |
+| `worker` | Opus · medium | Builds a change whose scope is already agreed, making the engineering calls inside it. | `/build-it`, `/fresh-eyes` fixes |
+| `worker-light` | Sonnet · medium | Builds purely mechanical changes, and stops if a design decision turns up. | `/build-it`, when the scope note says `Mechanical: yes` |
+| `reviewer` | Opus · medium | Reads finished work blind and reports what the code really does, what is missing, and where comments have gone stale. | `/fresh-eyes`, `/ship-it` |
+
+**How work reaches them.** A skill names its agent in the step that needs it, so that step always
+runs on the agent's model. Claude can also pick an agent on its own when one fits. If an agent is
+not installed, the skill falls back to a general-purpose agent and says so. Opus runs at `medium`
+because, in Anthropic's testing, Opus 5.5 at medium matches the previous Opus at high on coding
+work.
+
+**Tuning them for the team.** The model and effort live in each agent's own frontmatter, and
+nowhere else. Change the line, push, and every teammate's `git pull` picks it up.
+
+**Changing one for a single project.** Put a file with the same `name:` in that project's
+`.claude/agents/`; a project agent wins over the installed one.
+
+**What can quietly override them.** Two settings, measured on Claude Code 2.1.289:
+`CLAUDE_CODE_EFFORT_LEVEL` replaces every agent's effort, and `CLAUDE_CODE_SUBAGENT_MODEL` replaces
+every agent's model, but only together with `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. `--effort`,
+`/effort` and `effortLevel` do not; an agent's own setting wins over all three. The installer
+warns you about either one, and `/context-audit` names the agents each one overrides.
+
 ## ⚙️ Install
 
 Requires [git](https://git-scm.com/downloads) and [Node.js](https://nodejs.org/). Clone, then run
@@ -347,7 +382,7 @@ Because the skills are linked rather than copied, editing one in this repo updat
 every Claude session. Commit and push to share the change.
 
 **Staying up to date is `git pull`, not a re-install.** The links point at this clone, so pulling
-updates every installed skill at once; re-running the installer is for adding or removing skills,
+updates every installed skill and agent at once; re-running the installer is for adding or removing them,
 and never refreshes content because there is no copy to refresh. The one exception is the optional
 instruction blocks, which really are copied into your global `CLAUDE.md` — `node install.mjs
 --refresh` rewrites those and repairs any dangling link, without adding or removing anything.
@@ -382,7 +417,7 @@ machine pick Advanced because it says it is for them, and everyone else takes Si
 | Install | Who it is for |
 |---|---|
 | **Advanced install** | Developers. Every skill, and you pick which ones from a checklist. This is the default answer. |
-| **Simple install** | People who do not write code. A small set for describing problems, writing them up, and finding your place again — `/raise-issue`, `/ttp`, `/brief-me`, `/memory-audit` — plus plain-English replies in every project on the machine. Nothing to choose. |
+| **Simple install** | People who do not write code. A small set for describing problems, writing them up, and finding your place again — `/raise-issue`, `/ttp`, `/brief-me`, `/memory-audit` — plus the agents, and plain-English replies in every project on the machine. Nothing to choose. |
 
 > [!WARNING]
 > **Simple is not a smaller Advanced, and if you write code you do not want it.** It is a

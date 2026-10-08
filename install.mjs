@@ -26,8 +26,9 @@
 //
 // Everything it offers is read from disk rather than hardcoded here, so this file does not need
 // editing as the collection changes:
-//   • ./skills.txt        — one checkbox per skill, its folders, a description for a person, and
-//                           whether each setup defaults it on.
+//   • ./skills.txt        — one checkbox per skill, its folders, a description for a person,
+//                           whether each setup defaults it on, and the agents it needs.
+//   • ./agents.txt        — the same, for the agents in ./agents, linked into ~/.claude/agents.
 //   • ./beta-features.txt — which skills and instructions are still in development
 //   • ./instructions/*.md — the optional blocks offered for the global CLAUDE.md, each carrying
 //                           its own dev:/nontech: defaults
@@ -53,6 +54,8 @@ const repoInstructionsDir = path.join(repoRoot, "instructions");
 const repoToolsDir = path.join(repoRoot, "tools");
 const betaListFile = path.join(repoRoot, "beta-features.txt");
 const skillsListFile = path.join(repoRoot, "skills.txt");
+const repoAgentsDir = path.join(repoRoot, "agents");
+const agentsListFile = path.join(repoRoot, "agents.txt");
 const deprecatedListFile = path.join(repoRoot, "deprecated.txt");
 const repoExtrasDir = path.join(repoRoot, "extras");
 
@@ -73,7 +76,14 @@ const KIND_LABELS = { skill: "skill", instruction: "global instruction", agent: 
 // Shown in the details panel for a skill folder with no line in skills.txt. Declared up here
 // because buildPlan() runs before the rest of the file is evaluated.
 const NO_DESCRIPTION = "No description yet — add a line for it in skills.txt.";
+const NO_AGENT_DESCRIPTION = "No description yet — add a line for it in agents.txt.";
 const globalSkillsDir = path.join(homedir(), ".claude", "skills");
+const globalAgentsDir = path.join(homedir(), ".claude", "agents");
+// Skills and agents are linked the same way — one folder each, from the repo into ~/.claude — so
+// the link helpers take one of these rather than being written twice. Declared up here for the
+// same reason as NO_DESCRIPTION: buildPlan() runs before the rest of the file is evaluated.
+const SKILLS = { kind: "skill", listFile: skillsListFile, sourceDir: repoSkillsDir, targetDir: globalSkillsDir };
+const AGENTS = { kind: "agent", listFile: agentsListFile, sourceDir: repoAgentsDir, targetDir: globalAgentsDir };
 const globalClaudeMd = path.join(homedir(), ".claude", "CLAUDE.md");
 const globalSettings = path.join(homedir(), ".claude", "settings.json");
 
@@ -198,6 +208,7 @@ if (unknownFlags.length) {
     console.log("  Nothing was changed.\n");
   } else {
     applySkillLinks(plan);
+    applyAgentLinks(plan);
     applyBetaTools(plan);
     if (plan.instructions) applyInstructionBlocks(plan.instructions, plan.mayRemoveInstructions);
     applyPrMergePermission(plan.prMerge);
@@ -267,11 +278,11 @@ function printHelp() {
   console.log("                                you ask for it, on every setup.");
   console.log("  --no-allow-pr-merge           Take that rule away again.");
   console.log("");
-  console.log("  --refresh                     Re-link the skills you already have and rewrite the");
-  console.log("                                instruction blocks you already use, then stop. Adds");
-  console.log("                                nothing, removes nothing, asks nothing. Run it after");
-  console.log("                                a git pull. Skills are links, so their content is");
-  console.log("                                already up to date either way.");
+  console.log("  --refresh                     Re-link the skills and agents you already have,");
+  console.log("                                rewrite the instruction blocks you already use,");
+  console.log("                                then stop. Adds nothing, removes nothing, asks");
+  console.log("                                nothing. Run it after a git pull. Skills and agents");
+  console.log("                                are links, so their content is already up to date.");
   console.log("");
   console.log("  --extras=<names>              Also run these other people's installers, once this");
   console.log("                                repo's own skills are in. Comma-separated, 'all', or");
@@ -397,17 +408,23 @@ async function offerStar() {
  */
 async function buildPlan() {
   const skillGroups = loadSkillGroups();
+  const agentGroups = loadAgentGroups();
   const blocks = loadInstructionBlocks();
   const installedBlocks = readInstalledBlockNames(blocks);
   const interactive = canPrompt() && !acceptDefaults;
   const groupNamed = (name) => skillGroups.find((g) => g.name === name);
+  const agentNamed = (name) => agentGroups.find((g) => g.name === name);
 
   // Beta covers more than skills, so split the list by kind. Anything named but missing from the
   // repo is dropped, which keeps a stale line in beta-features.txt from breaking the run.
   const betaFeatures = loadBetaFeatures().filter((f) =>
-    f.kind === "skill" ? Boolean(groupNamed(f.name)) : blocks.some((b) => b.name === f.name),
+    f.kind === "skill" ? Boolean(groupNamed(f.name)) : f.kind === "agent" ? Boolean(agentNamed(f.name)) : blocks.some((b) => b.name === f.name),
   );
   const betaSkills = betaFeatures.filter((f) => f.kind === "skill").map((f) => f.name);
+  const betaAgents = betaFeatures.filter((f) => f.kind === "agent").map((f) => f.name);
+  const stableAgentGroups = agentGroups.filter((g) => !betaAgents.includes(g.name));
+  const stableAgents = stableAgentGroups.map((g) => g.name);
+  const linkedAgents = stableAgentGroups.filter((g) => isGroupLinked(g, AGENTS)).map((g) => g.name);
   const betaBlockNames = new Set(betaFeatures.filter((f) => f.kind === "instruction").map((f) => f.name));
   // Everything that is NOT beta is offered in the second question. When nothing is left, that
   // question does not exist and the wizard is one step shorter.
@@ -424,9 +441,11 @@ async function buildPlan() {
 
   // What is already in place, so the checkboxes open showing the current state.
   const activeBeta = betaFeatures
-    .filter((f) => (f.kind === "skill" ? isGroupLinked(groupNamed(f.name)) : installedBlocks.has(f.name)))
+    .filter((f) =>
+      f.kind === "skill" ? isGroupLinked(groupNamed(f.name)) : f.kind === "agent" ? isGroupLinked(agentNamed(f.name), AGENTS) : installedBlocks.has(f.name),
+    )
     .map((f) => f.name);
-  const linkedStable = stableGroups.filter(isGroupLinked).map((g) => g.name);
+  const linkedStable = stableGroups.filter((g) => isGroupLinked(g)).map((g) => g.name);
 
   // Retired skills. Named in deprecated.txt rather than deleted, so anyone who already has one
   // gets redirected instead of finding a command that quietly stopped existing.
@@ -435,10 +454,14 @@ async function buildPlan() {
   // The ones actually sitting on this machine — the only ones worth saying anything about. On a
   // clean install this is empty and the whole retirement path costs nothing.
   const deprecatedLinked = stableGroups.filter((g) => isDeprecated(g.name) && linkedStable.includes(g.name)).map((g) => g.name);
+  // Agents retire by the same rules, in the same question.
+  const deprecatedAgentNames = loadDeprecatedNames("agent");
+  const deprecatedAgentsLinked = linkedAgents.filter((n) => deprecatedAgentNames.has(n));
   // Explicitly agreed removals. Kept apart from the checklist's prune set because the two are
   // authorised differently: prune means "you saw a ticked box and cleared it", this means "you
   // answered a question that named this skill". The second works on tracks where no checklist runs.
   const retire = new Set();
+  const retireAgents = new Set();
 
   const screen = () => {
     clearScreen();
@@ -506,6 +529,7 @@ async function buildPlan() {
   // it has nothing to show. Computed AFTER the audience answer so the count stays honest —
   // it depends on which track we are on.
   const askSkills = interactive && !guided && stableSkills.length > 0;
+  const askAgents = interactive && !guided && stableAgents.length > 0;
   const askBeta = interactive && !guided && betaFeatures.length > 0 && !forceBeta && !forceNoBeta;
   const askOptional =
     interactive &&
@@ -538,6 +562,7 @@ async function buildPlan() {
   const totalSteps =
     (askSkills ? 1 : 0) +
     (askBeta ? 1 : 0) +
+    (askAgents ? 1 : 0) +
     (askOptional ? 1 : 0) +
     (askPrMerge ? 1 : 0) +
     (askExtras ? 1 : 0) +
@@ -564,13 +589,14 @@ async function buildPlan() {
    * track no checklist is shown, so nothing may be pruned; on the developer track the checklists
    * that actually ran may prune, and the ones a flag answered may not.
    */
-  const prune = { skills: askSkills, beta: askBeta, instructions: askOptional };
+  const prune = { skills: askSkills, agents: askAgents, beta: askBeta, instructions: askOptional };
 
   // What this track would switch on, before anything already installed is folded in.
   // A retired skill is never switched on by a track, whatever its defaults column still says.
   // The column is the belt; this is the braces, and it means retiring something is one line in
   // deprecated.txt rather than a line there plus a defaults edit that is easy to forget.
   const trackSkills = stableGroups.filter((g) => g.defaults[track] && !isDeprecated(g.name)).map((g) => g.name);
+  const trackAgents = stableAgentGroups.filter((g) => g.defaults[track] && !deprecatedAgentNames.has(g.name)).map((g) => g.name);
   const trackBlocks = blocks.filter((b) => b.defaults[track]).map((b) => b.name);
   // Beta stays off on a flag-driven run whatever the track says — an unattended run never
   // enables something still in development. Interactively it is named and labelled in the
@@ -583,6 +609,14 @@ async function buildPlan() {
   // Skills: on a first run take the track's defaults; once something is linked, open on what you
   // actually have, so a choice made last time is not silently undone by re-running.
   let selectedSkills = new Set(uninstall || linkedStable.length ? linkedStable : trackSkills);
+  // Agents open the same way. The ones the chosen skills need are added once the skills are known.
+  let selectedAgents = new Set(uninstall || linkedAgents.length ? linkedAgents : trackAgents);
+  // Every skill that will be linked, stable or beta: the set whose needs decide which agents to tick.
+  const skillsToLink = () => new Set([...selectedSkills, ...[...selectedBeta].filter((n) => betaSkills.includes(n))]);
+  const neededAgents = () => agentsNeededBy(skillsToLink(), skillGroups, agentGroups);
+  // What those needs may actually tick. A retired agent is never put on a machine, whoever needs it —
+  // the skill falls back instead, and the summary says so.
+  const neededToTick = () => [...neededAgents().keys()].filter((n) => !deprecatedAgentNames.has(n));
   let wantInstructions; // Set of block names, or null to leave the CLAUDE.md step alone entirely
   // true to add the merge rule, false to remove it, null to leave settings.json alone. Null is
   // the default on every path that did not ask and was not told.
@@ -595,7 +629,11 @@ async function buildPlan() {
   if (guided && !uninstall) {
     selectedSkills = unionFloor(linkedStable, trackSkills);
     selectedBeta = unionFloor(activeBeta, trackBeta);
+    selectedAgents = unionFloor(linkedAgents, [...trackAgents, ...neededToTick()]);
   }
+
+  // What the summary needs to account for every agent, read at the moment it is drawn.
+  const agentSummary = () => ({ stable: stableAgents, linked: linkedAgents, selected: selectedAgents, needed: uninstall ? new Map() : neededAgents(), retire: retireAgents });
 
   if (interactive) {
     try {
@@ -605,22 +643,28 @@ async function buildPlan() {
       // worded way to answer the same thing. Not counted as a numbered step: like the install-mode
       // fork, it exists only on some runs, and a counter that changes shape between machines is
       // worse than no counter on this screen.
-      if (deprecatedLinked.length && !uninstall) {
+      const retiredHere = [
+        ...deprecatedLinked.map((name) => ({ kind: "skill", name, label: `/${name}`, group: groupNamed(name) })),
+        ...deprecatedAgentsLinked.map((name) => ({ kind: "agent", name, label: `${name} (agent)`, group: agentNamed(name) })),
+      ];
+      if (retiredHere.length && !uninstall) {
         screen();
+        const kinds = new Set(retiredHere.map((r) => r.kind));
+        const noun = kinds.size > 1 ? "thing" : [...kinds][0];
         const answer = await chooseAction({
-          heading: deprecatedLinked.length === 1 ? "A skill you have has been retired" : "Some skills you have have been retired",
+          heading: retiredHere.length === 1 ? `${noun === "agent" ? "An" : "A"} ${noun} you have has been retired` : `Some ${noun}s you have have been retired`,
           body: [
-            ...deprecatedLinked.flatMap((name) => {
-              const group = groupNamed(name);
-              return [style.yellow(`  /${name}`), ...wrap(group?.description || NO_DESCRIPTION, 80).map((l) => `    ${style.dim(l)}`), ""];
+            ...retiredHere.flatMap(({ kind, label, group }) => {
+              return [style.yellow(`  ${label}`), ...wrap(group?.description || (kind === "agent" ? NO_AGENT_DESCRIPTION : NO_DESCRIPTION), 80).map((l) => `    ${style.dim(l)}`), ""];
             }),
             ...wrap(
-              "Retired skills stay in the repo and keep working, so nothing breaks if you leave them. They are no longer maintained, and they are not installed on new machines.",
+              `Retired ${noun}s stay in the repo and keep working, so nothing breaks if you leave them.` +
+                " They are no longer maintained, and they are not installed on new machines.",
               84,
             ).map((l) => style.dim(l)),
           ],
           items: [
-            { value: "remove", label: deprecatedLinked.length === 1 ? "Remove it" : "Remove them", hint: "recommended — the replacement is named above" },
+            { value: "remove", label: retiredHere.length === 1 ? "Remove it" : "Remove them", hint: "recommended — the replacement is named above" },
             { value: "keep", label: "Keep for now", hint: "leave it installed; you will be asked again next time" },
           ],
           initial: "remove",
@@ -632,6 +676,10 @@ async function buildPlan() {
           for (const name of deprecatedLinked) {
             retire.add(name);
             selectedSkills.delete(name);
+          }
+          for (const name of deprecatedAgentsLinked) {
+            retireAgents.add(name);
+            selectedAgents.delete(name);
           }
         }
       }
@@ -662,12 +710,44 @@ async function buildPlan() {
             details:
               f.kind === "instruction"
                 ? blocks.find((b) => b.name === f.name).summary
-                : groupNamed(f.name).description || NO_DESCRIPTION,
+                : f.kind === "agent"
+                  ? agentNamed(f.name).description || NO_AGENT_DESCRIPTION
+                  : groupNamed(f.name).description || NO_DESCRIPTION,
           })),
           selected: activeBeta,
         });
         if (!picked) return null;
         selectedBeta = picked;
+      }
+
+      // — Agents —
+      // After skills and beta, because which agents to tick depends on which skills were chosen.
+      // A needed agent is ticked and says which skill needs it; unticking it is allowed, and the
+      // summary then names the skill that falls back to a general-purpose agent for that step.
+      if (askAgents) {
+        screen();
+        const needed = uninstall ? new Map() : neededAgents();
+        const picked = await multiSelect({
+          heading: `Agents${stepLabel()}`,
+          note: uninstall
+            ? "Tick the ones to remove."
+            : "Each takes one kind of job, on its own model and effort level. Skills that need one have ticked it.",
+          items: stableAgentGroups.map((g) => ({
+            value: g.name,
+            label: g.name,
+            hint: [
+              g.tuning,
+              needed.has(g.name) ? `needed by ${needed.get(g.name).map((n) => `/${n}`).join(", ")}` : "",
+              deprecatedAgentNames.has(g.name) ? "deprecated" : "",
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            details: g.description || NO_AGENT_DESCRIPTION,
+          })),
+          selected: [...selectedAgents, ...needed.keys()].filter((n) => !deprecatedAgentNames.has(n) || selectedAgents.has(n)),
+        });
+        if (!picked) return null;
+        selectedAgents = picked;
       }
 
       // — Optional (non-beta) features —
@@ -755,7 +835,7 @@ Runs: ${e.command}`,
       screen();
       const go = await chooseAction({
         heading: `Ready${stepLabel()}`,
-        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire }),
+        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary() }),
         items: [
           { value: "go", label: uninstall ? "Remove them" : "Install", hint: "apply the changes above" },
           { value: "cancel", label: "Cancel", hint: "change nothing" },
@@ -771,6 +851,7 @@ Runs: ${e.command}`,
     // track's defaults ARE the default answer, so -y and the interactive first run agree on what
     // "default" means. Union floor, so an unattended run can still only add.
     selectedSkills = unionFloor(linkedStable, trackSkills);
+    selectedAgents = unionFloor(linkedAgents, uninstall ? trackAgents : [...trackAgents, ...neededToTick()]);
     if (forceNoBeta) selectedBeta = new Set(activeBeta);
     const fromBeta = [...selectedBeta].filter((name) => betaBlockNames.has(name));
     if (skipInstructions || blocks.length === 0) wantInstructions = null;
@@ -785,7 +866,7 @@ Runs: ${e.command}`,
       wantInstructions = unionFloor([...installedBlocks], [...trackBlocks.filter((n) => !betaBlockNames.has(n)), ...fromBeta]);
     } else wantInstructions = new Set([...installedBlocks, ...fromBeta]);
 
-    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire })) {
+    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary() })) {
       console.log(`  ${line}`);
     }
     console.log("");
@@ -804,10 +885,19 @@ Runs: ${e.command}`,
     ...[...selectedSkills].filter((name) => groupNamed(name)),
     ...[...selectedBeta].filter((name) => betaSkills.includes(name)),
   ]);
+  // Agents likewise: the stable ones chosen, plus any beta agent ticked on the beta checklist.
+  const selectedAgentGroups = new Set([
+    ...[...selectedAgents].filter((name) => agentNamed(name)),
+    ...[...selectedBeta].filter((name) => betaAgents.includes(name)),
+  ]);
   return {
     skillGroups,
     selectedGroups,
     betaSkills,
+    agentGroups,
+    selectedAgentGroups,
+    betaAgents,
+    retireAgents,
     selectedBeta,
     newlyEnabledBeta,
     // Removals the user agreed to by name, rather than by clearing a checkbox. applySkillLinks
@@ -833,7 +923,7 @@ Runs: ${e.command}`,
  * with two rows can never report on only one of them. The optional lines cover only the non-beta
  * blocks, which keeps each feature in exactly one place.
  */
-function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set() }) {
+function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set(), agents = null }) {
   const verb = uninstall ? "remove" : "install";
   const lines = [];
   const names = (items) => items.map((i) => i.label).join(", ");
@@ -863,6 +953,42 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
     const retiring = droppedSkills.filter((n) => retire.has(n));
     if (retiring.length) lines.push(`  ${retiring.join(", ")} ${retiring.length === 1 ? "is" : "are"} retired — removing as you asked`);
     if (!chosenSkills.length && !droppedSkills.length) lines.push("install no skills");
+  }
+
+  if (agents && agents.stable.length) {
+    const chosen = agents.stable.filter((n) => agents.selected.has(n));
+    if (uninstall) {
+      // Only what is actually here: an unattended uninstall also "selects" track defaults that
+      // were never linked, and promising to remove those is noise.
+      const removing = chosen.filter((n) => agents.linked.includes(n));
+      const left = agents.stable.filter((n) => !agents.selected.has(n) && agents.linked.includes(n));
+      if (removing.length) lines.push(`remove ${plural(removing.length, "agent")}: ${removing.join(", ")}`);
+      if (left.length) lines.push(`leave ${plural(left.length, "agent")}: ${left.join(", ")}`);
+    } else {
+      const added = chosen.filter((n) => !agents.linked.includes(n));
+      const kept = chosen.filter((n) => agents.linked.includes(n));
+      const dropped = agents.stable.filter((n) => !agents.selected.has(n) && agents.linked.includes(n) && (prune.agents || agents.retire.has(n)));
+      if (guided) {
+        // No checklist on this track, so this line is all the reader learns. The noun stays the
+        // real one — these are agents — and the words after it say what that means.
+        if (added.length) {
+          lines.push("install agents: behind-the-scenes assistants that make Claude quicker");
+          lines.push("  and cheaper at looking things up and checking work. Nothing for you to do.");
+        } else if (kept.length) lines.push(`keep ${plural(kept.length, "agent")}`);
+      } else {
+        if (added.length) lines.push(`install ${plural(added.length, "agent")}: ${added.join(", ")}`);
+        if (kept.length) lines.push(`keep ${plural(kept.length, "agent")}`);
+      }
+      if (dropped.length) lines.push(`remove ${plural(dropped.length, "agent")}: ${dropped.join(", ")}`);
+      // A chosen skill hands a step to an agent that was unticked. Allowed — the skill falls back
+      // to a general-purpose agent — but it should be a decision someone saw, not a surprise.
+      for (const [agent, skills] of agents.needed) {
+        if (agents.stable.includes(agent) && !agents.selected.has(agent)) {
+          lines.push(`  ${skills.map((s) => `/${s}`).join(", ")} will use a general-purpose agent instead of ${agent}`);
+        }
+      }
+      if (chosen.length) for (const line of agentOverrideWarnings()) lines.push(style.yellow(line));
+    }
   }
 
   if (betaItems.length) {
@@ -975,30 +1101,35 @@ function resolveInstructionFlags(blocks, installedBlocks) {
   return desired;
 }
 
-function listSkillFolders() {
+function listFolders(dir) {
+  if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(repoSkillsDir, { withFileTypes: true })
+    .readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
 }
 
 /**
- * One checkbox per entry, read from skills.txt: `<name> | <folders> | <description>`.
+ * One checkbox per entry, read from skills.txt or agents.txt:
+ * `<name> | <folders> | <description> | <defaults> | <agents it needs>`.
  *
- * The description deliberately does NOT come from the skill's own SKILL.md — that one is written
- * to help Claude decide when to use the skill, and reads as dense and technical to a person. A
- * folder with no entry still installs, on its own, so a new skill is never silently dropped.
+ * The description deliberately does NOT come from the skill's own SKILL.md (or the agent's own
+ * file) — that one is written to help Claude decide when to use it, and reads as dense and
+ * technical to a person. A folder with no entry still installs, on its own, so a new skill or
+ * agent is never silently dropped.
  */
-function loadSkillGroups() {
-  const folders = listSkillFolders();
+function loadGroups(where) {
+  const folders = listFolders(where.sourceDir);
+  const listName = path.basename(where.listFile);
+  const dirName = path.basename(where.sourceDir);
   const groups = [];
   const claimed = new Set();
 
-  if (fs.existsSync(skillsListFile)) {
-    for (const line of fs.readFileSync(skillsListFile, "utf8").split(/\r?\n/)) {
+  if (fs.existsSync(where.listFile)) {
+    for (const line of fs.readFileSync(where.listFile, "utf8").split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
-      const [name, folderList = "", description = "", defaults = ""] = trimmed.split("|").map((part) => part.trim());
+      const [name, folderList = "", description = "", defaults = "", needs = ""] = trimmed.split("|").map((part) => part.trim());
       const members = (folderList || name)
         .split(",")
         .map((f) => f.trim())
@@ -1006,23 +1137,62 @@ function loadSkillGroups() {
       if (!name || members.length === 0) {
         // A stale line cannot break the run — but it must not vanish without a word either, or a
         // renamed folder silently drops a skill out of every setup and nobody notices for months.
-        if (name) warnConfig(`skills.txt: "${name}" names no folder that exists under ./skills — ignored`);
+        if (name) warnConfig(`${listName}: "${name}" names no folder that exists under ./${dirName} — ignored`);
         continue;
       }
       members.forEach((f) => claimed.add(f));
       groups.push({
+        kind: where.kind,
         name,
         folders: members,
         description,
-        defaults: parseDefaults(defaults, { dev: true, nontech: false }, `skills.txt: ${name}`),
+        defaults: parseDefaults(defaults, { dev: true, nontech: false }, `${listName}: ${name}`),
+        needs: needs.split(",").map((s) => s.trim()).filter(Boolean),
       });
     }
   }
   for (const folder of folders) {
     // A folder with no line still installs on the developer track, exactly as before.
-    if (!claimed.has(folder)) groups.push({ name: folder, folders: [folder], description: "", defaults: { dev: true, nontech: false } });
+    if (!claimed.has(folder)) groups.push({ kind: where.kind, name: folder, folders: [folder], description: "", defaults: { dev: true, nontech: false }, needs: [] });
   }
   return groups.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function loadSkillGroups() {
+  return loadGroups(SKILLS);
+}
+
+/**
+ * The agents, with the model and effort each is tuned to, read from the agent's own frontmatter —
+ * the one place they are set — so the checklist can show what a developer is choosing between.
+ */
+function loadAgentGroups() {
+  return loadGroups(AGENTS).map((group) => {
+    const file = path.join(repoAgentsDir, group.folders[0], `${group.folders[0]}.md`);
+    const meta = fs.existsSync(file) ? parseFrontmatter(fs.readFileSync(file, "utf8")).meta : {};
+    const tuning = [meta.model, meta.effort].filter(Boolean).join(" · ");
+    return { ...group, agentName: meta.name || group.name, tuning };
+  });
+}
+
+/**
+ * Which agents the given skills hand steps to, as agent name → the skills that need it. A name in
+ * skills.txt's fifth column that is not an agent here is reported, not silently dropped: the skill
+ * would fall back to a general-purpose agent and nobody would know why.
+ */
+function agentsNeededBy(skillNames, skillGroups, agentGroups) {
+  const needed = new Map();
+  for (const group of skillGroups) {
+    if (!skillNames.has(group.name)) continue;
+    for (const agent of group.needs) {
+      if (!agentGroups.some((a) => a.name === agent)) {
+        warnConfig(`skills.txt: ${group.name} needs an agent called "${agent}", which agents.txt does not have — ignored`);
+        continue;
+      }
+      needed.set(agent, [...(needed.get(agent) || []), group.name]);
+    }
+  }
+  return needed;
 }
 
 /**
@@ -1078,11 +1248,11 @@ function frontmatterDefaults(meta, fallback, where = "") {
 
 
 /** True if any folder in the group is linked here, so a half-linked group still reads as present. */
-function isGroupLinked(group) {
+function isGroupLinked(group, where = SKILLS) {
   return group.folders.some((folder) => {
-    const linkPath = path.join(globalSkillsDir, folder);
+    const linkPath = path.join(where.targetDir, folder);
     try {
-      return path.resolve(path.dirname(linkPath), fs.readlinkSync(linkPath)) === path.resolve(path.join(repoSkillsDir, folder));
+      return path.resolve(path.dirname(linkPath), fs.readlinkSync(linkPath)) === path.resolve(path.join(where.sourceDir, folder));
     } catch {
       return false;
     }
@@ -1090,7 +1260,8 @@ function isGroupLinked(group) {
 }
 
 /**
- * Retired skills, read from deprecated.txt. Returns a Set of skills.txt names.
+ * Retired skills or agents, read from deprecated.txt. Returns a Set of skills.txt (or agents.txt)
+ * names for the kind asked for.
  *
  * Deprecation is deliberately NOT deletion: a removed folder leaves anyone who already installed
  * it holding a command that has silently stopped existing. A named one keeps working, says it is
@@ -1100,7 +1271,7 @@ function isGroupLinked(group) {
  * skill that has finished its retirement and been deleted is the expected end state of this file,
  * not a misconfiguration.
  */
-function loadDeprecatedNames() {
+function loadDeprecatedNames(kind = "skill") {
   if (!fs.existsSync(deprecatedListFile)) return new Set();
   return new Set(
     fs
@@ -1109,7 +1280,7 @@ function loadDeprecatedNames() {
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith("#"))
       .map((line) => line.split(/\s+/))
-      .filter(([kind, name]) => kind === "skill" && name)
+      .filter(([lineKind, name]) => lineKind === kind && name)
       .map(([, name]) => name),
   );
 }
@@ -1287,11 +1458,24 @@ async function runExtras(extras, guided = false) {
 // ── Skill links ─────────────────────────────────────────────────────────────────────────────────
 
 function applySkillLinks(plan) {
-  fs.mkdirSync(globalSkillsDir, { recursive: true });
+  applyLinks({ where: SKILLS, groups: plan.skillGroups, betaNames: plan.betaSkills, selected: plan.selectedGroups, prune: { stable: plan.prune.skills, beta: plan.prune.beta }, retire: plan.retire });
+}
 
-  for (const group of plan.skillGroups) {
-    const isBeta = plan.betaSkills.includes(group.name);
-    const wanted = plan.selectedGroups.has(group.name);
+function applyAgentLinks(plan) {
+  if (!plan.agentGroups.length) return;
+  applyLinks({ where: AGENTS, groups: plan.agentGroups, betaNames: plan.betaAgents, selected: plan.selectedAgentGroups, prune: { stable: plan.prune.agents, beta: plan.prune.beta }, retire: plan.retireAgents });
+}
+
+/**
+ * Link, keep, or unlink every group of one kind. `prune.stable` / `prune.beta` say whether the
+ * checklist for that kind ran, which is the only thing that lets an unticked box mean "remove".
+ */
+function applyLinks({ where, groups, betaNames, selected, prune, retire }) {
+  fs.mkdirSync(where.targetDir, { recursive: true });
+
+  for (const group of groups) {
+    const isBeta = betaNames.includes(group.name);
+    const wanted = selected.has(group.name);
 
     // Left unticked. The interactive checklist showed whether it was already installed, so an
     // empty box there means "take it away"; a flag-driven run never removes silently and just
@@ -1299,13 +1483,13 @@ function applySkillLinks(plan) {
     if (!wanted && !uninstall) {
       // Per-kind: a beta skill may only be pruned if the BETA checklist ran, a stable one only
       // if the skills checklist ran. On the guided track neither did, so neither can be removed.
-      const mayPrune = isBeta ? plan.prune.beta : plan.prune.skills;
+      const mayPrune = isBeta ? prune.beta : prune.stable;
       // A retirement the user agreed to by name is its own authorisation, and a stronger one than
       // an empty checkbox: they were shown this skill, told it was retired, and said remove it.
       // Without this it would depend on the skills checklist having run, so answering "remove
       // them" on the guided track would silently do nothing.
-      const agreedRetirement = plan.retire?.has(group.name);
-      if ((mayPrune || agreedRetirement) && isGroupLinked(group)) {
+      const agreedRetirement = retire?.has(group.name);
+      if ((mayPrune || agreedRetirement) && isGroupLinked(group, where)) {
         // unlinkFolder, NOT a bare rmSync over group.folders. isGroupLinked is `.some()`, so one
         // of our links makes the whole group read as present — but the other folders in it may be
         // a real directory somebody else put there. A blind recursive force-delete would take
@@ -1313,7 +1497,7 @@ function applySkillLinks(plan) {
         // unticking `ttp` would delete a foreign `to-the-point/` and report only "removed ttp".
         // unlinkFolder already refuses anything that is not our own link; the prune path was the
         // one place bypassing that guard.
-        const outcomes = group.folders.map(unlinkFolder);
+        const outcomes = group.folders.map((folder) => unlinkFolder(folder, where));
         const kept = outcomes.filter((o) => o === "foreign").length;
         // Say WHICH answer removed it. "unticked" is a lie on the retirement path, where the user
         // never saw a checkbox for this skill and answered a question instead.
@@ -1326,13 +1510,24 @@ function applySkillLinks(plan) {
     }
     // On UNINSTALL, only take away what was ticked for removal.
     if (!wanted && uninstall) {
-      if (isGroupLinked(group)) report(group, "kept", "");
+      if (isGroupLinked(group, where)) report(group, "kept", "");
       continue;
+    }
+
+    // Two agents with the same name in ~/.claude/agents have no documented winner, so ours is not
+    // added beside someone else's. Theirs is never touched; only this agent is skipped.
+    if (!uninstall && where === AGENTS) {
+      const clash = findAgentClash(group);
+      if (clash) {
+        console.log(`  ${style.yellow("PROBLEM  ")} ${group.name} (agent) — you already have an agent called "${group.agentName}" at`);
+        console.log(`            ${clash}. Rename or remove it, then run this again.`);
+        continue;
+      }
     }
 
     // A group can cover several folders — an alias like /seatbelts is the same choice, so it is
     // reported once, under the worst thing that happened to any of its folders.
-    const outcomes = group.folders.map((folder) => (uninstall ? unlinkFolder(folder) : linkFolder(folder)));
+    const outcomes = group.folders.map((folder) => (uninstall ? unlinkFolder(folder, where) : linkFolder(folder, where)));
     if (outcomes.includes("problem")) continue; // linkFolder already explained which folder and why
     if (uninstall) {
       if (outcomes.includes("removed")) report(group, "removed", "");
@@ -1348,7 +1543,8 @@ function applySkillLinks(plan) {
 function report(group, state, note) {
   const colour = state === "PROBLEM" ? style.yellow : state === "skipped" || state === "kept" ? style.dim : style.green;
   const alias = group.folders.length > 1 ? style.dim(` +${group.folders.length - 1} alias`) : "";
-  console.log(`  ${colour(state.padEnd(9))} ${group.name}${alias}${note ? ` ${style.dim(note)}` : ""}`);
+  const kind = group.kind === "agent" ? style.dim(" (agent)") : "";
+  console.log(`  ${colour(state.padEnd(9))} ${group.name}${kind}${alias}${note ? ` ${style.dim(note)}` : ""}`);
 }
 
 /**
@@ -1361,25 +1557,26 @@ function report(group, state, note) {
  */
 function refreshInstalled() {
   console.log("  Refreshing what is already installed. Nothing is added or removed.\n");
-  const groups = loadSkillGroups();
   let touched = 0;
-  for (const group of groups) {
-    if (!isGroupLinked(group)) continue;
-    touched++;
-    const outcomes = group.folders.map(linkFolder);
-    if (outcomes.includes("problem")) continue;
-    report(group, outcomes.includes("repaired") ? "repaired" : "ready", "");
+  for (const [where, groups] of [[SKILLS, loadSkillGroups()], [AGENTS, loadAgentGroups()]]) {
+    for (const group of groups) {
+      if (!isGroupLinked(group, where)) continue;
+      touched++;
+      const outcomes = group.folders.map((folder) => linkFolder(folder, where));
+      if (outcomes.includes("problem")) continue;
+      report(group, outcomes.includes("repaired") ? "repaired" : "ready", "");
+    }
   }
-  if (!touched) console.log(`  ${style.dim("No skills from this repo are linked. Run the installer without --refresh first.")}`);
+  if (!touched) console.log(`  ${style.dim("No skills or agents from this repo are linked. Run the installer without --refresh first.")}`);
   const blocks = loadInstructionBlocks();
   if (blocks.length) applyInstructionBlocks(readInstalledBlockNames(blocks), false);
   console.log("");
 }
 
 /** Link one folder. Returns "ready" | "installed" | "repaired" | "problem". */
-function linkFolder(folder) {
-  const source = path.join(repoSkillsDir, folder);
-  const linkPath = path.join(globalSkillsDir, folder);
+function linkFolder(folder, where = SKILLS) {
+  const source = path.join(where.sourceDir, folder);
+  const linkPath = path.join(where.targetDir, folder);
   const { existing, existingIsLink, linksHere } = inspectLink(linkPath, source);
   // A link can point here yet be BROKEN (dangling target — e.g. the repo moved, or a half-written
   // link). existsSync follows the link and is false when it cannot resolve, so this separates a
@@ -1401,14 +1598,58 @@ function linkFolder(folder) {
 }
 
 /** Unlink one folder. Returns "removed" | "foreign" | "absent". */
-function unlinkFolder(folder) {
-  const linkPath = path.join(globalSkillsDir, folder);
-  const { existing, linksHere } = inspectLink(linkPath, path.join(repoSkillsDir, folder));
+function unlinkFolder(folder, where = SKILLS) {
+  const linkPath = path.join(where.targetDir, folder);
+  const { existing, linksHere } = inspectLink(linkPath, path.join(where.sourceDir, folder));
   if (linksHere) {
     fs.rmSync(linkPath, { recursive: true, force: true });
     return "removed";
   }
   return existing ? "foreign" : "absent";
+}
+
+/**
+ * Another agent under ~/.claude/agents that declares the same `name:` as this one, or null.
+ *
+ * Claude Code reads that directory recursively and identifies an agent only by its `name:`, so a
+ * clash can sit in any file at any depth, including behind someone else's link. Only our own
+ * links are skipped — they point back into this repo. Depth is capped so a deep or looping tree
+ * cannot stall the install.
+ */
+function findAgentClash(group) {
+  const ours = path.resolve(repoAgentsDir);
+  const walk = (dir, depth) => {
+    if (depth > 6) return null;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return null;
+    }
+    for (const name of entries) {
+      const full = path.join(dir, name);
+      try {
+        const target = path.resolve(dir, fs.readlinkSync(full));
+        if (target === ours || target.startsWith(ours + path.sep)) continue;
+      } catch {
+        // not a link
+      }
+      const stat = fs.statSync(full, { throwIfNoEntry: false });
+      if (!stat) continue; // a dangling link
+      if (stat.isDirectory()) {
+        const found = walk(full, depth + 1);
+        if (found) return found;
+      } else if (stat.isFile() && name.endsWith(".md")) {
+        try {
+          if (parseFrontmatter(fs.readFileSync(full, "utf8")).meta.name === group.agentName) return full;
+        } catch {
+          // unreadable: not ours to judge
+        }
+      }
+    }
+    return null;
+  };
+  return walk(globalAgentsDir, 0);
 }
 
 /**
@@ -1565,6 +1806,38 @@ function readGlobalSettings() {
   } catch {
     return { settings: {}, raw, existed: true, malformed: true };
   }
+}
+
+/**
+ * Settings that silently override the model or effort every agent is tuned to.
+ *
+ * Measured on Claude Code 2.1.289 rather than taken from the docs, which disagree with each other:
+ * CLAUDE_CODE_EFFORT_LEVEL beats an agent's own `effort`, and CLAUDE_CODE_SUBAGENT_MODEL beats an
+ * agent's own `model` only while CLAUDE_CODE_SUBAGENT_MODEL_FORCE is also set. Nothing else does —
+ * --effort, /effort and the effortLevel setting all lose to the agent — so nothing else is named.
+ * Reported on the Ready summary, never changed: someone may have set it on purpose.
+ */
+function agentOverrideWarnings() {
+  const settingsEnv = readGlobalSettings().settings?.env || {};
+  const isSet = (v) => v !== undefined && v !== null && !["", "0", "false"].includes(String(v).trim().toLowerCase());
+  const lookup = (name) => {
+    if (isSet(process.env[name])) return { value: process.env[name], where: "in your environment" };
+    if (isSet(settingsEnv[name])) return { value: String(settingsEnv[name]), where: `in ${globalSettings}` };
+    return null;
+  };
+  const lines = [];
+  const effort = lookup("CLAUDE_CODE_EFFORT_LEVEL");
+  if (effort) {
+    lines.push(`note: CLAUDE_CODE_EFFORT_LEVEL=${effort.value} is set ${effort.where}.`);
+    lines.push(`  Every agent will run at that effort instead of the level it is tuned for.`);
+  }
+  const force = lookup("CLAUDE_CODE_SUBAGENT_MODEL_FORCE");
+  const model = lookup("CLAUDE_CODE_SUBAGENT_MODEL");
+  if (force && model) {
+    lines.push(`note: CLAUDE_CODE_SUBAGENT_MODEL=${model.value}, with CLAUDE_CODE_SUBAGENT_MODEL_FORCE, is set ${force.where}.`);
+    lines.push(`  Every agent will run on ${model.value} instead of the model it is tuned for.`);
+  }
+  return lines;
 }
 
 /**

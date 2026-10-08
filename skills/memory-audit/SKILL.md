@@ -1,7 +1,7 @@
 ---
 name: memory-audit
 description: '[Adam''s Skills] Audit Claude''s per-user memory for this project and produce a report. Asks at the start whether the user wants a non-technical summary or a full technical audit. Never edits memory — produces a report only. Usage: /memory-audit'
-allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion
+allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, Agent
 ---
 
 You are running a memory audit for the user's per-user Claude memory in this project.
@@ -57,6 +57,11 @@ code to check the reference still resolves**. If a class has been renamed, a fil
 entry as a candidate for refresh or removal.
 
 Do not guess. If the entry says "the `XyzService` does …", actually search the code for `XyzService`.
+
+Hand these checks to the `scout` agent in one call (Agent tool, `subagent_type: scout`;
+`general-purpose` if it is not installed, and say so in a line): every path, class, function and
+directory the memories name, and the memory file each came from. It returns which still resolve,
+with `path:line`. Deciding what a missing reference means for the entry stays with you.
 
 ## Step 5 — Produce the report
 

@@ -68,8 +68,9 @@ Run these steps in order. Do not skip step 1 — it is the integrity gate.
    Whatever the source, the output of this step is a concrete diff or set of changed
    files to hand to the blind agent in step 3 — never the conversation itself.
 
-3. **Spawn a fresh-context subagent (the Agent tool, `general-purpose` or `Explore`).**
-   Give it ONLY the diff or changed files from step 2 — never conversation history,
+3. **Spawn the `reviewer` agent** (the Agent tool, `subagent_type: reviewer`) — it is built for
+   exactly this read, on its own tuned model. If it is not installed, use `general-purpose` and
+   say so in a line. Give it ONLY the diff or changed files from step 2 — never conversation history,
    even when the change was reconstructed from this session. Its blind read is the point.
    See [REFERENCE.md](REFERENCE.md) for the exact subagent prompt. It must report:
    - What it believes this change does / fixes / builds.
@@ -152,7 +153,7 @@ survive the loop intact rather than being tidied away by it.
   here, and isolation does not compound: a second and third agent reading the same diff
   mostly re-derive the first one's findings at triple the cost, and the reconciliation
   step then has three near-identical reports to weigh instead of one clear read. Fan out
-  to 2–3 lensed agents (does-it-work / completeness / bugs-and-edge-cases) only when the
+  to 2–3 lensed `reviewer` agents (does-it-work / completeness / bugs-and-edge-cases) only when the
   diff is genuinely too large for one agent to hold — hundreds of lines across unrelated
   modules — and say why you did. See [REFERENCE.md](REFERENCE.md) for the lenses.
 

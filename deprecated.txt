@@ -23,7 +23,11 @@
 # banner at the top of the body naming the replacement. The installer cannot reach a session that
 # already has the skill linked; the skill's own text is the only thing that can.
 #
-# One per line, as:  skill <name from skills.txt>
+# One per line, as:  skill <name from skills.txt>   or   agent <name from agents.txt>
+#
+# An agent retires exactly as a skill does: labelled on the Agents checklist, offered for removal
+# in the same question, never installed on a new machine. Set its agents.txt defaults to `off,off`
+# and start its description there, and in its own file, with "DEPRECATED —".
 #
 # Delete a line to un-retire something. Blank lines and lines starting with # are ignored. The
 # installer reads this at run time; it never needs editing.

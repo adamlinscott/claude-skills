@@ -1,7 +1,7 @@
 ---
 name: raise-issue
 description: '[Adam''s Skills] Turns "this is broken" into a well-formed issue in the team''s tracker, written in the codebase''s own vocabulary. Built for someone who uses the product and does not read code — it asks a few plain-English questions, works out for itself which part of the code they are describing, checks whether the same thing has already been reported, and files it, but only after they say yes. Use when the user says something is broken, looks wrong, isn''t working, is behaving oddly, seems like a bug, or asks whether they should tell someone about a problem they found; when they say "I found a bug", "the X isn''t working", "should someone look at this?"; or when they paste a screenshot of something that looks wrong. Aliased as /report-issue.'
-allowed-tools: Read, Glob, Grep, Bash, Write, AskUserQuestion
+allowed-tools: Read, Glob, Grep, Bash, Write, AskUserQuestion, Agent
 ---
 
 # Raise an issue
@@ -139,12 +139,17 @@ Take the nouns the person used and find what they name in this repository. Searc
 any domain docs — `CONTEXT.md`, `CONTEXT-MAP.md`, `docs/adr/`, glossaries, README — for exact and
 adjacent matches.
 
+Hand the search to the `scout` agent (Agent tool, `subagent_type: scout`; `general-purpose` if it
+is not installed, and say so in a line). Give it the terms, the docs to check, and the bounds
+below. It returns locations marked confirmed or likely. Building the term map, and asking the
+person when a term has two candidates, stay with you — scout never talks to them.
+
 Bound the search, and show that it is bounded:
 
 - At most **six terms**, chosen by how load-bearing they are.
 - At most **twelve searches** in total.
 - A soft budget of about a minute. When it runs out, stop and report what you have.
-- Print a one-line progress marker as you go: `Looking up: "export button" (2/6)`.
+- Print one line before handing off, naming the terms: `Looking up: "export button", "spins forever"`.
 
 Build a **term map** — their word, the project's word, and `file:line` evidence. Format in
 [REFERENCE.md §4](REFERENCE.md).

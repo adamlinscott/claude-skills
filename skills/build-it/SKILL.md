@@ -1,7 +1,7 @@
 ---
 name: build-it
 description: '[Adam''s Skills] Build a piece of work, from wherever it is written down — a ticket number or URL, a plan or spec file, the plan agreed in the conversation above, or a description typed straight after the command. Reads whatever source it is given plus the code it names, then asks whatever the source and the code left unanswered — the why above all — before pinning in writing exactly which files will change and which will not. That scope note goes to disk, so it survives compaction and gives a later review something concrete to check against. Then it builds to that scope and stops, handing off rather than chaining. Where the ask turns out to be large and still foggy it says so and points at a planning pass first, rather than building into the fog. No issue tracker is required. Trigger ONLY on a direct instruction to build one specific, already-decided piece of work: "/build-it 412", "build it", "build this", "build that ticket", "build what we just planned", "implement this ticket", "go ahead and build it". Do NOT trigger on talk ABOUT building: planning, estimating, weighing options, or asking how something would be built ("what would it take to build X", "we should build X at some point", "how would you build this"), nor on any sentence where the word is incidental ("the build is failing", "build a list of the files"). If it is not an instruction to start work right now on something already settled, do not trigger; the user can always type /build-it.'
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion, Agent
 ---
 
 # Build It
@@ -83,8 +83,11 @@ not a requirement, and it is the one that quietly produces a Windows-only path o
 needs a login only you have. If any of that does not hold, stop and say so before reading further.
 
 Then take the nouns in the ticket and find what they name in this repository — files, symbols,
-routes, tables, tests, and the conventions around them. Read the neighbours of anything you will
-change, and check any contract you plan to rely on against the live code rather than against an
+routes, tables, tests, and the conventions around them. Hand that lookup to the `scout` agent
+(Agent tool, `subagent_type: scout`; `general-purpose` if it is not installed, and say so in a
+line): give it the nouns, get back locations. Then read the hits that matter yourself — the
+interview and the scope note need you to know this code, not a summary of it. Read the neighbours
+of anything you will change, and check any contract you plan to rely on against the live code rather than against an
 ADR or design doc, which records a decision rather than a guarantee that it is still true.
 
 This is not preparation for building; it is preparation for **asking**. Every question you can
@@ -159,7 +162,10 @@ tell them once that it will go stale.
 
 It has four parts, and the second is the one that earns the file:
 
-- **Building** — the change, in one paragraph, in the project's own vocabulary.
+- **Building** — the change, in one paragraph, in the project's own vocabulary, ending with
+  `Mechanical: yes` or `Mechanical: no`. Yes only when no design choice is left — a rename, a field
+  added by an existing pattern, tests written to stated cases, a copy or config change. It decides
+  which agent builds it in step 5; when in doubt, it is no.
 - **Will change** — the files and areas this will touch. Named, not gestured at.
 - **Will not change** — the things a reasonable implementer might have touched and this one will
   not. Adjacent bugs found on the way, the tidy-up the code is asking for, the second caller that
@@ -198,14 +204,21 @@ Implement what the scope note says, following the repository's own conventions �
 framework, its patterns, its error handling. Where the repo practises TDD and `/tdd` is
 installed, use it at the seams you agreed.
 
-Run the project's checks as you go the way a careful developer would: typecheck and the relevant
-test file often, the full suite once at the end. This is ordinary working discipline, not a
-verification ceremony — do not add extra passes over work that already passed, and do not delegate
-a subagent to re-check what you just did.
+**Who builds it.** Hand the build to the `worker` agent, or to `worker-light` when the scope note
+says `Mechanical: yes` (Agent tool, `subagent_type: worker` / `worker-light`; `general-purpose` if
+it is not installed, and say so in a line). Give it the scope note's path, the source it came
+from, and the git posture below — it commits only if you tell it to. A change of a handful of lines
+in one or two files is the exception: build that yourself, because the handoff costs more than the
+edit.
 
-Delegate only where the work genuinely splits into independent tracks that are each large enough
-to be worth their own context. Most tickets are not that, and a fan-out on a single-module change
-costs time rather than saving it.
+If the worker stops because the scope does not hold, that is the *scope note turns out wrong* case
+below: you take it to the user, then hand the updated note back. Do not re-check what it built —
+`/fresh-eyes` is the independent read, and it comes after.
+
+Whoever builds runs the project's checks as they go, the way a careful developer would: typecheck
+and the relevant test file often, the full suite once at the end. This is ordinary working
+discipline, not a verification ceremony — no extra passes over work that already passed, and no
+subagent to re-check what was just done.
 
 **Git posture.** By default this skill makes **no commits** — it builds in the working tree and
 leaves version control to the user. With `--commit`, commit at logical points on a feature branch,

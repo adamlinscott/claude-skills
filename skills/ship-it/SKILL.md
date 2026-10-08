@@ -2,7 +2,7 @@
 name: ship-it
 description: '[Adam''s Skills] Get the work done in this conversation all the way out — merged, and deployed to every environment the repo has, production included. Grounds itself first in the branches written during this session, the open and closed PRs behind them, and the environments and CI/CD workflows the repo actually defines, then lands and releases the work and verifies each environment is running the commit. If the release would carry other people''s unreleased changes along with it, summarises whose work rides along and asks for confirmation before touching production. Takes no arguments by default; an optional scope override such as "only staging" limits which environments it deploys to. Invoke with /ship-it.'
 disable-model-invocation: true
-allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion
+allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, Agent
 ---
 
 # Ship It
@@ -74,7 +74,10 @@ deployed SHA, or the last production deploy, whichever this repo makes knowable.
 **If everything in the release is this session's work**, no gate. Proceed.
 
 **If it is not**, stop and ask. First a **very short** summary — a few lines, not a changelog:
-each other author, and in plain terms what their change does. Then ask with the
+each other author, and in plain terms what their change does. Have the `reviewer` agent read
+those commits for it (Agent tool, `subagent_type: reviewer`; `general-purpose` if it is not
+installed, and say so in a line): give it only the commit range and ask what each author's change
+does, judged from the code rather than the commit messages. You write the summary from its report. Then ask with the
 **AskUserQuestion tool** — a real "are you sure?", not a sentence in prose. Offer:
 
 - Ship everything (recommended when the extra work is small and routine)
