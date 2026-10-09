@@ -198,7 +198,7 @@ An agent whose type can't be read sits in the `*` zone, labelled `?`.
 
 ### LLM budget: deterministic first, cheap model only for meaning
 
-> **Revised after the session:** the decision model is optional and pluggable. The installer (where Agent Office is a beta feature) asks for JEV, Perplexity, Haiku (on the Claude login, no key) or None. JEV and Perplexity keys are stored as user environment variables (`TYPESAFE_API_KEY`, `PERPLEXITY_API_KEY`). The model only enriches data the logs already hold.
+> **Revised after the session:** room summaries come from the session's own data, else the cheapest Claude model via `$.model.complete` on the person's billing (no key). Decision models (JEV, Perplexity Decisions) are only for categorising and fuzzy relatedness with confidence, never for writing text; the beta installer offers JEV, Perplexity Decisions or None, with keys in user environment variables. Which checks they run is open on map #41.
 
 Most of the snapshot comes straight from the transcripts with no model involved: sessions,
 branches, agent types, tool names, file paths, timestamps, collisions and statuses. An LLM is
