@@ -1,0 +1,501 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Floor-plan prototype</title>
+<!--
+  PROTOTYPE — throwaway. Answers GitHub #46: what should the Agent Office floor plan look like?
+  Four structurally different layouts, switchable with ?variant=A|B|C|D, ?n=1|3|6 sessions, and
+  ?view=desktop|terminal. Each variant lays out one abstract SCENE (rooms, zones, people, lines, board)
+  in cell units; one renderer draws it as SVG (Claude Desktop) and one as coloured cells (terminal).
+  The fake sessions use the snapshot shape mods/agent-office/discover.mjs produces.
+  Open the file in a browser. Keys: ←/→ variant, 1/3/6 sessions, D/T view.
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@600;700&family=JetBrains+Mono:wght@400;700&family=Public+Sans:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#e7eae5; --sheet:#f5f6f2; --ink:#1a2528; --ink-2:#4d5c5f; --rule:#bcc6c1; --wall:#2b3a3e;
+  --lamp:#e2a91f; --ok:#2f8a55; --you:#2c6d71; --you-wash:rgba(44,109,113,.10); --clash:#c4462e; --stall:#9a5ab8;
+  --term-bg:#12191b; --term-fg:#d9e2de; --term-wall:#7e9590; --term-dim:#7d908c; --term-you:#1b3033; --term-zone:#172326;
+  --t-you:#71bdb9; --t-lamp:#f3c24f; --t-ok:#6cc28a; --t-clash:#f07d61; --t-stall:#c79be0;
+  --team1:#2c6d71; --team2:#c27a1c; --team3:#5b6fd1; --team4:#a0457a; --team5:#3f8a3a; --team6:#8a6d3b;
+  --f-d:"Familjen Grotesk",Arial,sans-serif; --f-b:"Public Sans",system-ui,sans-serif; --f-m:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --ground:#0f1618; --sheet:#152024; --ink:#e3eae6; --ink-2:#9db0ac; --rule:#30444a; --wall:#c9d6d2;
+  --lamp:#f3c24f; --ok:#6cc28a; --you:#71bdb9; --you-wash:rgba(113,189,185,.12); --clash:#f07d61; --stall:#c79be0;
+  --team1:#71bdb9; --team2:#f0a54a; --team3:#8fa0f5; --team4:#e087b9; --team5:#7fcf78; --team6:#d1b07a; color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:15px/1.5 var(--f-b);padding:20px 16px 110px}
+h1{font:700 22px var(--f-d);margin:0 0 4px}
+.sub{color:var(--ink-2);margin:0 0 16px;max-width:60em}
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+.panel{background:var(--sheet);border:1px solid var(--rule);padding:12px;min-width:0}
+.panel-h{display:flex;gap:10px;align-items:baseline;margin-bottom:8px}
+.panel-h b{font:600 15px var(--f-d)}
+.panel-h span{font:12px var(--f-m);color:var(--ink-2)}
+.panel svg{display:block;width:100%;height:auto}
+.term{background:var(--term-bg);padding:14px;overflow-x:auto;border:1px solid var(--rule)}
+.term pre{margin:0;font:13px/1.25 var(--f-m);color:var(--term-fg);width:max-content;font-variant-ligatures:none}
+.side{font-size:13.5px}
+.side h2{font:600 14px var(--f-d);margin:0 0 6px}
+.side ul{margin:0 0 14px;padding-left:18px}
+.side .why{background:var(--sheet);border:1px solid var(--rule);padding:10px 12px;margin-bottom:14px}
+.side details{background:var(--sheet);border:1px solid var(--rule);padding:8px 10px}
+.side pre{font:11px/1.4 var(--f-m);white-space:pre-wrap;max-height:340px;overflow:auto;margin:6px 0 0}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font:12px var(--f-m);color:var(--ink-2);margin-top:8px}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend svg{width:18px;height:18px}
+/* svg scene */
+.wall{fill:none;stroke:var(--wall);stroke-width:2.5}
+.room-you{fill:var(--you-wash)}
+.room-dim{fill:var(--ground);opacity:.6}
+.zone{fill:var(--ground);opacity:.75}
+.t{font-family:var(--f-m);font-size:10.5px;fill:var(--ink-2)}
+.t.room{font-size:11.5px;font-weight:700;fill:var(--ink)}
+.t.youc{fill:var(--you)}
+.t.zl{font-size:9px;letter-spacing:.12em}
+.t.lab{font-size:10px;fill:var(--ink)}
+.t.clash{fill:var(--clash);font-weight:700}
+.spawn{fill:none;stroke:var(--ink-2);stroke-width:1.3;opacity:.7}
+.file{fill:none;stroke:var(--clash);stroke-width:2;stroke-dasharray:6 5}
+.chip{fill:var(--sheet);stroke:var(--clash);stroke-width:1.4}
+.board{fill:var(--sheet);stroke:var(--ink);stroke-width:1.5}
+.card{fill:var(--ground);stroke:var(--ink-2);stroke-width:1}
+.teambar{stroke-width:3;stroke-linecap:round}
+/* silhouettes: figure = status colour, accessory = ink */
+.av{color:var(--ink-2)}
+.av.work{color:var(--lamp)} .av.ok{color:var(--ok)} .av.you{color:var(--you)} .av.idle{color:var(--ink-2);opacity:.5} .av.stall{color:var(--stall)}
+#av-body{fill:currentColor}
+.acc{fill:var(--ink)} .acc-line{fill:none;stroke:var(--ink);stroke-width:1.2;stroke-linecap:round}
+.acc-ring{fill:var(--sheet);fill-opacity:.55;stroke:var(--ink);stroke-width:1.4}
+.acc-star{fill:var(--lamp);stroke:var(--ink);stroke-width:.6}
+.acc-bang{fill:var(--sheet);stroke:var(--ink);stroke-width:.8}
+/* cells */
+.c-w{color:var(--term-wall)} .c-d{color:var(--term-dim)} .c-y{color:var(--t-you);font-weight:700} .c-l{color:var(--t-lamp);font-weight:700}
+.c-o{color:var(--t-ok);font-weight:700} .c-i{color:var(--term-dim)} .c-s{color:var(--t-stall);font-weight:700} .c-c{color:var(--t-clash);font-weight:700}
+.b-y{background:var(--term-you)} .b-z{background:var(--term-zone)}
+.c-t1{color:#71bdb9}.c-t2{color:#f0a54a}.c-t3{color:#8fa0f5}.c-t4{color:#e087b9}.c-t5{color:#7fcf78}.c-t6{color:#d1b07a}
+/* prototype switcher bar */
+.proto-bar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;
+  background:#111;color:#fff;border-radius:999px;padding:8px 14px;box-shadow:0 6px 24px rgba(0,0,0,.35);font:13px var(--f-m);z-index:9;max-width:calc(100vw - 24px)}
+.proto-bar button{background:#2a2a2a;color:#fff;border:0;border-radius:999px;padding:5px 11px;font:inherit;cursor:pointer}
+.proto-bar button:hover,.proto-bar button:focus-visible{background:#444;outline:none}
+.proto-bar button.on{background:#f3c24f;color:#111}
+.proto-bar .lab{min-width:190px;text-align:center;white-space:nowrap}
+.proto-bar .sep{opacity:.35}
+@media (max-width:980px){.stage{grid-template-columns:1fr}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="av-body"><circle cx="12" cy="8.6" r="4.6"/><path d="M2.6 23.4c0-5.6 4.2-9 9.4-9s9.4 3.4 9.4 9z"/></g>
+    <symbol id="av-worker" viewBox="0 0 24 24"><use href="#av-body"/><path class="acc" d="M6.6 7.9a5.4 5.4 0 0 1 10.8 0z"/><rect class="acc" x="5" y="7.6" width="14" height="1.7" rx=".8"/></symbol>
+    <symbol id="av-scout" viewBox="0 0 24 24"><use href="#av-body"/><path class="acc" d="M7.4 7.6a4.6 4.6 0 0 1 9.2 0z"/><path class="acc" d="M12 6.6h7.6a1 1 0 0 1 0 1.9H12z"/></symbol>
+    <symbol id="av-researcher" viewBox="0 0 24 24"><use href="#av-body"/><circle class="acc-line" cx="9.8" cy="9" r="1.9"/><circle class="acc-line" cx="14.2" cy="9" r="1.9"/><path class="acc-line" d="M11.7 9h.6"/></symbol>
+    <symbol id="av-reviewer" viewBox="0 0 24 24"><use href="#av-body"/><circle class="acc-ring" cx="17.6" cy="15.8" r="3.3"/><path class="acc-line" style="stroke-width:2" d="M20 18.2l2.6 2.6"/></symbol>
+    <symbol id="av-lead" viewBox="0 0 24 24"><use href="#av-body"/><path class="acc" d="M12 15.1l-1.3 1.5 1.3 5.4 1.3-5.4z"/><path class="acc" d="M10.6 14.6h2.8l-1.4 1.4z"/></symbol>
+    <symbol id="av-you" viewBox="0 0 24 24"><use href="#av-body"/><path class="acc-star" d="M18.4 12.6l.9 1.9 2.1.3-1.5 1.5.4 2.1-1.9-1-1.9 1 .4-2.1-1.5-1.5 2.1-.3z"/></symbol>
+    <symbol id="av-other" viewBox="0 0 24 24"><use href="#av-body"/></symbol>
+  </defs>
+</svg>
+
+<h1>Floor-plan prototype</h1>
+<p class="sub" id="variant-why"></p>
+<div class="stage">
+  <div>
+    <div class="panel" id="desktop">
+      <div class="panel-h"><b>Agent Office</b><span id="counts"></span></div>
+      <div id="svg-host"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="term" id="terminal" hidden><pre id="cells"></pre></div>
+  </div>
+  <aside class="side">
+    <div class="why"><h2>What to judge</h2><ul>
+      <li>Can you tell at a glance where the work is, who works with whom, and what is about to collide?</li>
+      <li>Does it still read at 6 sessions?</li>
+      <li>Does the terminal version say the same thing?</li>
+    </ul></div>
+    <h2>Scene state</h2>
+    <ul id="state"></ul>
+    <details><summary>Snapshot (discover.mjs shape)</summary><pre id="json"></pre></details>
+  </aside>
+</div>
+
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <button id="prev" aria-label="Previous variant">&larr;</button>
+  <span class="lab" id="vlabel"></span>
+  <button id="next" aria-label="Next variant">&rarr;</button>
+  <span class="sep">|</span>
+  <span>sessions</span><button data-n="1">1</button><button data-n="3">3</button><button data-n="6">6</button>
+  <span class="sep">|</span>
+  <button data-view="desktop">Desktop</button><button data-view="terminal">Terminal</button>
+</div>
+
+<script>
+// ───────────────────────── fake snapshots (discover.mjs shape) ─────────────────────────
+const S_YOU = { id: "a4b6", branch: "agent-office/floor-plan-prototype", title: "Reverse harness for sessions", status: "active", self: true,
+  filesTouched: ["install.mjs", "mods/agent-office/discover.mjs"],
+  agents: [
+    { id: "r1", type: "researcher", status: "running", lastTool: "WebFetch", lastFile: null },
+    { id: "s1", type: "scout", status: "done", lastTool: "Grep", lastFile: null },
+  ] };
+const S_SUN = { id: "bb31", branch: "sunfish", title: "Installer clean-up", status: "active",
+  filesTouched: ["install.mjs"],
+  agents: [ { id: "w1", type: "worker", status: "running", lastTool: "Edit", lastFile: "install.mjs" } ] };
+const S_MAIN = { id: "c02f", branch: "main", title: "Release prep", status: "idle", idleMinutes: 4,
+  filesTouched: [],
+  agents: [ { id: "v1", type: "reviewer", status: "done", lastTool: null, lastFile: null, finalMessage: "Stale comment in the skills.txt parser" } ] };
+const S_KING = { id: "d9a1", branch: "kingfisher", title: "Wizard keyboard fixes", status: "active",
+  filesTouched: ["lib/wizard.mjs", "skills.txt"],
+  agents: [
+    { id: "w2", type: "worker", status: "running", lastTool: "Edit", lastFile: "lib/wizard.mjs" },
+    { id: "w3", type: "worker-light", status: "stalled", lastTool: "Bash", lastFile: null },
+    { id: "r2", type: "researcher", status: "done", lastTool: "WebSearch", lastFile: null },
+  ] };
+const S_HERR = { id: "e5c3", branch: "herring", title: "Docs tidy", status: "idle", idleMinutes: 22, filesTouched: [], agents: [] };
+const S_MARL = { id: "f7b2", branch: "marlin", title: "Skill descriptions", status: "active",
+  filesTouched: ["skills.txt"],
+  agents: [
+    { id: "v2", type: "reviewer", status: "running", lastTool: "Read", lastFile: null },
+    { id: "s2", type: "scout", status: "running", lastTool: "Glob", lastFile: null },
+  ] };
+const SNAPSHOTS = {
+  1: [S_YOU],
+  3: [S_YOU, S_SUN, S_MAIN],
+  6: [S_YOU, S_SUN, S_MAIN, S_KING, S_HERR, S_MARL],
+};
+const ZONES = { scout: "archive", researcher: "library", worker: "workshop", "worker-light": "workshop", reviewer: "review room", "*": "open floor" };
+const ZONE_ORDER = ["library", "archive", "workshop", "review room", "open floor"];
+const ROLE = { scout: "scout", researcher: "researcher", worker: "worker", "worker-light": "worker", reviewer: "reviewer" };
+const STATUS = { running: "work", done: "ok", stalled: "stall", failed: "stall", killed: "stall" };
+
+// Derived the way the collisions-and-board build (#50) would: same-file links and reviewer cards.
+function derive(sessions) {
+  const people = [];
+  sessions.forEach((s, ti) => {
+    people.push({ id: s.id + ":lead", session: s, team: ti, role: s.self ? "you" : "lead", status: s.self ? "you" : s.status === "active" ? "work" : "idle", label: s.self ? "you" : "lead", zone: null, lead: true, file: s.filesTouched.find((f) => !s.agents.some((a) => a.lastFile === f)) });
+    for (const a of s.agents) people.push({ id: a.id, session: s, team: ti, role: ROLE[a.type] || "other", status: STATUS[a.status] || "ok", label: a.type, zone: ZONES[a.type] || ZONES["*"], spawnedBy: s.id + ":lead", file: a.lastFile });
+  });
+  const links = [];
+  for (let i = 0; i < sessions.length; i++) for (let j = i + 1; j < sessions.length; j++) {
+    for (const f of sessions[i].filesTouched) if (sessions[j].filesTouched.includes(f)) {
+      const end = (s) => people.find((p) => p.session === s && p.file === f) || people.find((p) => p.session === s && p.lead);
+      links.push({ a: end(sessions[i]).id, b: end(sessions[j]).id, file: f });
+    }
+  }
+  const cards = sessions.flatMap((s) => s.agents.filter((a) => a.type === "reviewer" && a.status === "done" && a.finalMessage).map((a) => ({ text: a.finalMessage, from: "reviewer@" + s.branch, by: a.id })));
+  const self = sessions.find((s) => s.self);
+  const touchesYou = (s) => links.some((l) => [l.a, l.b].some((id) => people.find((p) => p.id === id).session === s) && [l.a, l.b].some((id) => people.find((p) => p.id === id).session === self));
+  const ordered = [self, ...sessions.filter((s) => !s.self).sort((x, y) => (touchesYou(y) - touchesYou(x)) || ((y.status === "active") - (x.status === "active")))];
+  return { people, links, cards, ordered };
+}
+
+// ───────────────────────── scene building blocks (units = terminal cells) ─────────────────────────
+const SLOT_W = 10, SLOT_H = 3;
+function newScene() { return { rooms: [], zones: [], people: [], lines: [], boards: [], texts: [], w: 0, h: 0 }; }
+
+// Lay out one session as a room at (x, y) with width w. Returns its height.
+function room(scene, d, s, x, y, w, opts = {}) {
+  const team = d.ordered.indexOf(s);
+  const name = (s.self ? "* " : "") + s.branch + (s.status === "idle" ? "  idle " + s.idleMinutes + "m" : "");
+  if (opts.folded) {
+    scene.rooms.push({ x, y, w, h: 3, name, you: false, dim: true, team });
+    return 3;
+  }
+  const ppl = d.people.filter((p) => p.session === s && !p.lead);
+  const byZone = ZONE_ORDER.map((z) => [z, ppl.filter((p) => p.zone === z)]).filter(([, ps]) => ps.length);
+  let cx = x + 2, cy = y + 2, rowH = 0;
+  const inner = w - 4;
+  for (const [z, ps] of byZone) {
+    const perRow = Math.max(1, Math.min(ps.length, Math.floor((inner - 2) / SLOT_W)));
+    const zw = Math.max(z.length + 3, perRow * SLOT_W + 2);
+    const zh = 2 + Math.ceil(ps.length / perRow) * SLOT_H;
+    if (cx + zw > x + w - 2 && cx > x + 2) { cx = x + 2; cy += rowH + 1; rowH = 0; }
+    scene.zones.push({ x: cx, y: cy, w: zw, h: zh, name: z });
+    ps.forEach((p, i) => scene.people.push({ ...p, x: cx + 1 + (i % perRow) * SLOT_W, y: cy + 2 + Math.floor(i / perRow) * SLOT_H, teamIdx: team }));
+    cx += zw + 1; rowH = Math.max(rowH, zh);
+  }
+  const leadY = byZone.length ? cy + rowH + 1 : y + 2;
+  const lead = d.people.find((p) => p.session === s && p.lead);
+  scene.people.push({ ...lead, x: x + Math.floor(w / 2) - Math.floor(SLOT_W / 2), y: leadY, teamIdx: team });
+  for (const p of ppl) scene.lines.push({ kind: "spawn", a: lead.id, b: p.id });
+  const h = leadY - y + SLOT_H + 1;
+  scene.rooms.push({ x, y, w, h, name, you: !!s.self, dim: s.status === "idle", team });
+  return h;
+}
+function board(scene, d, x, y, w, h) {
+  scene.boards.push({ x, y, w, h, cards: d.cards });
+  for (const c of d.cards) scene.lines.push({ kind: "pin", a: c.by, board: scene.boards.length - 1 });
+}
+function finishLinks(scene, d) { for (const l of d.links) scene.lines.push({ kind: "file", a: l.a, b: l.b, label: l.file }); }
+
+// ───────────────────────── the four variants ─────────────────────────
+const W = 92;
+const VARIANTS = {
+  A: { name: "Grid of rooms", why: "Your room spans the top with the board beside it. Every other active session is a room in a grid below; idle sessions fold into a dark strip so they cost one line.",
+    build(d) {
+      const sc = newScene(); const [you, ...rest] = d.ordered;
+      const bw = d.cards.length ? 26 : 0;
+      const yh = room(sc, d, you, 0, 0, W - (bw ? bw + 1 : 0));
+      if (bw) board(sc, d, W - bw, 0, bw, yh);
+      let y = yh + 1;
+      const act = rest.filter((s) => s.status === "active" || s.agents.length), idle = rest.filter((s) => !act.includes(s));
+      const cols = act.length <= 2 ? Math.max(1, act.length) : 3;
+      const cw = Math.floor((W - (cols - 1)) / cols);
+      for (let i = 0; i < act.length; i += cols) {
+        let rh = 0;
+        act.slice(i, i + cols).forEach((s, k) => { rh = Math.max(rh, room(sc, d, s, k * (cw + 1), y, cw)); });
+        y += rh + 1;
+      }
+      const iw = idle.length ? Math.floor((W - (idle.length - 1)) / idle.length) : 0;
+      idle.forEach((s, k) => room(sc, d, s, k * (iw + 1), y, iw, { folded: true }));
+      if (idle.length) y += 4;
+      finishLinks(sc, d); sc.w = W; sc.h = y; return sc;
+    } },
+  B: { name: "Corridor", why: "Your room is on top. A corridor runs beneath it: sessions that are working open into rooms off the corridor, idle ones stay closed doors with a nameplate. The board is at the end of the corridor.",
+    build(d) {
+      const sc = newScene(); const [you, ...rest] = d.ordered;
+      let y = room(sc, d, you, 0, 0, W) + 1;
+      const open = rest.filter((s) => s.status === "active"), shut = rest.filter((s) => s.status !== "active");
+      sc.texts.push({ x: 1, y, s: "corridor", cls: "zl" });
+      sc.texts.push({ x: 0, y: y + 1, s: "\u2550".repeat(W), cls: "floor" });
+      let dx = 12;
+      for (const s of shut) {
+        const label = "[] " + s.branch + " " + (s.idleMinutes ? s.idleMinutes + "m" : "");
+        sc.texts.push({ x: dx, y, s: label, cls: "door", team: d.ordered.indexOf(s) });
+        dx += label.length + 3;
+              }
+      y += 3;
+      const cols = Math.max(1, Math.min(3, open.length));
+      const cw = Math.floor((W - (cols - 1)) / cols);
+      for (let i = 0; i < open.length; i += cols) {
+        let rh = 0;
+        open.slice(i, i + cols).forEach((s, k) => { rh = Math.max(rh, room(sc, d, s, k * (cw + 1), y, cw)); });
+        y += rh + 1;
+      }
+      // Idle sessions with finished agents still need their reviewer findings: show them on the board only.
+      for (const s of shut) for (const p of d.people.filter((p) => p.session === s && !p.lead)) sc.people.push({ ...p, x: -99, y: -99, hidden: true });
+      if (d.cards.length) { board(sc, d, 0, y, W, 4 + d.cards.length); y += 5 + d.cards.length; }
+      finishLinks(sc, d); sc.w = W; sc.h = y; return sc;
+    } },
+  C: { name: "Open plan by job", why: "No rooms. The floor is divided by job: library, archive, workshop, review room. Each session is a coloured team sitting across the zones; leads sit at the front desks. You see who does what kind of work across all sessions at once.",
+    build(d) {
+      const sc = newScene();
+      // front desks: one lead per session
+      sc.texts.push({ x: 1, y: 0, s: "front desks", cls: "zl" });
+      d.ordered.forEach((s, i) => {
+        const lead = d.people.find((p) => p.session === s && p.lead);
+        sc.people.push({ ...lead, x: 2 + i * (SLOT_W + 4), y: 1, teamIdx: i, teamLabel: s.branch });
+      });
+      let y = 5;
+      const zonesUsed = ZONE_ORDER.filter((z) => d.people.some((p) => p.zone === z));
+      const zw = Math.floor((W - (zonesUsed.length - 1)) / Math.max(1, zonesUsed.length));
+      let maxH = 0;
+      zonesUsed.forEach((z, k) => {
+        const ps = d.people.filter((p) => p.zone === z);
+        const perRow = Math.max(1, Math.floor((zw - 2) / SLOT_W));
+        const zh = 2 + Math.ceil(ps.length / perRow) * SLOT_H;
+        maxH = Math.max(maxH, zh);
+        const zx = k * (zw + 1);
+        sc.zones.push({ x: zx, y, w: zw, h: zh, name: z });
+        ps.forEach((p, i) => {
+          sc.people.push({ ...p, x: zx + 1 + (i % perRow) * SLOT_W, y: y + 2 + Math.floor(i / perRow) * SLOT_H, teamIdx: d.ordered.indexOf(p.session) });
+          sc.lines.push({ kind: "spawn", a: p.spawnedBy, b: p.id });
+        });
+      });
+      sc.zones.forEach((z) => (z.h = maxH));
+      y += maxH + 1;
+      sc.rooms.push({ x: 0, y: 0, w: W, h: y, name: "", you: false, dim: false, floor: true });
+      if (d.cards.length) { board(sc, d, Math.floor(W / 4), y + 1, Math.floor(W / 2), 3 + d.cards.length); y += 5 + d.cards.length; }
+      finishLinks(sc, d); sc.w = W; sc.h = y; sc.teams = true; return sc;
+    } },
+  D: { name: "You at the centre", why: "The reverse harness taken literally. Your room sits in the middle; other sessions surround it, the ones that touch your work placed closest (left, right, above), idle ones pushed to the corners and folded. The board hangs under you.",
+    build(d) {
+      const sc = newScene(); const [you, ...rest] = d.ordered;
+      const side = 26, mid = W - 2 * side - 2;
+      const slots = [[0, 1], [2, 1], [1, 0], [0, 0], [2, 0], [0, 2], [2, 2]];
+      const near = rest.filter((s) => s.status === "active"), far = rest.filter((s) => s.status !== "active");
+      const placed = [...near, ...far].slice(0, slots.length);
+      const colX = [0, side + 1, side + 1 + mid + 1], colW = [side, mid, side];
+      // measure rows: row 0 above, row 1 middle (you), row 2 below
+      const rowItems = { 0: [], 1: [[1, you, false]], 2: [] };
+      placed.forEach((s, i) => { const [c, r] = slots[i]; rowItems[r].push([c, s, s.status !== "active"]); });
+      let y = 0;
+      for (const r of [0, 1, 2]) {
+        let rh = 0;
+        for (const [c, s, folded] of rowItems[r]) rh = Math.max(rh, room(sc, d, s, colX[c], y, colW[c], { folded }));
+        if (r === 1 && d.cards.length) { board(sc, d, colX[1], y + rh + 1, mid, 3 + d.cards.length); rh += 4 + d.cards.length; }
+        if (rh) y += rh + 1;
+      }
+      finishLinks(sc, d); sc.w = W; sc.h = y; return sc;
+    } },
+};
+
+// ───────────────────────── Desktop renderer (SVG) ─────────────────────────
+const UX = 9, UY = 15;
+const short = (t) => { const v = String(t).split("/").pop(); return v.length > 11 ? v.slice(0, 10) + "…" : v; };
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+function personCentre(p) { return [(p.x + 1) * UX, (p.y + 0.6) * UY]; }
+function renderSvg(sc) {
+  const pos = new Map(sc.people.filter((p) => !p.hidden).map((p) => [p.id, p]));
+  const out = [];
+  for (const r of sc.rooms) {
+    const [x, y, w, h] = [r.x * UX, r.y * UY, r.w * UX, r.h * UY];
+    if (r.floor) { out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="wall" rx="2"/>`); continue; }
+    out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="${r.you ? "room-you" : r.dim ? "room-dim" : ""}" fill="${r.you || r.dim ? "" : "none"}"/>`);
+    out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="wall" rx="2"/>`);
+    out.push(`<text class="t room ${r.you ? "youc" : ""}" x="${x + 10}" y="${y + 17}">${esc(r.name)}</text>`);
+    if (r.dim && r.h <= 3) out.push(`<text class="t" x="${x + w - 10}" y="${y + 17}" text-anchor="end">lights off</text>`);
+  }
+  for (const z of sc.zones) {
+    out.push(`<rect class="zone" x="${z.x * UX}" y="${z.y * UY}" width="${z.w * UX}" height="${z.h * UY}" rx="5"/>`);
+    out.push(`<text class="t zl" x="${z.x * UX + 7}" y="${z.y * UY + 12}">${esc(z.name.toUpperCase())}</text>`);
+  }
+  for (const t of sc.texts) {
+    if (t.cls === "floor") { out.push(`<line x1="0" x2="${sc.w * UX}" y1="${t.y * UY + 6}" y2="${t.y * UY + 6}" stroke="var(--rule)" stroke-width="6"/>`); continue; }
+    if (t.cls === "door") { const dw = t.s.length * 6.6 + 10; out.push(`<rect x="${t.x * UX}" y="${t.y * UY}" width="${dw}" height="22" rx="3" class="card"/><rect x="${t.x * UX + 4}" y="${t.y * UY + 4}" width="9" height="14" fill="var(--ink-2)" opacity=".5"/><text class="t" x="${t.x * UX + 18}" y="${t.y * UY + 15}">${esc(t.s.slice(3))}</text>`); continue; }
+    out.push(`<text class="t ${t.cls}" x="${t.x * UX}" y="${t.y * UY + 12}">${esc(t.s.toUpperCase())}</text>`);
+  }
+  for (const b of sc.boards) {
+    const [x, y, w, h] = [b.x * UX, b.y * UY, b.w * UX, b.h * UY];
+    out.push(`<rect class="board" x="${x}" y="${y}" width="${w}" height="${h}" rx="3"/><text class="t room" x="${x + 10}" y="${y + 17}">BOARD</text>`);
+    b.cards.forEach((c, i) => {
+      out.push(`<rect class="card" x="${x + 8}" y="${y + 26 + i * 34}" width="${w - 16}" height="28" rx="3"/><circle cx="${x + 18}" cy="${y + 40 + i * 34}" r="4" fill="var(--ok)"/>`);
+      out.push(`<text class="t lab" x="${x + 28}" y="${y + 37 + i * 34}">${esc(c.text.slice(0, Math.floor((w - 40) / 6.2)))}</text><text class="t" x="${x + 28}" y="${y + 49 + i * 34}">${esc(c.from)}</text>`);
+    });
+  }
+  // lines under people
+  for (const l of sc.lines) {
+    const a = pos.get(l.a);
+    if (!a) continue;
+    const [ax, ay] = personCentre(a);
+    if (l.kind === "pin") { const b = sc.boards[l.board]; const bx = b.x * UX + 8, by = b.y * UY + 40; out.push(`<path d="M${ax} ${ay}L${bx} ${by}" fill="none" stroke="var(--ok)" stroke-width="1.4" stroke-dasharray="2 4"/>`); continue; }
+    const b = pos.get(l.b); if (!b) continue;
+    const [bx, by] = personCentre(b);
+    if (l.kind === "spawn") out.push(`<path class="spawn" d="M${ax} ${ay - 8}C${ax} ${(ay + by) / 2} ${bx} ${(ay + by) / 2} ${bx} ${by + 12}"/>`);
+    if (l.kind === "file") {
+      out.push(`<path class="file" d="M${ax} ${ay}C${(ax + bx) / 2} ${ay} ${(ax + bx) / 2} ${by} ${bx} ${by}"/>`);
+      const mx = (ax + bx) / 2, my = (ay + by) / 2, lw = l.label.length * 6.6 + 16;
+      out.push(`<rect class="chip" x="${mx - lw / 2}" y="${my - 10}" width="${lw}" height="20" rx="10"/><text class="t clash" x="${mx}" y="${my + 4}" text-anchor="middle">${esc(l.label)}</text>`);
+    }
+  }
+  for (const p of sc.people) {
+    if (p.hidden) continue;
+    const x = p.x * UX, y = p.y * UY;
+    if (sc.teams && p.teamIdx != null) out.push(`<line class="teambar" x1="${x + 2}" x2="${x + 16}" y1="${y + 36}" y2="${y + 36}" stroke="var(--team${(p.teamIdx % 6) + 1})"/>`);
+    if (p.status === "work") out.push(`<circle cx="${x + 9}" cy="${y + 11}" r="15" fill="var(--lamp)" opacity=".18"/>`);
+    out.push(`<use href="#av-${p.role}" class="av ${p.status}" x="${x - 4}" y="${y - 4}" width="26" height="26"/>`);
+    if (p.status === "stall") out.push(`<circle cx="${x + 20}" cy="${y}" r="5.5" class="acc-bang"/><text x="${x + 20}" y="${y + 3.5}" text-anchor="middle" font-size="9" font-weight="700" fill="var(--ink)">!</text>`);
+    out.push(`<text class="t lab ${p.role === "you" ? "youc" : ""}" x="${x + 9}" y="${y + 32}" text-anchor="middle">${esc(short(p.teamLabel && sc.teams ? p.teamLabel : p.label))}</text>`);
+  }
+  return `<svg viewBox="-6 -6 ${sc.w * UX + 12} ${sc.h * UY + 12}" role="img" aria-label="Agent Office floor plan">${out.join("")}</svg>`;
+}
+
+// ───────────────────────── terminal renderer (coloured cells) ─────────────────────────
+const GLYPH = { you: "\u2605", lead: "L", worker: "W", scout: "S", researcher: "R", reviewer: "V", other: "?" };
+const CC = { you: "y", work: "l", ok: "o", idle: "i", stall: "s" };
+function renderCells(sc) {
+  const Wc = sc.w, Hc = sc.h + 1;
+  const g = Array.from({ length: Hc }, () => Array.from({ length: Wc }, () => ({ ch: " ", f: "", b: "" })));
+  const put = (x, y, s, f, b) => { for (let k = 0; k < s.length; k++) { const c = g[y] && g[y][x + k]; if (!c) continue; c.ch = s[k]; if (f !== undefined) c.f = f; if (b !== undefined) c.b = b; } };
+  const fill = (x, y, w, h, b) => { for (let r = y; r < y + h; r++) for (let c = x; c < x + w; c++) if (g[r] && g[r][c]) g[r][c].b = b; };
+  const box = (x, y, w, h, f, heavy) => {
+    const [tl, tr, bl, br, hz, vt] = heavy ? ["\u250f", "\u2513", "\u2517", "\u251b", "\u2501", "\u2503"] : ["\u250c", "\u2510", "\u2514", "\u2518", "\u2500", "\u2502"];
+    put(x, y, tl + hz.repeat(w - 2) + tr, f); put(x, y + h - 1, bl + hz.repeat(w - 2) + br, f);
+    for (let r = y + 1; r < y + h - 1; r++) { put(x, r, vt, f); put(x + w - 1, r, vt, f); }
+  };
+  for (const r of sc.rooms) {
+    if (r.you) fill(r.x + 1, r.y + 1, r.w - 2, r.h - 2, "b-y");
+    box(r.x, r.y, r.w, r.h, "c-w", r.floor);
+    if (r.name) put(r.x + 2, r.y, " " + r.name + " ", r.you ? "c-y" : r.dim ? "c-d" : "");
+    if (r.dim && r.h <= 3) put(r.x + 2, r.y + 1, "lights off", "c-d");
+  }
+  for (const z of sc.zones) fill(z.x, z.y, z.w, z.h, "b-z");
+  const pos = new Map(sc.people.filter((p) => !p.hidden).map((p) => [p.id, p]));
+  const blank = (x, y) => g[y] && g[y][x] && g[y][x].ch === " ";
+  for (const l of sc.lines) {
+    if (l.kind !== "file") continue;
+    const a = pos.get(l.a), b = pos.get(l.b); if (!a || !b) continue;
+    const y = a.y, x1 = Math.min(a.x, b.x) + 2, x2 = Math.max(a.x, b.x) - 1;
+    if (a.y === b.y) { put(x1, y, "\u254c".repeat(Math.max(0, x2 - x1)), "c-c"); put(Math.floor((x1 + x2) / 2) - Math.floor(l.label.length / 2), y + 1, l.label, "c-c"); }
+    else {
+      const top = a.y < b.y ? a : b, bot = a.y < b.y ? b : a;
+      put(top.x + 2, top.y, "\u254c".repeat(Math.max(1, Math.abs(bot.x - top.x) + 1)), "c-c");
+      const vx = bot.x + (bot.x >= top.x ? 0 : 2);
+      for (let r = top.y + 1; r < bot.y; r++) put(bot.x, r, "\u2506", "c-c");
+      put(bot.x + 3, Math.floor((top.y + bot.y) / 2), l.label, "c-c");
+    }
+  }
+  for (const z of sc.zones) { put(z.x + 1, z.y, z.name, "c-d"); }
+  for (const t of sc.texts) {
+    if (t.cls === "floor") put(0, t.y, t.s, "c-w");
+    else if (t.cls === "door") put(t.x, t.y, "\u258c" + t.s.slice(2), "c-d");
+    else put(t.x, t.y, t.s, "c-d");
+  }
+  for (const b of sc.boards) {
+    box(b.x, b.y, b.w, b.h, "c-w"); put(b.x + 2, b.y, " BOARD ", "");
+    b.cards.forEach((c, i) => { put(b.x + 2, b.y + 1 + i * 2, "\u25cf", "c-o"); put(b.x + 4, b.y + 1 + i * 2, c.text.slice(0, b.w - 6), ""); put(b.x + 4, b.y + 2 + i * 2, c.from.slice(0, b.w - 6), "c-d"); });
+  }
+  for (const p of sc.people) {
+    if (p.hidden) continue;
+    const f = "c-" + CC[p.status];
+    put(p.x, p.y, "\u25cf" + GLYPH[p.role], f);
+    if (p.status === "stall") put(p.x + 2, p.y, "!", "c-s");
+    const lab = (sc.teams && p.teamLabel ? p.teamLabel : p.label).slice(0, SLOT_W - 1);
+    put(p.x, p.y + 1, lab, sc.teams && p.teamIdx != null ? "c-t" + ((p.teamIdx % 6) + 1) : p.role === "you" ? "c-y" : "c-d");
+  }
+  const out = document.createDocumentFragment();
+  g.forEach((row, ri) => {
+    let cur = null, buf = "";
+    const flush = () => { if (!buf) return; const s = document.createElement("span"); s.className = cur; s.textContent = buf; s.style.cssText = `display:inline-block;width:${[...buf].length}ch;overflow:hidden;vertical-align:top;white-space:pre`; out.appendChild(s); buf = ""; };
+    for (const c of row) { const k = (c.f + " " + c.b).trim(); if (k !== cur) { flush(); cur = k; } buf += c.ch; }
+    flush(); if (ri < g.length - 1) out.appendChild(document.createTextNode("\n"));
+  });
+  return out;
+}
+
+// ───────────────────────── switcher and state ─────────────────────────
+const params = new URLSearchParams(location.search);
+const state = { variant: VARIANTS[params.get("variant")] ? params.get("variant") : "A", n: [1, 3, 6].includes(+params.get("n")) ? +params.get("n") : 3, view: params.get("view") === "terminal" ? "terminal" : "desktop" };
+const keys = Object.keys(VARIANTS);
+function render() {
+  const v = VARIANTS[state.variant], sessions = SNAPSHOTS[state.n], d = derive(sessions), sc = v.build(d);
+  document.getElementById("vlabel").textContent = state.variant + " \u2014 " + v.name;
+  document.getElementById("variant-why").textContent = v.why;
+  document.getElementById("svg-host").innerHTML = renderSvg(sc);
+  const cells = document.getElementById("cells"); cells.textContent = ""; cells.appendChild(renderCells(sc));
+  document.getElementById("desktop").hidden = state.view !== "desktop";
+  document.getElementById("terminal").hidden = state.view !== "terminal";
+  const work = d.people.filter((p) => p.status === "work").length, done = d.people.filter((p) => p.status === "ok").length;
+  document.getElementById("counts").textContent = `${sessions.length} sessions \u00b7 ${work} working \u00b7 ${done} done \u00b7 ${d.links.length} collision${d.links.length === 1 ? "" : "s"}`;
+  document.getElementById("legend").innerHTML = [["you", "you", "you"], ["lead", "work", "lead"], ["worker", "work", "worker"], ["scout", "work", "scout"], ["researcher", "work", "researcher"], ["reviewer", "work", "reviewer"]]
+    .map(([r, st, l]) => `<span><svg viewBox="0 0 24 24"><use href="#av-${r}" class="av ${st}"/></svg>${l}</span>`).join("") +
+    `<span>\u25cf working = amber \u00b7 done = green \u00b7 idle = faded \u00b7 stalled = purple !</span>`;
+  document.getElementById("state").innerHTML = [
+    `variant <b>${state.variant}</b>, ${state.n} session${state.n > 1 ? "s" : ""}, ${state.view}`,
+    `${sc.rooms.length} rooms, ${sc.zones.length} zones, ${sc.people.filter((p) => !p.hidden).length} people`,
+    `collisions: ${d.links.map((l) => l.file).join(", ") || "none"}`,
+    `board cards: ${d.cards.length}`,
+    `scene size: ${sc.w} \u00d7 ${sc.h} cells`,
+  ].map((s) => `<li>${s}</li>`).join("");
+  document.getElementById("json").textContent = JSON.stringify({ project: "C:/Users/adamr/Projects/claude-skills/.git", self: "a4b6", sessions }, null, 2);
+  for (const b of document.querySelectorAll("[data-n]")) b.classList.toggle("on", +b.dataset.n === state.n);
+  for (const b of document.querySelectorAll("[data-view]")) b.classList.toggle("on", b.dataset.view === state.view);
+  const q = new URLSearchParams({ variant: state.variant, n: state.n, view: state.view });
+  try { history.replaceState(null, "", "?" + q); } catch {}
+}
+const step = (dir) => { state.variant = keys[(keys.indexOf(state.variant) + dir + keys.length) % keys.length]; render(); };
+document.getElementById("prev").onclick = () => step(-1);
+document.getElementById("next").onclick = () => step(1);
+for (const b of document.querySelectorAll("[data-n]")) b.onclick = () => { state.n = +b.dataset.n; render(); };
+for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => { state.view = b.dataset.view; render(); };
+addEventListener("keydown", (e) => {
+  if (e.target.closest("input,textarea,[contenteditable]")) return;
+  if (e.key === "ArrowLeft") step(-1); else if (e.key === "ArrowRight") step(1);
+  else if ("136".includes(e.key) && e.key.length === 1) { state.n = +e.key; render(); }
+  else if (e.key === "d" || e.key === "D") { state.view = "desktop"; render(); }
+  else if (e.key === "t" || e.key === "T") { state.view = "terminal"; render(); }
+});
+render();
+</script>
