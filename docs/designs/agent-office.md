@@ -261,6 +261,7 @@ text is shown locally, to the same user, from their own transcripts.
    participant in the network, not only the one giving orders. It builds on v2's links and on
    the snapshot, and needs its own design pass on consent, interruption rules and
    reversibility.
+7. **v4, the multiplayer office (future vision, out of scope).** Every employee joins with their own lead agents in one shared office alongside every other session and subagent in the company. Gatekeeper agents gate deployments and risky actions company-wide. Motivated by a problem already seen: parallel agent sessions touch the same code and deploy on different schedules, so one session's work ships inside another's deployment. Needs its own design pass on identity and permissions across people, shared state between machines, and who a gate answers to.
 
 ## Open Questions
 
