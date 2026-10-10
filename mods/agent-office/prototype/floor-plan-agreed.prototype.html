@@ -1,0 +1,397 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Office Floor Plans</title>
+<!--
+  PROTOTYPE, throwaway. GitHub #46, second round: the floor plan as agreed with Adam on 2026-10-10.
+  Rooms are pieces of work (one session per room in v1, several allowed), no job zones, write bubbles
+  (amber write, red possible conflict), animated lines only while an answer is owed, info icons on
+  reviewers with findings, no board. Layout A (grid) is the build-first layout; D (you at the centre)
+  is the target, sketched with the same room drawing. Fake data uses the discover.mjs snapshot shape.
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@600;700&family=JetBrains+Mono:wght@400;700&family=Public+Sans:wght@400;600&display=swap">
+<style>
+/* Layout: floor plans stacked on the left, a sticky "selected agent" card and key on the right. */
+:root{
+  --ground:#e7eae5; --sheet:#f5f6f2; --ink:#1a2528; --ink-2:#4d5c5f; --rule:#bcc6c1; --wall:#2b3a3e; --table:#d6dcd6;
+  --lamp:#e2a91f; --ok:#2f8a55; --you:#2c6d71; --you-wash:rgba(44,109,113,.10); --clash:#c4462e; --stall:#9a5ab8; --info:#2e64c8;
+  --bubble-ink:#1a1a12;
+  --term-bg:#12191b; --term-fg:#d9e2de; --term-wall:#7e9590; --term-dim:#7d908c; --term-you:#1b3033; --term-table:#24343a;
+  --t-you:#71bdb9; --t-lamp:#f3c24f; --t-ok:#6cc28a; --t-clash:#f07d61; --t-stall:#c79be0; --t-info:#7aa7f5;
+  --f-d:"Familjen Grotesk",Arial,sans-serif; --f-b:"Public Sans",system-ui,sans-serif; --f-m:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ground:#0f1618; --sheet:#152024; --ink:#e3eae6; --ink-2:#9db0ac; --rule:#30444a; --wall:#c9d6d2; --table:#22323a;
+  --lamp:#f3c24f; --ok:#6cc28a; --you:#71bdb9; --you-wash:rgba(113,189,185,.12); --clash:#f07d61; --stall:#c79be0; --info:#7aa7f5; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --ground:#0f1618; --sheet:#152024; --ink:#e3eae6; --ink-2:#9db0ac; --rule:#30444a; --wall:#c9d6d2; --table:#22323a;
+  --lamp:#f3c24f; --ok:#6cc28a; --you:#71bdb9; --you-wash:rgba(113,189,185,.12); --clash:#f07d61; --stall:#c79be0; --info:#7aa7f5; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:15px/1.5 var(--f-b);padding:24px 16px 48px}
+.wrap{max-width:1680px;margin:0 auto}
+h1{font:700 24px var(--f-d);margin:0 0 6px;text-wrap:balance}
+h2{font:600 15px var(--f-d);margin:0 0 6px}
+.lede{max-width:70ch;margin:0 0 16px;color:var(--ink-2)}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 14px;font:13px var(--f-m)}
+.seg{display:inline-flex;border:1px solid var(--rule);background:var(--sheet)}
+.seg button{background:none;border:0;padding:6px 14px;font:inherit;color:var(--ink);cursor:pointer}
+.seg button.on{background:var(--ink);color:var(--sheet)}
+.seg button:focus-visible{outline:2px solid var(--you);outline-offset:-2px}
+.hint{color:var(--ink-2)}
+.stage{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+.plans{display:flex;flex-direction:column;gap:20px;min-width:0}
+.panel{background:var(--sheet);border:1px solid var(--rule);padding:14px;min-width:0}
+.panel header{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:4px}
+.panel .letter{font:700 26px/1 var(--f-d);color:var(--you)}
+.panel h3{font:700 18px var(--f-d);margin:0}
+.panel .tag{font:12px var(--f-m);color:var(--ink-2);border:1px solid var(--rule);padding:1px 8px}
+.panel .idea{margin:0 0 10px;color:var(--ink-2);max-width:80ch}
+.panel svg.plan{display:block;width:100%;height:auto}
+.term{background:var(--term-bg);padding:14px;overflow-x:auto}
+.term pre{margin:0;font:13px/1.25 var(--f-m);color:var(--term-fg);width:max-content;font-variant-ligatures:none}
+aside{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px);display:flex;flex-direction:column;gap:14px;min-width:0}
+.box{background:var(--sheet);border:1px solid var(--rule);padding:12px 14px}
+.sel dl{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0;font-size:13.5px}
+.sel dt{color:var(--ink-2);font:12px/1.7 var(--f-m)}
+.sel dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.sel .who{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+.sel .who svg{width:34px;height:34px;flex:none}
+.sel .who b{font:600 15px var(--f-d)}
+.sel ul{margin:4px 0 0;padding-left:18px}
+.key{display:grid;gap:7px;font-size:13px}
+.key div{display:flex;gap:8px;align-items:center}
+.key svg{width:44px;height:22px;flex:none}
+.rules{margin-top:20px}
+.rules ul{margin:0;padding-left:20px;max-width:90ch}
+.rules li{margin-bottom:4px}
+.cast{overflow-x:auto;margin-top:20px}
+.cast table{border-collapse:collapse;font:12px/1.45 var(--f-m);width:100%}
+.cast th{text-align:left;font-weight:400;color:var(--ink-2);border-bottom:1px solid var(--rule);padding:3px 10px 3px 0}
+.cast td{padding:3px 10px 3px 0;vertical-align:top;border-bottom:1px solid var(--rule)}
+/* plan drawing */
+.wall{fill:none;stroke:var(--wall);stroke-width:2.5}
+.room-you{fill:var(--you-wash)} .room-dim{fill:var(--ground);opacity:.6}
+.table{fill:var(--table);stroke:var(--rule)}
+.t{font-family:var(--f-m);font-size:10.5px;fill:var(--ink-2)}
+.t.title{font:700 13px var(--f-d);fill:var(--ink)} .t.youc{fill:var(--you)}
+.t.lab{font-size:10px;fill:var(--ink)}
+.flow{fill:none;stroke:var(--ink-2);stroke-width:2.2;stroke-linecap:round;stroke-dasharray:.1 7;animation:flow 1s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-7.1}}
+@media (prefers-reduced-motion:reduce){.flow{animation:none}}
+.bub{stroke:var(--wall);stroke-width:.8}
+.bub.w{fill:var(--lamp)} .bub.c{fill:var(--clash)}
+.bub-t{font:700 10px var(--f-m);fill:var(--bubble-ink)}
+.info-c{fill:var(--info)}
+.person{cursor:pointer;outline:none}
+.person .ring{fill:none;stroke:var(--you);stroke-width:2;opacity:0}
+.person:hover .ring,.person:focus-visible .ring,.person.sel .ring{opacity:1}
+.av{color:var(--ink-2)}
+.av.work{color:var(--lamp)} .av.ok{color:var(--ok)} .av.you{color:var(--you)} .av.idle{color:var(--ink-2);opacity:.5} .av.stall,.av.fail{color:var(--stall)}
+#av-body{fill:currentColor}
+.acc{fill:var(--ink)} .acc-line{fill:none;stroke:var(--ink);stroke-width:1.2;stroke-linecap:round}
+.acc-ring{fill:var(--sheet);fill-opacity:.55;stroke:var(--ink);stroke-width:1.4}
+.acc-star{fill:var(--lamp);stroke:var(--ink);stroke-width:.6}
+.acc-bang{fill:var(--sheet);stroke:var(--ink);stroke-width:.8}
+/* terminal cells */
+.c-w{color:var(--term-wall)} .c-d{color:var(--term-dim)} .c-y{color:var(--t-you);font-weight:700} .c-l{color:var(--t-lamp);font-weight:700}
+.c-o{color:var(--t-ok);font-weight:700} .c-i{color:var(--term-dim)} .c-s{color:var(--t-stall);font-weight:700} .c-c{color:var(--t-clash);font-weight:700}
+.c-n{color:var(--t-info);font-weight:700} .c-t{color:var(--term-fg);font-weight:700}
+.b-y{background:var(--term-you)} .b-t{background:var(--term-table)}
+@media (max-width:1000px){.stage{grid-template-columns:1fr} aside{position:static}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="av-body"><circle cx="12" cy="8.6" r="4.6"/><path d="M2.6 23.4c0-5.6 4.2-9 9.4-9s9.4 3.4 9.4 9z"/></g>
+    <symbol id="av-worker" viewBox="0 0 24 24"><use href="#av-body"/><path class="acc" d="M6.6 7.9a5.4 5.4 0 0 1 10.8 0z"/><rect class="acc" x="5" y="7.6" width="14" height="1.7" rx=".8"/></symbol>
+    <symbol id="av-scout" viewBox="0 0 24 24"><use href="#av-body"/><path class="acc" d="M7.4 7.6a4.6 4.6 0 0 1 9.2 0z"/><path class="acc" d="M12 6.6h7.6a1 1 0 0 1 0 1.9H12z"/></symbol>
+    <symbol id="av-researcher" viewBox="0 0 24 24"><use href="#av-body"/><circle class="acc-line" cx="9.8" cy="9" r="1.9"/><circle class="acc-line" cx="14.2" cy="9" r="1.9"/><path class="acc-line" d="M11.7 9h.6"/></symbol>
+    <symbol id="av-reviewer" viewBox="0 0 24 24"><use href="#av-body"/><circle class="acc-ring" cx="17.6" cy="15.8" r="3.3"/><path class="acc-line" style="stroke-width:2" d="M20 18.2l2.6 2.6"/></symbol>
+    <symbol id="av-lead" viewBox="0 0 24 24"><use href="#av-body"/><path class="acc" d="M12 15.1l-1.3 1.5 1.3 5.4 1.3-5.4z"/><path class="acc" d="M10.6 14.6h2.8l-1.4 1.4z"/></symbol>
+    <symbol id="av-you" viewBox="0 0 24 24"><use href="#av-body"/><path class="acc-star" d="M18.4 12.6l.9 1.9 2.1.3-1.5 1.5.4 2.1-1.9-1-1.9 1 .4-2.1-1.5-1.5 2.1-.3z"/></symbol>
+    <symbol id="av-other" viewBox="0 0 24 24"><use href="#av-body"/></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <h1>Agent Office floor plan</h1>
+  <p class="lede">The design agreed on 10 October, drawn from the same busy afternoon in claude-skills: eight sessions, about 25 subagents. Each room is one piece of work, named after what it is doing. Click anyone to see what they are doing.</p>
+  <div class="toolbar">
+    <span>Draw as</span>
+    <div class="seg" role="group" aria-label="Drawing"><button data-view="desktop">Claude Desktop</button><button data-view="terminal">Terminal</button></div>
+    <span class="hint">The terminal drawing is coloured text cells. Arrows shift on each redraw instead of animating.</span>
+  </div>
+  <div class="stage">
+    <div class="plans">
+      <section class="panel">
+        <header><span class="letter">A</span><h3>Grid of rooms</h3><span class="tag">build first</span></header>
+        <p class="idea">Your room first, then every other room in a fixed place, in the order the sessions started. Idle rooms with nothing to show fold into a one-line strip.</p>
+        <div class="draw" id="draw-A"></div>
+      </section>
+      <section class="panel">
+        <header><span class="letter">D</span><h3>You at the centre</h3><span class="tag">target, sketch</span></header>
+        <p class="idea">The same rooms placed by a different layout step. Rooms that share a file with yours sit beside you, other working rooms around you, idle rooms at the edges. Later: drag to move around, corridors between rooms.</p>
+        <div class="draw" id="draw-D"></div>
+      </section>
+    </div>
+    <aside>
+      <div class="box sel" id="sel" aria-live="polite"></div>
+      <div class="box"><h2>Key</h2><div class="key" id="key"></div></div>
+    </aside>
+  </div>
+
+  <section class="rules box">
+    <h2>The rules this drawing follows</h2>
+    <ul>
+      <li><b>Rooms are pieces of work.</b> In v1 each session is its own room. A room can already hold several sessions (stacked tables), so related work and other people can join one room later, with work groups inside it.</li>
+      <li><b>No job zones.</b> Everyone in a room sits at one table with their lead. The hat or prop shows the job.</li>
+      <li><b>Room name is the job.</b> The session's title in large type, the branch and checkout in small print.</li>
+      <li><b>Status colour on the figure:</b> amber working, green done, faded idle, purple stalled (!) or failed (&times;).</li>
+      <li><b>Write bubble:</b> amber while an agent writes a file. Red when any other agent, in any room, edited that file in the last 30 minutes. Later, a red bubble triggers a git check and conflict help.</li>
+      <li><b>Lines only while an answer is owed.</b> Dots travel from the agent waiting toward the agent working. The line goes away when the answer arrives. v2 messaging adds lines between any two agents.</li>
+      <li><b>Info icon</b> over a reviewer that finished with findings. No board.</li>
+      <li><b>Layout is a separate step.</b> A ships first; D replaces it without changing how a room is drawn.</li>
+    </ul>
+  </section>
+
+  <section class="cast box">
+    <h2>The fake repository: claude-skills</h2>
+    <table id="cast"></table>
+  </section>
+</div>
+
+<script>
+// ───────────────────────── fake sessions (discover.mjs shape, plus per-agent recent edits) ─────────────────────────
+const ag = (id, type, status, o = {}) => ({ id, type, status, writing: null, edits: [], ...o });
+const SESSIONS = [
+  { id: "a4b6", branch: "feature/agent-office", worktree: "orca/paddlefish", title: "Reverse harness for sessions", status: "active", self: true,
+    lead: { edits: ["install.mjs"] },
+    agents: [ag("r1", "researcher", "running"), ag("s1", "scout", "done"), ag("w0", "worker", "running", { writing: "mods/agent-office/discover.mjs", edits: ["mods/agent-office/discover.mjs"] }), ag("v0", "reviewer", "running")] },
+  { id: "bb31", branch: "sunfish", worktree: ".claude/worktrees/sunfish", title: "Installer clean-up", status: "active", lead: {},
+    agents: [ag("w1", "worker", "running", { writing: "install.mjs", edits: ["install.mjs"] }), ag("w1b", "worker-light", "done", { edits: ["lib/args.mjs"] }), ag("s3", "scout", "done")] },
+  { id: "c02f", branch: "main", worktree: "main checkout", title: "Release prep", status: "idle", idleMinutes: 4, lead: {},
+    agents: [ag("v1", "reviewer", "done", { findings: ["Stale comment in the skills.txt parser"] }), ag("v1b", "reviewer", "done", { findings: ["README skills table is out of order", "CHANGELOG missing 2.4.0"] })] },
+  { id: "d9a1", branch: "kingfisher", worktree: ".claude/worktrees/kingfisher", title: "Wizard keyboard fixes", status: "active", lead: { edits: ["skills.txt"] },
+    agents: [ag("w2", "worker", "running", { writing: "lib/wizard.mjs", edits: ["lib/wizard.mjs"] }), ag("w3", "worker-light", "stalled"), ag("r2", "researcher", "done"), ag("s4", "scout", "running")] },
+  { id: "e5c3", branch: "herring", worktree: ".claude/worktrees/herring", title: "Docs tidy", status: "idle", idleMinutes: 22, lead: {}, agents: [] },
+  { id: "f7b2", branch: "marlin", worktree: ".claude/worktrees/marlin", title: "Skill descriptions", status: "active", lead: { writing: "README.md", edits: ["README.md"] },
+    agents: [ag("v2", "reviewer", "running"), ag("s2", "scout", "running"), ag("w4", "worker", "running", { writing: "skills.txt", edits: ["skills.txt"] })] },
+  { id: "g3d8", branch: "pike", worktree: ".claude/worktrees/pike", title: "Split lib/ into modules", status: "active", lead: {},
+    agents: [ag("w5", "worker", "running", { writing: "lib/wizard.mjs", edits: ["lib/wizard.mjs", "lib/ui.mjs"] }), ag("w6", "worker", "running", { writing: "lib/ui.mjs", edits: ["lib/ui.mjs"], ownWorktree: true }), ag("w7", "worker", "failed"),
+      ag("s5", "scout", "done"), ag("s6", "scout", "done"), ag("r3", "researcher", "running")] },
+  { id: "h1e0", branch: "carp", worktree: ".claude/worktrees/carp", title: "Flaky test hunt", status: "idle", idleMinutes: 9, lead: {},
+    agents: [ag("w8", "worker", "done", { edits: ["test/wizard.test.mjs"] }), ag("v3", "reviewer", "done", { findings: ["Wizard test timeout is a race, not slowness"] })] },
+];
+const ROLE = { scout: "scout", researcher: "researcher", worker: "worker", "worker-light": "worker", reviewer: "reviewer" };
+const STATUS = { running: "work", done: "ok", stalled: "stall", failed: "fail", killed: "fail" };
+const STATUS_TEXT = { work: "working", ok: "done", idle: "idle", stall: "stalled", fail: "failed", you: "you" };
+
+function derive(sessions) {
+  const people = [];
+  for (const s of sessions) {
+    const lead = { id: s.id + ":lead", session: s, lead: true, role: s.self ? "you" : "lead", type: s.self ? "you" : "lead",
+      status: s.self ? "you" : s.status === "active" ? "work" : "idle", writing: s.lead.writing || null, edits: s.lead.edits || [] };
+    people.push(lead);
+    for (const a of s.agents) people.push({ ...a, session: s, role: ROLE[a.type] || "other", status: STATUS[a.status], leadId: lead.id, awaited: a.status === "running" || a.status === "stalled" });
+  }
+  for (const p of people) if (p.writing) p.conflicts = people.filter((q) => q !== p && (q.writing === p.writing || q.edits.includes(p.writing)));
+  return people;
+}
+const PEOPLE = derive(SESSIONS);
+const byId = new Map(PEOPLE.map((p) => [p.id, p]));
+// v1: one session per room. The room drawing takes a list so later versions can put several sessions in one room.
+const ROOMS = SESSIONS.map((s) => ({ sessions: [s] }));
+const subsOf = (s) => PEOPLE.filter((p) => p.session === s && !p.lead);
+const isFolded = (r) => r.sessions.every((s) => s.status === "idle" && !subsOf(s).some((p) => p.findings));
+
+// ───────────────────────── room drawing (units = terminal cells) ─────────────────────────
+const SEAT = 12, LEADW = 12, FOLD_W = 34;
+function measure(r) {
+  if (isFolded(r)) return { w: FOLD_W, h: 3 };
+  let h = 3, k = 1;
+  for (const s of r.sessions) { const n = subsOf(s).length; k = Math.max(k, Math.ceil(n / 2)); h += n > 1 ? 11 : 8; }
+  return { w: Math.max(4 + LEADW + k * SEAT, 40), h };
+}
+function drawRoom(sc, r, x, y) {
+  const { w, h } = measure(r), s0 = r.sessions[0];
+  const idle = r.sessions.every((s) => s.status === "idle");
+  const title = r.sessions.map((s) => s.title).join(" + ");
+  const sub = r.sessions.map((s) => s.branch + " · " + s.worktree).join("  |  ") + (idle ? "  ·  idle " + s0.idleMinutes + "m" : "");
+  sc.rooms.push({ x, y, w, h, title, sub, you: r.sessions.some((s) => s.self), dim: idle, folded: isFolded(r) });
+  if (isFolded(r)) return;
+  let cy = y + 3;
+  for (const s of r.sessions) {
+    const subs = subsOf(s), k = Math.max(1, Math.ceil(subs.length / 2));
+    const lead = PEOPLE.find((p) => p.session === s && p.lead), tx = x + 2 + LEADW;
+    sc.people.push({ p: lead, x: x + 4, y: cy + 4 });
+    sc.tables.push({ x: tx, y: cy + 4, w: k * SEAT - 1 });
+    subs.forEach((p, i) => {
+      const top = i < k, col = top ? i : i - k;
+      sc.people.push({ p, x: tx + col * SEAT + 4, y: top ? cy + 1 : cy + 7 });
+      if (p.awaited) sc.lines.push({ from: lead.id, to: p.id });
+    });
+    cy += subs.length > 1 ? 11 : 8;
+  }
+}
+const newScene = () => ({ rooms: [], tables: [], people: [], lines: [], w: 0, h: 0 });
+
+// ───────────────────────── layouts ─────────────────────────
+function layoutA(rooms) {
+  const sc = newScene(), W = 124;
+  const you = rooms.find((r) => r.sessions.some((s) => s.self));
+  const open = rooms.filter((r) => r !== you && !isFolded(r)), folded = rooms.filter((r) => isFolded(r));
+  let x = 0, y = 0, rowH = 0;
+  for (const r of [you, ...open, ...folded]) {
+    const m = measure(r);
+    if (x && x + m.w > W) { x = 0; y += rowH + 1; rowH = 0; }
+    drawRoom(sc, r, x, y); x += m.w + 1; rowH = Math.max(rowH, m.h);
+  }
+  sc.w = W; sc.h = y + rowH; return sc;
+}
+function layoutD(rooms) {
+  const sc = newScene();
+  const you = rooms.find((r) => r.sessions.some((s) => s.self));
+  const mine = new Set(PEOPLE.filter((p) => p.session.self).flatMap((p) => [...p.edits, p.writing]).filter(Boolean));
+  const related = (r) => PEOPLE.some((p) => r.sessions.includes(p.session) && [...p.edits, p.writing].some((f) => mine.has(f)));
+  const rank = (r) => (related(r) ? 0 : r.sessions.some((s) => s.status === "active") ? 1 : isFolded(r) ? 3 : 2);
+  const others = rooms.filter((r) => r !== you).sort((a, b) => rank(a) - rank(b));
+  const SLOTS = [[0, 1], [2, 1], [1, 0], [0, 0], [2, 0], [1, 2], [0, 2], [2, 2]];
+  const cells = [[1, 1, you], ...others.slice(0, SLOTS.length).map((r, i) => [SLOTS[i][0], SLOTS[i][1], r])];
+  const colW = [0, 0, 0], rowH = [0, 0, 0];
+  for (const [c, rw, r] of cells) { const m = measure(r); colW[c] = Math.max(colW[c], m.w); rowH[rw] = Math.max(rowH[rw], m.h); }
+  const colX = [0, colW[0] + 2, colW[0] + colW[1] + 4], rowY = [0, rowH[0] + 1, rowH[0] + rowH[1] + 2];
+  for (const [c, rw, r] of cells) {
+    const m = measure(r);
+    const x = colX[c] + (c === 0 ? colW[0] - m.w : c === 1 ? Math.floor((colW[1] - m.w) / 2) : 0);
+    const y = rowY[rw] + (rw === 0 ? rowH[0] - m.h : 0);
+    drawRoom(sc, r, x, y);
+  }
+  sc.w = colX[2] + colW[2]; sc.h = rowY[2] + rowH[2]; return sc;
+}
+
+// ───────────────────────── Claude Desktop drawing (SVG) ─────────────────────────
+const UX = 9, UY = 15;
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+const base = (f) => f.split("/").pop();
+const clip = (t, n) => (t.length > n ? t.slice(0, n - 1) + "…" : t);
+const label = (p) => (p.lead ? (p.session.self ? "you" : "lead") : p.type);
+function renderSvg(sc) {
+  const out = [];
+  for (const r of sc.rooms) {
+    const [x, y, w, h] = [r.x * UX, r.y * UY, r.w * UX, r.h * UY];
+    out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" class="${r.you ? "room-you" : r.dim ? "room-dim" : ""}" fill="${r.you || r.dim ? "" : "none"}"/><rect x="${x}" y="${y}" width="${w}" height="${h}" class="wall" rx="2"/>`);
+    const tmax = Math.floor((w - 20) / 7.4);
+    out.push(`<text class="t title ${r.you ? "youc" : ""}" x="${x + 10}" y="${y + 18}">${esc(clip((r.you ? "★ " : "") + r.title, tmax))}</text>`);
+    if (r.folded) out.push(`<text class="t" x="${x + w - 10}" y="${y + 18}" text-anchor="end">idle ${r.sub.split("idle ")[1]} · lights off</text>`);
+    else out.push(`<text class="t" x="${x + 10}" y="${y + 33}">${esc(clip(r.sub, Math.floor((w - 20) / 6.4)))}</text>`);
+  }
+  for (const t of sc.tables) out.push(`<rect class="table" x="${t.x * UX}" y="${t.y * UY + 2}" width="${t.w * UX}" height="22" rx="4"/>`);
+  const pos = new Map(sc.people.map((q) => [q.p.id, q]));
+  const ctr = (q) => [q.x * UX + 9, q.y * UY + 9];
+  for (const l of sc.lines) {
+    const [ax, ay] = ctr(pos.get(l.from)), [bx, by] = ctr(pos.get(l.to));
+    out.push(`<path class="flow" d="M${ax + 12} ${ay}C${(ax + bx) / 2} ${ay} ${bx} ${(ay + by) / 2} ${bx} ${by + (by < ay ? 14 : -10)}"/>`);
+  }
+  for (const { p, x: cx, y: cy } of sc.people) {
+    const x = cx * UX, y = cy * UY, g = [];
+    g.push(`<circle class="ring" cx="${x + 9}" cy="${y + 10}" r="17"/>`);
+    if (p.status === "work") g.push(`<circle cx="${x + 9}" cy="${y + 11}" r="15" fill="var(--lamp)" opacity=".18"/>`);
+    g.push(`<use href="#av-${p.role}" class="av ${p.status}" x="${x - 4}" y="${y - 4}" width="26" height="26"/>`);
+    if (p.status === "stall" || p.status === "fail") g.push(`<circle cx="${x + 20}" cy="${y}" r="5.5" class="acc-bang"/><text x="${x + 20}" y="${y + 3.5}" text-anchor="middle" font-size="9" font-weight="700" fill="var(--ink)">${p.status === "fail" ? "×" : "!"}</text>`);
+    if (p.findings) g.push(`<circle class="info-c" cx="${x + 21}" cy="${y - 1}" r="6.5"/><text x="${x + 21}" y="${y + 2.5}" text-anchor="middle" font-size="10" font-weight="700" font-family="Georgia,serif" fill="var(--sheet)">i</text>`);
+    if (p.writing) {
+      const t = "✎ " + clip(base(p.writing), 13), bw = t.length * 6.4 + 12, bx = x + 9 - bw / 2, by = y - 22;
+      g.push(`<path class="bub ${p.conflicts.length ? "c" : "w"}" d="M${bx + 3} ${by}h${bw - 6}a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h${-(bw / 2 - 9)}l-4 4-4-4h${-(bw / 2 - 5)}a3 3 0 0 1-3-3v-10a3 3 0 0 1 3-3z"/><text class="bub-t" x="${x + 9}" y="${by + 11.5}" text-anchor="middle">${esc(t)}</text>`);
+    }
+    g.push(`<text class="t lab ${p.role === "you" ? "youc" : ""}" x="${x + 9}" y="${y + 33}" text-anchor="middle">${esc(clip(label(p), 12))}</text>`);
+    out.push(`<g class="person${state.sel === p.id ? " sel" : ""}" data-id="${p.id}" tabindex="0" role="button" aria-label="${esc(label(p) + ", " + STATUS_TEXT[p.status] + ", " + p.session.title)}">${g.join("")}</g>`);
+  }
+  return `<svg class="plan" viewBox="-6 -28 ${sc.w * UX + 12} ${sc.h * UY + 34}" role="img" aria-label="Agent Office floor plan">${out.join("")}</svg>`;
+}
+
+// ───────────────────────── terminal drawing (coloured cells) ─────────────────────────
+const GLYPH = { you: "★", lead: "L", worker: "W", scout: "S", researcher: "R", reviewer: "V", other: "?" };
+const CC = { you: "y", work: "l", ok: "o", idle: "i", stall: "s", fail: "s" };
+const PHASES = ["›··", "·›·", "··›"];
+function renderCells(sc, tick) {
+  const W = sc.w, H = sc.h + 1;
+  const g = Array.from({ length: H }, () => Array.from({ length: W }, () => ({ ch: " ", f: "", b: "" })));
+  const put = (x, y, s, f, b) => { [...s].forEach((ch, k) => { const c = g[y] && g[y][x + k]; if (!c) return; c.ch = ch; if (f !== undefined) c.f = f; if (b !== undefined) c.b = b; }); };
+  const fill = (x, y, w, h, b) => { for (let r = y; r < y + h; r++) for (let c = x; c < x + w; c++) if (g[r] && g[r][c]) g[r][c].b = b; };
+  const box = (x, y, w, h, f) => { put(x, y, "┌" + "─".repeat(w - 2) + "┐", f); put(x, y + h - 1, "└" + "─".repeat(w - 2) + "┘", f); for (let r = y + 1; r < y + h - 1; r++) { put(x, r, "│", f); put(x + w - 1, r, "│", f); } };
+  for (const r of sc.rooms) {
+    if (r.you) fill(r.x + 1, r.y + 1, r.w - 2, r.h - 2, "b-y");
+    box(r.x, r.y, r.w, r.h, "c-w");
+    put(r.x + 2, r.y, " " + clip((r.you ? "★ " : "") + r.title, r.w - 6) + " ", r.you ? "c-y" : r.dim ? "c-d" : "c-t");
+    put(r.x + 2, r.y + 1, clip(r.folded ? "idle " + r.sub.split("idle ")[1] + " · lights off" : r.sub, r.w - 4), "c-d");
+  }
+  for (const t of sc.tables) fill(t.x, t.y, t.w, 2, "b-t");
+  const awaited = new Set(sc.lines.map((l) => l.to));
+  for (const { p, x, y } of sc.people) {
+    put(x, y, "●" + GLYPH[p.role], "c-" + CC[p.status]);
+    if (p.status === "stall" || p.status === "fail") put(x + 2, y, p.status === "fail" ? "x" : "!", "c-s");
+    if (p.findings) put(x + 2, y, "i", "c-n");
+    if (awaited.has(p.id)) put(x - 3, y, PHASES[tick % 3], "c-d");
+    put(x - 3, y + 1, clip(label(p), 10), p.role === "you" ? "c-y" : "c-d");
+    if (p.writing) put(x - 3, y - 1, "✎" + clip(base(p.writing), 9), p.conflicts.length ? "c-c" : "c-l");
+  }
+  const frag = document.createDocumentFragment();
+  g.forEach((row, ri) => {
+    let cur = null, buf = "";
+    const flush = () => { if (!buf) return; const s = document.createElement("span"); s.className = cur; s.textContent = buf; s.style.cssText = `display:inline-block;width:${[...buf].length}ch;overflow:hidden;vertical-align:top;white-space:pre`; frag.appendChild(s); buf = ""; };
+    for (const c of row) { const k = (c.f + " " + c.b).trim(); if (k !== cur) { flush(); cur = k; } buf += c.ch; }
+    flush(); if (ri < g.length - 1) frag.appendChild(document.createTextNode("\n"));
+  });
+  return frag;
+}
+
+// ───────────────────────── page ─────────────────────────
+const state = { view: "desktop", sel: "w2", tick: 0 };
+const SCENES = { A: layoutA(ROOMS), D: layoutD(ROOMS) };
+function render() {
+  for (const k of ["A", "D"]) {
+    const host = document.getElementById("draw-" + k);
+    if (state.view === "desktop") host.innerHTML = renderSvg(SCENES[k]);
+    else { host.innerHTML = '<div class="term"><pre></pre></div>'; host.querySelector("pre").appendChild(renderCells(SCENES[k], state.tick)); }
+  }
+  for (const b of document.querySelectorAll("[data-view]")) b.classList.toggle("on", b.dataset.view === state.view);
+  renderSel();
+}
+function renderSel() {
+  const p = byId.get(state.sel), s = p.session, rows = [];
+  rows.push(["room", esc(s.title)]);
+  rows.push(["status", STATUS_TEXT[p.status] + (p.status === "you" ? ", lead of this room" : "")]);
+  if (p.writing) rows.push(["writing", `<code>${esc(p.writing)}</code>`]);
+  if (p.conflicts && p.conflicts.length) rows.push(["red because", "also edited in the last 30 min by " + p.conflicts.map((q) => `${esc(label(q))} in <i>${esc(q.session.title)}</i>`).join("; ")]);
+  else if (p.writing) rows.push(["amber because", "nobody else touched this file in the last 30 min"]);
+  if (p.awaited) rows.push(["line", "its lead is waiting for its answer; dots travel toward it"]);
+  if (p.ownWorktree) rows.push(["worktree", "works in its own worktree, stays in its lead's room"]);
+  if (p.findings) rows.push(["findings", `<ul>${p.findings.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>`]);
+  document.getElementById("sel").innerHTML = `<div class="who"><svg viewBox="0 0 24 24"><use href="#av-${p.role}" class="av ${p.status}"/></svg><div><b>${esc(label(p))}</b><br><span class="hint">${esc(s.branch)}</span></div></div><dl>${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>`;
+}
+function pick(e) { const g = e.target.closest(".person"); if (!g) return; state.sel = g.dataset.id; render(); document.querySelector(`.person[data-id="${g.dataset.id}"]`)?.focus({ preventScroll: true }); }
+for (const id of ["draw-A", "draw-D"]) { const el = document.getElementById(id); el.addEventListener("click", pick); el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(e); } }); }
+for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => { state.view = b.dataset.view; render(); };
+const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (!still) setInterval(() => { if (state.view !== "terminal") return; state.tick++; render(); }, 450);
+
+document.getElementById("key").innerHTML = [
+  [`<use href="#av-worker" class="av work" x="10" y="0" width="22" height="22"/>`, "Working (amber glow)"],
+  [`<use href="#av-worker" class="av ok" x="10" y="0" width="22" height="22"/>`, "Done"],
+  [`<use href="#av-worker" class="av idle" x="10" y="0" width="22" height="22"/>`, "Idle"],
+  [`<use href="#av-worker" class="av stall" x="10" y="0" width="22" height="22"/>`, "Stalled (!) or failed (×)"],
+  [`<rect class="bub w" x="2" y="4" width="40" height="14" rx="3"/><text class="bub-t" x="22" y="14.5" text-anchor="middle">✎ file</text>`, "Writing a file"],
+  [`<rect class="bub c" x="2" y="4" width="40" height="14" rx="3"/><text class="bub-t" x="22" y="14.5" text-anchor="middle">✎ file</text>`, "Writing a file someone else edited in the last 30 min"],
+  [`<path class="flow" d="M2 11H42"/>`, "Waiting for an answer: dots travel toward the agent working"],
+  [`<circle class="info-c" cx="22" cy="11" r="7"/><text x="22" y="15" text-anchor="middle" font-size="11" font-weight="700" font-family="Georgia,serif" fill="var(--sheet)">i</text>`, "Reviewer findings to read"],
+  [`<use href="#av-scout" class="av ok" x="0" y="0" width="22" height="22"/><use href="#av-researcher" class="av ok" x="22" y="0" width="22" height="22"/>`, "Hat or prop = job: hard hat worker, cap scout, glasses researcher, magnifier reviewer, tie lead, star you"],
+].map(([svg, t]) => `<div><svg viewBox="0 0 44 22">${svg}</svg><span>${t}</span></div>`).join("");
+
+(() => {
+  const count = (s) => { const c = {}; for (const a of s.agents) { const t = ROLE[a.type] || a.type; c[t] = (c[t] || 0) + 1; } return Object.entries(c).map(([t, n]) => n + " " + t + (n > 1 ? "s" : "")).join(", ") || "none"; };
+  const writes = (s) => PEOPLE.filter((p) => p.session === s && p.writing).map((p) => `<span style="color:var(--${p.conflicts.length ? "clash" : "ink"})">${esc(base(p.writing))}</span>`).join(", ");
+  document.getElementById("cast").innerHTML = `<tr><th>Room (session title)</th><th>Branch</th><th>Checkout</th><th>State</th><th>Subagents</th><th>Writing now (red = possible conflict)</th></tr>` +
+    SESSIONS.map((s) => `<tr><td>${esc(s.title)}${s.self ? " (you)" : ""}</td><td>${esc(s.branch)}</td><td>${esc(s.worktree)}</td><td>${s.status === "active" ? "working" : "idle " + s.idleMinutes + "m"}</td><td>${count(s)}</td><td>${writes(s)}</td></tr>`).join("");
+})();
+render();
+</script>
