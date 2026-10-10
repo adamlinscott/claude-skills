@@ -109,6 +109,8 @@ Pixel Agents source read.
 
 ## Recommended Approach: B, built in A's order
 
+> **Revised by the floor-plan prototype (10 Oct, [#46](https://github.com/adamlinscott/claude-skills/issues/46)):** no job zones and no board. A room is one piece of work (one session in v1, several later), named by its title, with everyone at one table. Same-file lines became write bubbles (amber, red when anyone edited the file in 30 minutes); lines show only while an answer is owed; reviewers with findings get an info icon, readable on hover or click. Grid layout first. Where this section, the wireframe or the milestones below mention zones, desks by zone, the board or collision lines, #46 wins.
+
 One **discover module** builds an **office snapshot**. Three things consume it.
 
 ```
