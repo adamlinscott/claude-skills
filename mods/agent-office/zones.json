@@ -1,0 +1,8 @@
+{
+  "scout": "archive",
+  "researcher": "library",
+  "worker": "workshop",
+  "worker-light": "workshop",
+  "reviewer": "review room",
+  "*": "open floor"
+}

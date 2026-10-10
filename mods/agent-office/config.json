@@ -1,0 +1,11 @@
+{
+  "activeMinutes": 2,
+  "idleMinutes": 30,
+  "quietSeconds": 60,
+  "stalledMinutes": 5,
+  "touchedWindowMinutes": 30,
+  "touchedTools": ["Edit", "Write", "NotebookEdit"],
+  "tailBytes": 1048576,
+  "gitCacheSeconds": 60,
+  "decisionModel": "none"
+}
