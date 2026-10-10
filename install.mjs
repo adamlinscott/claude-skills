@@ -29,7 +29,10 @@
 //   • ./skills.txt        — one checkbox per skill, its folders, a description for a person,
 //                           whether each setup defaults it on, and the agents it needs.
 //   • ./agents.txt        — the same, for the agents in ./agents, linked into ~/.claude/agents.
-//   • ./beta-features.txt — which skills and instructions are still in development
+//   • ./mods.txt          — the same, for the mods in ./mods, linked into ~/.claude/skills. A mod
+//                           is a Claude Code plugin; Claude Code loads one from that folder as
+//                           <name>@skills-dir. Only linked once it has .claude-plugin/plugin.json.
+//   • ./beta-features.txt — which skills, agents, mods and instructions are still in development
 //   • ./instructions/*.md — the optional blocks offered for the global CLAUDE.md, each carrying
 //                           its own dev:/nontech: defaults
 //   • ./extras/*.md       — other people's collections, and the command that installs each. Never
@@ -45,7 +48,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
-import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, readKey, style, wrap } from "./lib/wizard.mjs";
+import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, readKey, readSecret, style, wrap } from "./lib/wizard.mjs";
 import { blockPattern, applyBlocks, detectEol } from "./lib/claude-md.mjs";
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -56,6 +59,8 @@ const betaListFile = path.join(repoRoot, "beta-features.txt");
 const skillsListFile = path.join(repoRoot, "skills.txt");
 const repoAgentsDir = path.join(repoRoot, "agents");
 const agentsListFile = path.join(repoRoot, "agents.txt");
+const repoModsDir = path.join(repoRoot, "mods");
+const modsListFile = path.join(repoRoot, "mods.txt");
 const deprecatedListFile = path.join(repoRoot, "deprecated.txt");
 const repoExtrasDir = path.join(repoRoot, "extras");
 
@@ -72,11 +77,12 @@ const warnConfig = (message) => {
 };
 
 // How each kind of beta feature is described in the installer's list.
-const KIND_LABELS = { skill: "skill", instruction: "global instruction", agent: "agent" };
+const KIND_LABELS = { skill: "skill", instruction: "global instruction", agent: "agent", mod: "mod" };
 // Shown in the details panel for a skill folder with no line in skills.txt. Declared up here
 // because buildPlan() runs before the rest of the file is evaluated.
 const NO_DESCRIPTION = "No description yet — add a line for it in skills.txt.";
 const NO_AGENT_DESCRIPTION = "No description yet — add a line for it in agents.txt.";
+const NO_MOD_DESCRIPTION = "No description yet — add a line for it in mods.txt.";
 const globalSkillsDir = path.join(homedir(), ".claude", "skills");
 const globalAgentsDir = path.join(homedir(), ".claude", "agents");
 // Skills and agents are linked the same way — one folder each, from the repo into ~/.claude — so
@@ -84,6 +90,9 @@ const globalAgentsDir = path.join(homedir(), ".claude", "agents");
 // same reason as NO_DESCRIPTION: buildPlan() runs before the rest of the file is evaluated.
 const SKILLS = { kind: "skill", listFile: skillsListFile, sourceDir: repoSkillsDir, targetDir: globalSkillsDir };
 const AGENTS = { kind: "agent", listFile: agentsListFile, sourceDir: repoAgentsDir, targetDir: globalAgentsDir };
+// Mods land in the same folder as skills: it is also where Claude Code looks for a plugin that
+// loads in place every session, so a `git pull` updates a mod exactly as it does a skill.
+const MODS = { kind: "mod", listFile: modsListFile, sourceDir: repoModsDir, targetDir: globalSkillsDir };
 const globalClaudeMd = path.join(homedir(), ".claude", "CLAUDE.md");
 const globalSettings = path.join(homedir(), ".claude", "settings.json");
 
@@ -109,6 +118,38 @@ const linkType = process.platform === "win32" ? "junction" : "dir";
 const BETA_TOOLS = {
   debrief: { command: "debrief", serveArgs: ["serve"], mcpName: "debrief" },
 };
+
+// Agent Office is the one mod with a setup step of its own: which decision model it uses to
+// categorise work and judge whether two pieces of it are related, and that model's API key.
+//
+// The mod itself never reads the key. Its decision-model calls go through a script it runs, and
+// that script takes the key from its own environment — so the installer's whole job is to put the
+// key where that environment gets it (the Windows user environment, or a private env.sh that the
+// shell profile sources), and to save which model was chosen in the mod's config.json.
+//
+// The key is never accepted as a flag (it would land in shell history), never echoed, never
+// printed in the summary, and never written anywhere in this repo. Each variable the installer
+// set is recorded by NAME in AGENT_OFFICE_RECORD, with whether it already existed before, so
+// --uninstall removes only what the installer created.
+const AGENT_OFFICE = "agent-office";
+const DECISION_MODELS = {
+  jev: { label: "JEV (TypeSafe AI)", variable: "TYPESAFE_API_KEY", keyName: "TypeSafe API key" },
+  perplexity: { label: "Perplexity Decisions", variable: "PERPLEXITY_API_KEY", keyName: "Perplexity API key" },
+  none: { label: "None", variable: null, keyName: null },
+};
+const AGENT_OFFICE_DIR = path.join(homedir(), ".claude", "agent-office");
+const AGENT_OFFICE_RECORD = path.join(AGENT_OFFICE_DIR, "installed.json");
+// The mod's user overrides. The installer only ever sets `decisionModel` in it.
+const AGENT_OFFICE_CONFIG = path.join(AGENT_OFFICE_DIR, "config.json");
+// macOS/Linux: the keys live here, readable only by the user, never in the profile itself.
+const AGENT_OFFICE_ENV = path.join(AGENT_OFFICE_DIR, "env.sh");
+// The marked block in a zsh/bash profile. Everything between the two lines is ours, and all it
+// holds is SOURCE_ENV_LINE.
+const PROFILE_BEGIN = "# >>> claude-skills: Agent Office keys (managed by install.mjs) >>>";
+const PROFILE_END = "# <<< claude-skills: Agent Office keys <<<";
+const SOURCE_ENV_LINE = 'if [ -f "$HOME/.claude/agent-office/env.sh" ]; then . "$HOME/.claude/agent-office/env.sh"; fi';
+// The first terminal release that loads mods. Older ones skip the plugin's hooks module.
+const MIN_CLAUDE_FOR_MODS = "2.1.287";
 
 // ── Options ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -145,6 +186,7 @@ const KNOWN_FLAGS = [
   "--no-allow-pr-merge",
   "--refresh",
   "--extras",
+  "--decision-model",
   "--accept-defaults",
   "--yes",
   "-y",
@@ -173,6 +215,8 @@ const refresh = has("--refresh");
 const addInstructions = flagValue("--add-instructions");
 const removeInstructions = flagValue("--remove-instructions");
 const extrasArg = flagValue("--extras");
+// Answers Agent Office's decision-model question. Never carries the key itself.
+const decisionModelArg = flagValue("--decision-model");
 const acceptDefaults = has("--accept-defaults") || has("--yes") || has("-y");
 const wantSimple = has("--simple");
 const wantAdvanced = has("--advanced");
@@ -209,7 +253,9 @@ if (unknownFlags.length) {
   } else {
     applySkillLinks(plan);
     applyAgentLinks(plan);
+    applyModLinks(plan);
     applyBetaTools(plan);
+    applyAgentOffice(plan);
     if (plan.instructions) applyInstructionBlocks(plan.instructions, plan.mayRemoveInstructions);
     applyPrMergePermission(plan.prMerge);
     await runExtras(plan.extras, plan.guided);
@@ -278,11 +324,19 @@ function printHelp() {
   console.log("                                you ask for it, on every setup.");
   console.log("  --no-allow-pr-merge           Take that rule away again.");
   console.log("");
-  console.log("  --refresh                     Re-link the skills and agents you already have,");
+  console.log("  --decision-model=<name>       Which decision model Agent Office uses to categorise");
+  console.log("                                work and judge what is related: jev, perplexity or");
+  console.log("                                none. Only used when Agent Office is installed. The");
+  console.log("                                API key is never taken as a flag: in a terminal you");
+  console.log("                                are asked for it, and without one the key must");
+  console.log("                                already be set (TYPESAFE_API_KEY or");
+  console.log("                                PERPLEXITY_API_KEY).");
+  console.log("");
+  console.log("  --refresh                     Re-link the skills, agents and mods you already have,");
   console.log("                                rewrite the instruction blocks you already use,");
   console.log("                                then stop. Adds nothing, removes nothing, asks");
-  console.log("                                nothing. Run it after a git pull. Skills and agents");
-  console.log("                                are links, so their content is already up to date.");
+  console.log("                                nothing. Run it after a git pull. Skills, agents and");
+  console.log("                                mods are links, so their content is already current.");
   console.log("");
   console.log("  --extras=<names>              Also run these other people's installers, once this");
   console.log("                                repo's own skills are in. Comma-separated, 'all', or");
@@ -311,6 +365,16 @@ function printFarewell(plan = {}) {
     return;
   }
   console.log("\n  Done. Start a new Claude session to pick them up.");
+  // A variable set just now reaches only processes started after it, and a terminal that is
+  // already open was started before it.
+  if (plan.keySaved) {
+    console.log(`  Open a new terminal first, so Claude sees ${plan.decisionModel.variable}. Restart Claude Desktop too.`);
+  }
+  // Set by applyAgentOffice when the key is saved but no profile could load it.
+  if (plan.profileInstruction) {
+    console.log("");
+    for (const line of plan.profileInstruction) console.log(`  ${style.yellow(line)}`);
+  }
 
   if (!plan.guided) {
     console.log("");
@@ -409,22 +473,36 @@ async function offerStar() {
 async function buildPlan() {
   const skillGroups = loadSkillGroups();
   const agentGroups = loadAgentGroups();
+  const modGroups = loadModGroups();
   const blocks = loadInstructionBlocks();
   const installedBlocks = readInstalledBlockNames(blocks);
   const interactive = canPrompt() && !acceptDefaults;
   const groupNamed = (name) => skillGroups.find((g) => g.name === name);
   const agentNamed = (name) => agentGroups.find((g) => g.name === name);
+  const modNamed = (name) => modGroups.find((g) => g.name === name);
 
   // Beta covers more than skills, so split the list by kind. Anything named but missing from the
   // repo is dropped, which keeps a stale line in beta-features.txt from breaking the run.
   const betaFeatures = loadBetaFeatures().filter((f) =>
-    f.kind === "skill" ? Boolean(groupNamed(f.name)) : f.kind === "agent" ? Boolean(agentNamed(f.name)) : blocks.some((b) => b.name === f.name),
+    f.kind === "skill"
+      ? Boolean(groupNamed(f.name))
+      : f.kind === "agent"
+        ? Boolean(agentNamed(f.name))
+        : f.kind === "mod"
+          ? Boolean(modNamed(f.name))
+          : blocks.some((b) => b.name === f.name),
   );
   const betaSkills = betaFeatures.filter((f) => f.kind === "skill").map((f) => f.name);
   const betaAgents = betaFeatures.filter((f) => f.kind === "agent").map((f) => f.name);
   const stableAgentGroups = agentGroups.filter((g) => !betaAgents.includes(g.name));
   const stableAgents = stableAgentGroups.map((g) => g.name);
   const linkedAgents = stableAgentGroups.filter((g) => isGroupLinked(g, AGENTS)).map((g) => g.name);
+  // Mods have no checklist of their own: today every mod is beta, and a stable one simply follows
+  // the track's defaults, added to whatever is already linked (the union floor below).
+  const betaMods = betaFeatures.filter((f) => f.kind === "mod").map((f) => f.name);
+  const stableModGroups = modGroups.filter((g) => !betaMods.includes(g.name));
+  const stableMods = stableModGroups.map((g) => g.name);
+  const linkedMods = stableModGroups.filter((g) => isGroupLinked(g, MODS)).map((g) => g.name);
   const betaBlockNames = new Set(betaFeatures.filter((f) => f.kind === "instruction").map((f) => f.name));
   // Everything that is NOT beta is offered in the second question. When nothing is left, that
   // question does not exist and the wizard is one step shorter.
@@ -434,6 +512,8 @@ async function buildPlan() {
   const betaItems = betaFeatures.map((f) => ({
     name: f.name,
     label: f.kind === "instruction" ? blocks.find((b) => b.name === f.name).title : f.name,
+    // A mod with no plugin.json is never linked, ticked or not, so the summary must not promise it.
+    blocked: f.kind === "mod" && !modNamed(f.name).ready && !isGroupLinked(modNamed(f.name), MODS),
   }));
   const extras = uninstall ? [] : loadExtras();
   const stableGroups = skillGroups.filter((g) => !betaSkills.includes(g.name));
@@ -442,7 +522,13 @@ async function buildPlan() {
   // What is already in place, so the checkboxes open showing the current state.
   const activeBeta = betaFeatures
     .filter((f) =>
-      f.kind === "skill" ? isGroupLinked(groupNamed(f.name)) : f.kind === "agent" ? isGroupLinked(agentNamed(f.name), AGENTS) : installedBlocks.has(f.name),
+      f.kind === "skill"
+        ? isGroupLinked(groupNamed(f.name))
+        : f.kind === "agent"
+          ? isGroupLinked(agentNamed(f.name), AGENTS)
+          : f.kind === "mod"
+            ? isGroupLinked(modNamed(f.name), MODS)
+            : installedBlocks.has(f.name),
     )
     .map((f) => f.name);
   const linkedStable = stableGroups.filter((g) => isGroupLinked(g)).map((g) => g.name);
@@ -597,6 +683,7 @@ async function buildPlan() {
   // deprecated.txt rather than a line there plus a defaults edit that is easy to forget.
   const trackSkills = stableGroups.filter((g) => g.defaults[track] && !isDeprecated(g.name)).map((g) => g.name);
   const trackAgents = stableAgentGroups.filter((g) => g.defaults[track] && !deprecatedAgentNames.has(g.name)).map((g) => g.name);
+  const trackMods = stableModGroups.filter((g) => g.defaults[track]).map((g) => g.name);
   const trackBlocks = blocks.filter((b) => b.defaults[track]).map((b) => b.name);
   // Beta stays off on a flag-driven run whatever the track says — an unattended run never
   // enables something still in development. Interactively it is named and labelled in the
@@ -611,6 +698,9 @@ async function buildPlan() {
   let selectedSkills = new Set(uninstall || linkedStable.length ? linkedStable : trackSkills);
   // Agents open the same way. The ones the chosen skills need are added once the skills are known.
   let selectedAgents = new Set(uninstall || linkedAgents.length ? linkedAgents : trackAgents);
+  // Stable mods are never asked about, so they can only be added to, and an uninstall takes away
+  // every one that is linked.
+  const selectedMods = new Set(uninstall ? linkedMods : unionFloor(linkedMods, trackMods));
   // Every skill that will be linked, stable or beta: the set whose needs decide which agents to tick.
   const skillsToLink = () => new Set([...selectedSkills, ...[...selectedBeta].filter((n) => betaSkills.includes(n))]);
   const neededAgents = () => agentsNeededBy(skillsToLink(), skillGroups, agentGroups);
@@ -646,6 +736,39 @@ async function buildPlan() {
     return clashes;
   };
   const agentSummary = () => ({ stable: stableAgents, linked: linkedAgents, selected: selectedAgents, needed: uninstall ? new Map() : neededAgents(), retire: retireAgents, clashes: agentClashes() });
+
+  // Every mod that this run would link, stable or beta. A mod with no plugin.json is left out: it
+  // is listed, and a config note says why, but Claude Code could not load it if it were linked.
+  const modsToLink = () =>
+    uninstall ? new Set() : new Set([...selectedMods, ...[...selectedBeta].filter((n) => betaMods.includes(n))].filter((n) => modNamed(n)?.ready));
+  // The same check linkFolder makes, run before the Ready screen, as for agents.
+  const modClashes = () => {
+    const clashes = new Map();
+    for (const name of modsToLink()) {
+      const file = findModClash(modNamed(name));
+      if (file) clashes.set(name, file);
+    }
+    return clashes;
+  };
+  const modSummary = () => ({ stable: stableMods, linked: linkedMods, selected: selectedMods, linking: modsToLink(), clashes: modClashes() });
+
+  // Agent Office's decision model, decided before the Ready screen like everything else. Asked
+  // only when Agent Office is ARRIVING on this machine — kept as it is, it is not asked again
+  // unless --decision-model says to — and only when it will really be linked.
+  const agentOfficeLinking = () => modsToLink().has(AGENT_OFFICE) && !modClashes().has(AGENT_OFFICE);
+  const agentOfficeArriving = () => agentOfficeLinking() && !isGroupLinked(modNamed(AGENT_OFFICE), MODS);
+  // --uninstall undoes what Agent Office's setup wrote unless the mod is staying: linked, and left
+  // unticked on the removal checklist. Unlinked already (an earlier untick) still counts as going.
+  const agentOfficeCleanup = () =>
+    uninstall &&
+    (selectedBeta.has(AGENT_OFFICE) || selectedMods.has(AGENT_OFFICE) || !modNamed(AGENT_OFFICE) || !isGroupLinked(modNamed(AGENT_OFFICE), MODS));
+  if (decisionModelArg !== undefined && !DECISION_MODELS[decisionModelArg]) {
+    warnConfig(`--decision-model: "${decisionModelArg}" is not jev, perplexity or none — ignored`);
+  }
+  const modelFromFlag = DECISION_MODELS[decisionModelArg] ? decisionModelArg : undefined;
+  // { model, variable, action } — action is "set" (key in hand), "keep" (already set), "missing"
+  // (no key and no way to ask for one), or "none". The key itself rides in `key`, in memory only.
+  let decisionModel = null;
 
   if (interactive) {
     try {
@@ -724,7 +847,10 @@ async function buildPlan() {
                 ? blocks.find((b) => b.name === f.name).summary
                 : f.kind === "agent"
                   ? agentNamed(f.name).description || NO_AGENT_DESCRIPTION
-                  : groupNamed(f.name).description || NO_DESCRIPTION,
+                  : f.kind === "mod"
+                    ? (modNamed(f.name).description || NO_MOD_DESCRIPTION) +
+                      (modNamed(f.name).ready ? "" : "\n\nNot ready to install yet: it has no .claude-plugin/plugin.json.")
+                    : groupNamed(f.name).description || NO_DESCRIPTION,
           })),
           selected: activeBeta,
         });
@@ -760,6 +886,31 @@ async function buildPlan() {
         });
         if (!picked) return null;
         selectedAgents = picked;
+      }
+
+      // — Agent Office's decision model —
+      // Not a numbered step: whether it exists depends on the beta answer, which comes after the
+      // counter was fixed — the same reason the retirement question is not counted.
+      if (!uninstall && (agentOfficeArriving() || (modelFromFlag && agentOfficeLinking()))) {
+        let model = modelFromFlag;
+        if (!model) {
+          screen();
+          model = await chooseAction({
+            heading: "Agent Office: decision model",
+            body: wrap(
+              "Agent Office can hand two jobs to a decision model: sorting what your sessions are working on into categories, and judging whether two pieces of work are related. Pick the one you have a key for, or None to go without.",
+              84,
+            ).map((l) => style.dim(l)),
+            items: [
+              { value: "jev", label: DECISION_MODELS.jev.label, hint: `needs a ${DECISION_MODELS.jev.keyName}` },
+              { value: "perplexity", label: DECISION_MODELS.perplexity.label, hint: `needs a ${DECISION_MODELS.perplexity.keyName}` },
+              { value: "none", label: DECISION_MODELS.none.label, hint: "no key needed" },
+            ],
+          });
+          if (!model) return null;
+        }
+        decisionModel = await askForKey(model, screen);
+        if (!decisionModel) return null;
       }
 
       // — Optional (non-beta) features —
@@ -847,7 +998,7 @@ Runs: ${e.command}`,
       screen();
       const go = await chooseAction({
         heading: `Ready${stepLabel()}`,
-        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary() }),
+        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary(), mods: modSummary(), decisionModel, agentOfficeCleanup: agentOfficeCleanup() }),
         items: [
           { value: "go", label: uninstall ? "Remove them" : "Install", hint: "apply the changes above" },
           { value: "cancel", label: "Cancel", hint: "change nothing" },
@@ -878,7 +1029,20 @@ Runs: ${e.command}`,
       wantInstructions = unionFloor([...installedBlocks], [...trackBlocks.filter((n) => !betaBlockNames.has(n)), ...fromBeta]);
     } else wantInstructions = new Set([...installedBlocks, ...fromBeta]);
 
-    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary() })) {
+    // No key can be asked for here, and none is ever taken as a flag. --decision-model can only
+    // confirm a key that is already set, or say plainly that there is none.
+    if (!uninstall && agentOfficeLinking()) {
+      if (modelFromFlag) {
+        const { variable } = DECISION_MODELS[modelFromFlag];
+        decisionModel = { model: modelFromFlag, variable, action: !variable ? "none" : userVariableIsSet(variable) ? "keep" : "missing" };
+      } else if (agentOfficeArriving()) {
+        warnConfig("Agent Office has no decision model: pass --decision-model=jev|perplexity|none, or run this in a terminal");
+      }
+    } else if (modelFromFlag && !uninstall) {
+      warnConfig("--decision-model: Agent Office is not being installed, so it was ignored");
+    }
+
+    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary(), mods: modSummary(), decisionModel, agentOfficeCleanup: agentOfficeCleanup() })) {
       console.log(`  ${line}`);
     }
     console.log("");
@@ -902,6 +1066,8 @@ Runs: ${e.command}`,
     ...[...selectedAgents].filter((name) => agentNamed(name)),
     ...[...selectedBeta].filter((name) => betaAgents.includes(name)),
   ]);
+  // Mods likewise. A mod that is not ready stays in the set so applyLinks can say it was skipped.
+  const selectedModGroups = new Set([...selectedMods, ...[...selectedBeta].filter((name) => betaMods.includes(name))]);
   return {
     skillGroups,
     selectedGroups,
@@ -910,6 +1076,11 @@ Runs: ${e.command}`,
     selectedAgentGroups,
     betaAgents,
     retireAgents,
+    modGroups,
+    selectedModGroups,
+    betaMods,
+    decisionModel,
+    agentOfficeCleanup: agentOfficeCleanup(),
     selectedBeta,
     newlyEnabledBeta,
     // Removals the user agreed to by name, rather than by clearing a checkbox. applySkillLinks
@@ -935,7 +1106,7 @@ Runs: ${e.command}`,
  * with two rows can never report on only one of them. The optional lines cover only the non-beta
  * blocks, which keeps each feature in exactly one place.
  */
-function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set(), agents = null }) {
+function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set(), agents = null, mods = null, decisionModel = null, agentOfficeCleanup = false }) {
   const verb = uninstall ? "remove" : "install";
   const lines = [];
   const names = (items) => items.map((i) => i.label).join(", ");
@@ -1016,19 +1187,78 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
       if (picked.length) lines.push(`remove beta: ${names(picked)}`);
       if (left.length) lines.push(`leave beta: ${names(left)}`);
     } else {
-      const added = betaItems.filter((i) => selectedBeta.has(i.name) && !activeBeta.includes(i.name));
+      const added = betaItems.filter((i) => selectedBeta.has(i.name) && !activeBeta.includes(i.name) && !i.blocked);
       const kept = betaItems.filter((i) => selectedBeta.has(i.name) && activeBeta.includes(i.name));
       const dropped = betaItems.filter((i) => !selectedBeta.has(i.name) && activeBeta.includes(i.name) && prune.beta);
-      const skipped = betaItems.filter((i) => !selectedBeta.has(i.name) && !(activeBeta.includes(i.name) && prune.beta));
+      const skipped = betaItems.filter((i) => i.blocked || (!selectedBeta.has(i.name) && !(activeBeta.includes(i.name) && prune.beta)));
       if (added.length) lines.push(`install beta: ${names(added)}`);
       if (kept.length) lines.push(`keep beta: ${names(kept)}`);
       if (dropped.length) lines.push(`remove beta: ${names(dropped)}`);
       if (skipped.length) lines.push(`skip beta: ${names(skipped)}`);
+      // Unticking only unlinks the mod. The key is outside ~/.claude/skills and stays put.
+      const savedKeys = dropped.some((i) => i.name === AGENT_OFFICE) ? readAgentOfficeRecord().variables.map((v) => v.name) : [];
+      if (savedKeys.length) lines.push(`  Agent Office's saved ${savedKeys.join(", ")} stays until: node install.mjs --uninstall`);
     }
     // "beta" is jargon, and the guided reader has no checklist hint to read it against. Sits
     // directly under the beta lines it explains.
     if (guided && betaItems.some((i) => selectedBeta.has(i.name))) {
       lines.push(`  beta means still being worked on — it may change or be rough at the edges`);
+    }
+  }
+
+  if (mods) {
+    // Stable mods only; a beta mod is already on the beta lines above.
+    if (uninstall) {
+      const removing = mods.stable.filter((n) => mods.selected.has(n));
+      if (removing.length) lines.push(`remove ${plural(removing.length, "mod")}: ${removing.join(", ")}`);
+    } else {
+      const added = mods.stable.filter((n) => mods.linking.has(n) && !mods.linked.includes(n) && !mods.clashes.has(n));
+      const kept = mods.stable.filter((n) => mods.linking.has(n) && mods.linked.includes(n));
+      if (added.length) lines.push(`install ${plural(added.length, "mod")}: ${added.join(", ")}`);
+      if (kept.length) lines.push(`keep ${plural(kept.length, "mod")}`);
+      for (const [name, file] of mods.clashes) {
+        lines.push(style.yellow(`skip ${name}: something else already lives at`));
+        lines.push(style.yellow(`  ${file}. Move or delete it, then run this again.`));
+      }
+      if (mods.linking.size > mods.clashes.size) for (const line of claudeVersionWarnings()) lines.push(style.yellow(line));
+    }
+  }
+
+  // Named, because it reaches outside ~/.claude: a user environment variable or a shell profile.
+  // Whatever installed.json records, whether or not the mod is still linked.
+  if (agentOfficeCleanup) {
+    const { variables, profile } = readAgentOfficeRecord();
+    if (process.platform === "win32") {
+      for (const { name, preexisting } of variables) {
+        if (!preexisting) lines.push(`remove ${name} from your Windows user environment (Agent Office's setup created it)`);
+        else {
+          lines.push(`leave ${name}: it existed before Agent Office's setup, so it is not removed. That setup`);
+          lines.push(`  replaced your old value with the key you pasted, and the old value cannot be restored.`);
+        }
+      }
+    } else if (variables.length || profile) {
+      lines.push(`remove ${AGENT_OFFICE_ENV}${variables.length ? ` (holds ${variables.map((v) => v.name).join(", ")})` : ""}`);
+      if (profile) lines.push(`  and the marked block in ${profile} that loads it`);
+    }
+  }
+
+  // The key is never on this screen — only the variable's name and what will happen to it.
+  if (decisionModel) {
+    const { model, variable, action } = decisionModel;
+    const label = DECISION_MODELS[model].label;
+    if (action === "none") lines.push(`Agent Office decision model: none`);
+    else if (action === "set") {
+      lines.push(`Agent Office decision model: ${label} — saves your key as ${variable}`);
+      if (process.platform === "win32") lines.push("  in your Windows user environment");
+      else {
+        const profile = profileFile();
+        lines.push(`  in ${AGENT_OFFICE_ENV}, which only you can read,`);
+        lines.push(profile ? `  loaded by a marked block in ${profile}` : "  loaded by one line you add to your shell's startup file (printed at the end)");
+      }
+    } else if (action === "keep") lines.push(`Agent Office decision model: ${label} — keeps the ${variable} already set`);
+    else {
+      lines.push(style.yellow(`note: ${label} needs ${variable}, which is not set, and a key is never taken as a flag.`));
+      lines.push(style.yellow(`  Agent Office runs without a decision model until you set it, or re-run this in a terminal.`));
     }
   }
 
@@ -1170,8 +1400,13 @@ function loadGroups(where) {
     }
   }
   for (const folder of folders) {
-    // A folder with no line still installs on the developer track, exactly as before.
-    if (!claimed.has(folder)) groups.push({ kind: where.kind, name: folder, folders: [folder], description: "", defaults: { dev: true, nontech: false }, needs: [] });
+    if (claimed.has(folder)) continue;
+    // A skill or agent folder with no line still installs on the developer track, exactly as
+    // before. A mod's does not: it changes Claude's own interface, and stable mods get no
+    // checklist, so it would arrive on every developer machine unannounced.
+    const isMod = where === MODS;
+    if (isMod) warnConfig(`${listName}: ./${dirName}/${folder} has no line here, so it is off on every setup — add one to offer it`);
+    groups.push({ kind: where.kind, name: folder, folders: [folder], description: "", defaults: { dev: !isMod, nontech: false }, needs: [] });
   }
   return groups.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -1190,6 +1425,19 @@ function loadAgentGroups() {
     const meta = fs.existsSync(file) ? parseFrontmatter(fs.readFileSync(file, "utf8")).meta : {};
     const tuning = [meta.model, meta.effort].filter(Boolean).join(" · ");
     return { ...group, agentName: meta.name || group.name, tuning };
+  });
+}
+
+/**
+ * The mods, each marked `ready` when every folder has the .claude-plugin/plugin.json that makes
+ * Claude Code load it. One that is not ready is still listed, so it does not vanish from the
+ * checklist, but it is not linked: a plugin folder without its manifest is not a plugin.
+ */
+function loadModGroups() {
+  return loadGroups(MODS).map((group) => {
+    const ready = group.folders.every((f) => fs.existsSync(path.join(repoModsDir, f, ".claude-plugin", "plugin.json")));
+    if (!ready) warnConfig(`mods.txt: ${group.name} has no .claude-plugin/plugin.json yet, so Claude Code could not load it — listed, not linked`);
+    return { ...group, ready };
   });
 }
 
@@ -1484,6 +1732,12 @@ function applyAgentLinks(plan) {
   applyLinks({ where: AGENTS, groups: plan.agentGroups, betaNames: plan.betaAgents, selected: plan.selectedAgentGroups, prune: { stable: plan.prune.agents, beta: plan.prune.beta }, retire: plan.retireAgents });
 }
 
+function applyModLinks(plan) {
+  if (!plan.modGroups.length) return;
+  // No checklist runs for stable mods, so none of them may be pruned; a beta one may, as usual.
+  applyLinks({ where: MODS, groups: plan.modGroups, betaNames: plan.betaMods, selected: plan.selectedModGroups, prune: { stable: false, beta: plan.prune.beta }, retire: new Set() });
+}
+
 /**
  * Link, keep, or unlink every group of one kind. `prune.stable` / `prune.beta` say whether the
  * checklist for that kind ran, which is the only thing that lets an unticked box mean "remove".
@@ -1542,6 +1796,12 @@ function applyLinks({ where, groups, betaNames, selected, prune, retire }) {
         continue;
       }
     }
+    // Linking a mod without its manifest would put a folder in ~/.claude/skills that Claude Code
+    // can neither load as a plugin nor as a skill. The Ready summary already said why.
+    if (!uninstall && where === MODS && !group.ready) {
+      report(group, "skipped", "(no .claude-plugin/plugin.json yet)");
+      continue;
+    }
 
     // A group can cover several folders — an alias like /seatbelts is the same choice, so it is
     // reported once, under the worst thing that happened to any of its folders.
@@ -1561,7 +1821,7 @@ function applyLinks({ where, groups, betaNames, selected, prune, retire }) {
 function report(group, state, note) {
   const colour = state === "PROBLEM" ? style.yellow : state === "skipped" || state === "kept" ? style.dim : style.green;
   const alias = group.folders.length > 1 ? style.dim(` +${group.folders.length - 1} alias`) : "";
-  const kind = group.kind === "agent" ? style.dim(" (agent)") : "";
+  const kind = group.kind === "agent" || group.kind === "mod" ? style.dim(` (${group.kind})`) : "";
   console.log(`  ${colour(state.padEnd(9))} ${group.name}${kind}${alias}${note ? ` ${style.dim(note)}` : ""}`);
 }
 
@@ -1576,7 +1836,7 @@ function report(group, state, note) {
 function refreshInstalled() {
   console.log("  Refreshing what is already installed. Nothing is added or removed.\n");
   let touched = 0;
-  for (const [where, groups] of [[SKILLS, loadSkillGroups()], [AGENTS, loadAgentGroups()]]) {
+  for (const [where, groups] of [[SKILLS, loadSkillGroups()], [AGENTS, loadAgentGroups()], [MODS, loadModGroups()]]) {
     for (const group of groups) {
       if (!isGroupLinked(group, where)) continue;
       touched++;
@@ -1585,7 +1845,7 @@ function refreshInstalled() {
       report(group, outcomes.includes("repaired") ? "repaired" : "ready", "");
     }
   }
-  if (!touched) console.log(`  ${style.dim("No skills or agents from this repo are linked. Run the installer without --refresh first.")}`);
+  if (!touched) console.log(`  ${style.dim("No skills, agents or mods from this repo are linked. Run the installer without --refresh first.")}`);
   const blocks = loadInstructionBlocks();
   if (blocks.length) applyInstructionBlocks(readInstalledBlockNames(blocks), false);
   console.log("");
@@ -1668,6 +1928,20 @@ function findAgentClash(group) {
     return null;
   };
   return walk(globalAgentsDir, 0);
+}
+
+/**
+ * Something that is not a link already sitting where this mod would be linked, or null. That is
+ * someone else's skill or plugin of the same name; it is never touched, and only this mod is
+ * skipped. linkFolder refuses the same case; this lets the Ready summary say so first.
+ */
+function findModClash(group) {
+  for (const folder of group.folders) {
+    const linkPath = path.join(MODS.targetDir, folder);
+    const { existing, existingIsLink } = inspectLink(linkPath, path.join(MODS.sourceDir, folder));
+    if (existing && !existingIsLink) return linkPath;
+  }
+  return null;
 }
 
 /**
@@ -1790,6 +2064,376 @@ function printManualMcpInstructions(name, cfg, distCli, linked) {
       2,
     ),
   );
+}
+
+// ── Agent Office ────────────────────────────────────────────────────────────────────────────────
+// The decision model's API key, put where the script Agent Office runs for decision-model calls
+// gets its environment: on Windows the user environment, on macOS and Linux a private env.sh that
+// a marked block in the shell profile sources. The key travels to PowerShell on stdin, never on a
+// command line, is never written into a profile, and is never printed. Each variable set is
+// recorded in AGENT_OFFICE_RECORD by name, with whether it existed before, so --uninstall can take
+// away exactly what the installer created.
+
+/**
+ * Ask for the chosen model's key. A key already set is offered as keep-or-replace and never
+ * shown. Returns the decision for the plan, or null if the user cancelled.
+ */
+async function askForKey(model, screen) {
+  const { variable, keyName } = DECISION_MODELS[model];
+  if (!variable) return { model, variable: null, action: "none" };
+  if (userVariableIsSet(variable)) {
+    screen();
+    const answer = await chooseAction({
+      heading: `Agent Office: ${keyName}`,
+      body: [style.dim(`${variable} is already set on this machine. Its value is not shown.`)],
+      items: [
+        { value: "keep", label: "Keep it", hint: "use the key that is already set" },
+        { value: "replace", label: "Replace it", hint: "paste a new key" },
+      ],
+      initial: "keep",
+    });
+    if (!answer) return null;
+    if (answer === "keep") return { model, variable, action: "keep" };
+  }
+  screen();
+  const where = process.platform === "win32" ? "your Windows user environment" : `${AGENT_OFFICE_ENV}, a file only you can read,`;
+  const key = await readSecret({
+    heading: `Agent Office: ${keyName}`,
+    body: wrap(
+      `Paste your ${keyName}. It is saved as ${variable} in ${where} once you confirm the install. It is never shown, and never written to this repo.`,
+      84,
+    ).map((l) => style.dim(l)),
+    label: keyName,
+  });
+  if (!key) return null;
+  return { model, variable, action: "set", key };
+}
+
+/** Runs one line of PowerShell with `name` in $env:CLAUDE_SKILLS_VARIABLE, and `input` on stdin. */
+function runPowerShell(script, name, input = "") {
+  return spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    input,
+    encoding: "utf8",
+    env: { ...process.env, CLAUDE_SKILLS_VARIABLE: name },
+  });
+}
+
+/** Is the variable set for this user? Answers yes or no only; the value never leaves the child. */
+function userVariableIsSet(name) {
+  return Boolean(process.env[name]) || storedUserVariable(name);
+}
+
+/**
+ * Is the variable in the store the installer writes to — the Windows user environment, or
+ * env.sh — as opposed to only in this shell?
+ */
+function storedUserVariable(name) {
+  if (process.platform === "win32") {
+    const res = runPowerShell("if ([Environment]::GetEnvironmentVariable($env:CLAUDE_SKILLS_VARIABLE, 'User')) { 'set' }", name);
+    return !res.error && res.stdout.trim() === "set";
+  }
+  return envFileLines().some((l) => l.startsWith(`export ${name}=`));
+}
+
+/**
+ * Did the variable exist in the user's environment before the installer touched it? On Windows
+ * that is the user environment itself. Elsewhere env.sh is ours, so it is the variable arriving
+ * from somewhere else: set in this shell, and not by our file.
+ */
+function variableExistedBefore(name) {
+  if (process.platform === "win32") return storedUserVariable(name);
+  return Boolean(process.env[name]) && !storedUserVariable(name);
+}
+
+/** The lines of env.sh, or [] when there is none. */
+function envFileLines() {
+  try {
+    return fs.readFileSync(AGENT_OFFICE_ENV, "utf8").split("\n").map((l) => l.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Store the key. Returns { ok: false, why } when it could not be stored at all, otherwise
+ * { ok: true, where, profile, manual }: `profile` is the file that now loads env.sh, and `manual`
+ * the lines to show the user when no profile could be written and they must add one themselves.
+ */
+function setUserVariable(name, value) {
+  if (process.platform === "win32") {
+    const res = runPowerShell("[Environment]::SetEnvironmentVariable($env:CLAUDE_SKILLS_VARIABLE, [Console]::In.ReadToEnd(), 'User')", name, value);
+    if (res.error || res.status !== 0) return { ok: false, why: res.error ? res.error.message : `PowerShell exited with code ${res.status}` };
+    return { ok: true, where: "your Windows user environment", profile: null, manual: null };
+  }
+
+  // A symlinked env.sh is the user's own arrangement: never written or chmodded through.
+  if (isSymlink(AGENT_OFFICE_ENV)) {
+    return {
+      ok: false,
+      why: `${AGENT_OFFICE_ENV} is a symlink, so it was not written`,
+      manual: [
+        `${AGENT_OFFICE_ENV} is a symlink, so the key was not saved.`,
+        `To use it, add this line to that file yourself, with your key in place of <key>:`,
+        `  export ${name}='<key>'`,
+      ],
+    };
+  }
+  const exports = envFileLines().filter((l) => l.startsWith("export ") && !l.startsWith(`export ${name}=`));
+  exports.push(`export ${name}='${value.replace(/'/g, `'\\''`)}'`);
+  const text = ["# Agent Office's API keys, written by claude-skills install.mjs. Private: keep it 0600.", ...exports, ""].join("\n");
+  try {
+    fs.mkdirSync(AGENT_OFFICE_DIR, { recursive: true });
+    // Tightened before the key goes in, not after: an existing file keeps its old mode on write.
+    if (fs.existsSync(AGENT_OFFICE_ENV)) fs.chmodSync(AGENT_OFFICE_ENV, 0o600);
+    fs.writeFileSync(AGENT_OFFICE_ENV, text, { mode: 0o600 });
+    fs.chmodSync(AGENT_OFFICE_ENV, 0o600);
+  } catch (err) {
+    return { ok: false, why: err.message };
+  }
+
+  const profile = profileFile();
+  const written = profile ? writeProfileBlock(profile, [SOURCE_ENV_LINE]) : { ok: false };
+  if (written.ok) return { ok: true, where: AGENT_OFFICE_ENV, profile, manual: null };
+  return { ok: true, where: AGENT_OFFICE_ENV, profile: null, manual: manualProfileLines(profile, written.why) };
+}
+
+function isSymlink(file) {
+  try {
+    return fs.lstatSync(file).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** What to print when the profile was not written: the one line the user adds themselves. */
+function manualProfileLines(profile, why) {
+  if (path.basename(process.env.SHELL || "") === "fish") {
+    return [
+      "Your shell is fish, so no profile was changed. To load the key in new terminals, add",
+      "this line to ~/.config/fish/config.fish:",
+      '  if test -f "$HOME/.claude/agent-office/env.sh"; source "$HOME/.claude/agent-office/env.sh"; end',
+    ];
+  }
+  if (profile) {
+    return [`${profile} was not changed (${why}).`, "To load the key in new terminals, add this line to it yourself:", `  ${SOURCE_ENV_LINE}`];
+  }
+  return ["No profile was changed for your shell. To load the key in new terminals, add this", "line to its startup file:", `  ${SOURCE_ENV_LINE}`];
+}
+
+function removeUserVariable(name) {
+  const res = runPowerShell("[Environment]::SetEnvironmentVariable($env:CLAUDE_SKILLS_VARIABLE, $null, 'User')", name);
+  return !res.error && res.status === 0;
+}
+
+/**
+ * The profile a zsh or bash user's terminals read, or null for any other shell, which gets an
+ * instruction instead of an edit. For bash it depends on the platform: Linux terminals open
+ * interactive shells, which read ~/.bashrc, while macOS terminals open login shells, which read
+ * only the FIRST of ~/.bash_profile, ~/.bash_login and ~/.profile that exists — so the block goes
+ * in that one, and ~/.bash_profile is created only when none exists, never to shadow ~/.profile.
+ */
+function profileFile() {
+  const shell = path.basename(process.env.SHELL || "");
+  if (shell === "zsh") return path.join(homedir(), ".zshrc");
+  if (shell !== "bash") return null;
+  if (process.platform !== "darwin") return path.join(homedir(), ".bashrc");
+  const login = [".bash_profile", ".bash_login", ".profile"].map((f) => path.join(homedir(), f));
+  return login.find((f) => fs.existsSync(f)) ?? login[0];
+}
+
+/**
+ * Set our marked block in `file` to `lines`, or take it out when `lines` is empty. A symlinked
+ * profile is not written through — it usually points into a dotfiles repo the user manages — and
+ * any read or write error is returned, not thrown. Returns { ok } or { ok: false, why }.
+ */
+function writeProfileBlock(file, lines) {
+  try {
+    let stat = null;
+    try {
+      stat = fs.lstatSync(file);
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+    }
+    if (stat?.isSymbolicLink()) return { ok: false, why: "it is a symlink" };
+    const text = stat ? fs.readFileSync(file, "utf8") : "";
+    const next = editProfileBlock(text, lines);
+    if (next !== text) fs.writeFileSync(file, next);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, why: err.code === "EACCES" || err.code === "EPERM" ? "it is not writable" : err.message };
+  }
+}
+
+/**
+ * The profile text with our block holding `lines`, or with the block removed entirely when
+ * `lines` is empty. Nothing outside the two marker lines is read or rewritten, and a removed
+ * block takes the blank line that was added before it along with it.
+ */
+function editProfileBlock(text, lines) {
+  const block = lines.length ? [PROFILE_BEGIN, ...lines, PROFILE_END].join("\n") : "";
+  const start = text.indexOf(PROFILE_BEGIN);
+  const end = start === -1 ? -1 : text.indexOf(PROFILE_END, start);
+  if (end === -1) {
+    if (!block) return text;
+    const lead = !text ? "" : text.endsWith("\n") ? "\n" : "\n\n";
+    return `${text}${lead}${block}\n`;
+  }
+  const before = text.slice(0, start);
+  const after = text.slice(end + PROFILE_END.length);
+  if (block) return `${before}${block}${after}`;
+  return `${before.replace(/\n\n$/, "\n")}${after.replace(/^\n/, "")}`;
+}
+
+/** What an earlier run wrote: each variable by name with `preexisting`, and the profile. Unreadable counts as nothing. */
+function readAgentOfficeRecord() {
+  try {
+    const record = JSON.parse(fs.readFileSync(AGENT_OFFICE_RECORD, "utf8"));
+    return {
+      variables: Array.isArray(record.variables)
+        ? record.variables.filter((v) => typeof v?.name === "string").map((v) => ({ name: v.name, preexisting: v.preexisting === true }))
+        : [],
+      profile: typeof record.profile === "string" ? record.profile : null,
+    };
+  } catch {
+    return { variables: [], profile: null };
+  }
+}
+
+/** Returns true when written. */
+function writeAgentOfficeRecord(record) {
+  try {
+    fs.mkdirSync(AGENT_OFFICE_DIR, { recursive: true });
+    fs.writeFileSync(AGENT_OFFICE_RECORD, `${JSON.stringify(record, null, 2)}\n`);
+    return true;
+  } catch (err) {
+    console.log(`  ${style.yellow("WARNING  ")} could not write ${AGENT_OFFICE_RECORD} — ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Set `decisionModel` in the mod's config.json, leaving every other key as it is. A file that is
+ * not a JSON object is left alone rather than rewritten, since that would lose the user's settings.
+ */
+function saveDecisionModel(model) {
+  let config = {};
+  try {
+    config = JSON.parse(fs.readFileSync(AGENT_OFFICE_CONFIG, "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") config = null;
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    console.log(`  ${style.yellow("WARNING  ")} ${AGENT_OFFICE_CONFIG} is not valid JSON, so the decision model was not saved.`);
+    console.log(`            Fix it, or add "decisionModel": "${model}" yourself.`);
+    return;
+  }
+  config.decisionModel = model;
+  try {
+    fs.mkdirSync(AGENT_OFFICE_DIR, { recursive: true });
+    fs.writeFileSync(AGENT_OFFICE_CONFIG, `${JSON.stringify(config, null, 2)}\n`);
+    console.log(`  ${style.green("saved    ")} decision model: ${model} ${style.dim(`(${AGENT_OFFICE_CONFIG})`)}`);
+  } catch (err) {
+    console.log(`  ${style.yellow("WARNING  ")} could not save the decision model — ${err.message}`);
+  }
+}
+
+function applyAgentOffice(plan) {
+  if (uninstall) {
+    if (plan.agentOfficeCleanup) removeAgentOfficeSettings();
+    return;
+  }
+  const decision = plan.decisionModel;
+  if (!decision) return;
+  saveDecisionModel(decision.model);
+  if (decision.action !== "set") return;
+
+  // Ownership is recorded BEFORE the variable is touched, and only the first time: once the
+  // installer has set it, a later run must not mistake its own value for the user's.
+  const record = readAgentOfficeRecord();
+  const isNew = !record.variables.some((v) => v.name === decision.variable);
+  if (isNew) {
+    record.variables.push({ name: decision.variable, preexisting: variableExistedBefore(decision.variable) });
+    if (!writeAgentOfficeRecord(record)) {
+      console.log(`            ${decision.variable} was not saved, so --uninstall cannot get it wrong. Set it yourself.`);
+      return;
+    }
+  }
+  const result = setUserVariable(decision.variable, decision.key);
+  if (!result.ok) {
+    if (isNew) {
+      record.variables = record.variables.filter((v) => v.name !== decision.variable);
+      writeAgentOfficeRecord(record);
+    }
+    console.log(`  ${style.yellow("WARNING  ")} could not save ${decision.variable} — ${result.why}`);
+    if (result.manual) plan.profileInstruction = result.manual;
+    else console.log(`            Set it yourself as a user environment variable, then restart Claude.`);
+    return;
+  }
+  if (result.profile) {
+    record.profile = result.profile;
+    writeAgentOfficeRecord(record);
+  }
+  plan.profileInstruction = result.manual;
+  plan.keySaved = true;
+  console.log(`  ${style.green("saved    ")} ${decision.variable} ${style.dim(`(${result.where})`)}`);
+}
+
+/** Undo exactly what AGENT_OFFICE_RECORD says was written, then remove the record. */
+function removeAgentOfficeSettings() {
+  if (!fs.existsSync(AGENT_OFFICE_RECORD)) return;
+  const { variables, profile } = readAgentOfficeRecord();
+  if (process.platform === "win32") {
+    for (const { name, preexisting } of variables) {
+      if (preexisting) {
+        console.log(`  ${style.dim("kept     ")} ${name} ${style.dim("(it existed before Agent Office's setup, which replaced your old value with the key you pasted)")}`);
+      } else if (removeUserVariable(name)) {
+        console.log(`  ${style.green("removed  ")} ${name} ${style.dim("(your Windows user environment)")}`);
+      } else {
+        console.log(`  ${style.yellow("WARNING  ")} could not remove ${name} from your user environment — remove it yourself.`);
+      }
+    }
+  } else {
+    try {
+      if (isSymlink(AGENT_OFFICE_ENV)) {
+        console.log(`  ${style.dim("kept     ")} ${AGENT_OFFICE_ENV} ${style.dim("(a symlink this installer did not make)")}`);
+      } else if (fs.existsSync(AGENT_OFFICE_ENV)) {
+        fs.rmSync(AGENT_OFFICE_ENV);
+        console.log(`  ${style.green("removed  ")} ${variables.map((v) => v.name).join(", ") || "the Agent Office keys"} ${style.dim(`(${AGENT_OFFICE_ENV})`)}`);
+      }
+    } catch (err) {
+      console.log(`  ${style.yellow("WARNING  ")} could not remove ${AGENT_OFFICE_ENV} — ${err.message}. Delete it yourself.`);
+    }
+    if (profile && fs.existsSync(profile)) {
+      const result = writeProfileBlock(profile, []);
+      if (result.ok) console.log(`  ${style.green("removed  ")} the block that loaded it ${style.dim(`(${profile})`)}`);
+      else console.log(`  ${style.yellow("WARNING  ")} ${profile} was not changed (${result.why}). Remove the Agent Office block from it yourself.`);
+    }
+  }
+  try {
+    fs.rmSync(AGENT_OFFICE_RECORD, { force: true });
+    // The folder may also hold the mod's own data; it goes only if nothing else is in it.
+    fs.rmdirSync(AGENT_OFFICE_DIR);
+  } catch {
+    // not empty
+  }
+}
+
+/**
+ * The Ready-summary note when the terminal's Claude Code cannot load mods: not found, or older
+ * than MIN_CLAUDE_FOR_MODS. One fixed command string, so the shell is given nothing to parse but
+ * our own text.
+ */
+function claudeVersionWarnings() {
+  const res = spawnSync("claude --version", { shell: true, encoding: "utf8" });
+  const found = !res.error && res.status === 0 && /(\d+)\.(\d+)\.(\d+)/.exec(res.stdout);
+  if (!found) {
+    return [`note: the claude command was not found. Mods need Claude Code ${MIN_CLAUDE_FOR_MODS} or newer;`, "  check it before relying on them."];
+  }
+  const have = found.slice(1).map(Number);
+  const need = MIN_CLAUDE_FOR_MODS.split(".").map(Number);
+  const older = have[0] - need[0] || have[1] - need[1] || have[2] - need[2];
+  if (older >= 0) return [];
+  return [`note: Claude Code ${have.join(".")} is installed, and mods need ${MIN_CLAUDE_FOR_MODS} or newer.`, "  Update it (claude update) or the mod will not load."];
 }
 
 // ── The ship-it merge permission ────────────────────────────────────────────────────────────────
