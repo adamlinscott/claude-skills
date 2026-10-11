@@ -86,6 +86,58 @@ test("the card: role and agent type, status and for how long, what it is doing, 
   });
 });
 
+test("write bubbles: amber while writing a file, never red for the agent's own edits, none without a file", () => {
+  const m = office([{ id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", writing: "lib/a.mjs" }, { id: "w2", writing: "lib/b.mjs" }, { id: "w3" }] }] }]);
+  m.agents.find((a) => a.id === "w3").doing = { kind: "write", since: m.generatedAt };
+  m.meaning.conflicts = [{ file: "lib/b.mjs", agents: ["w2"], by: "source" }];
+  const scene = layout(m, viewer(m, "s-a"));
+  assert.deepEqual(who(scene, "w1").bubble, { file: "lib/a.mjs", clash: false });
+  assert.deepEqual(who(scene, "w2").bubble, { file: "lib/b.mjs", clash: false });
+  assert.equal(who(scene, "w3").bubble, null);
+  assert.equal(who(scene, "s-a:lead").bubble, null);
+  assert.ok(!who(scene, "w2").card.lines.some((l) => l.startsWith("possible conflict")));
+});
+
+test("write bubbles: red when someone in another room edited the file lately, and the card says who and where", () => {
+  const m = office([
+    { id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", writing: "lib/wizard.mjs" }] }] },
+    { id: "b", sessions: [{ id: "s-b", status: "idle", lead: "idle", team: [{ id: "w9", status: "done" }] }] },
+  ]);
+  m.meaning.conflicts = [{ file: "lib/wizard.mjs", agents: ["w1", "w9"], by: "rules" }];
+  const scene = layout(m, viewer(m, "s-a"), { touchedWindowMinutes: 45 });
+  assert.deepEqual(who(scene, "w1").bubble, { file: "lib/wizard.mjs", clash: true });
+  assert.deepEqual(who(scene, "w1").card.lines.slice(2, 4), ["writing lib/wizard.mjs", "possible conflict: also edited in the last 45m by worker in Room b"]);
+});
+
+test("info icon: an agent with findings shows it, and its card holds the report's first lines, cut with …", () => {
+  const report = ["Findings:", "", "1. The wizard writes the config twice when the folder already exists.", ...Array.from({ length: 9 }, (_, i) => `${i + 2}. Another thing.`)].join("\n");
+  const m = office([{ id: "a", sessions: [{ id: "s-a", team: [{ id: "v1", type: "reviewer", role: "reviewer", status: "done", report }, { id: "w1" }] }] }]);
+  const scene = layout(m, viewer(m, "s-a"));
+  assert.equal(who(scene, "v1").info, true);
+  assert.equal(who(scene, "w1").info, false);
+  assert.deepEqual(who(scene, "v1").card.lines.slice(2), [
+    "Findings:",
+    "1. The wizard writes the config twice when",
+    "the folder already exists.",
+    "2. Another thing.",
+    "3. Another thing.",
+    "4. Another thing.",
+    "5. Another thing.",
+    "6. Another thing.…",
+  ]);
+  assert.ok(who(scene, "v1").card.lines.every((l) => l.length <= 44));
+});
+
+test("folding: an idle room whose reviewer still has findings stays open, dimmed", () => {
+  const m = office([
+    { id: "mine", sessions: [{ id: "s-m" }] },
+    { id: "read", sessions: [{ id: "s-r", status: "idle", lead: "idle", team: [{ id: "v1", type: "reviewer", role: "reviewer", status: "done", report: "Looks fine." }] }] },
+  ]);
+  const room = layout(m, viewer(m, "s-m")).rooms.find((r) => r.id === "room:read");
+  assert.equal(room.folded, false);
+  assert.equal(room.idle, true);
+});
+
 test("fitting rows: open rooms fold from the last, then rooms past the bottom are counted, not drawn", () => {
   const rooms = ["a", "b", "c", "d"].map((id) => ({ id, sessions: [{ id: "s-" + id, team: [{ id: "w-" + id }] }] }));
   const m = office(rooms);

@@ -10,6 +10,15 @@ const m = office([
   { id: "b", sessions: [{ id: "s-b", lead: "idle", team: [{ id: "r1", type: "researcher", role: "researcher", status: "failed" }] }] },
 ]);
 const scene = layout(m, viewerFor(m, "s-a"), { columns: 90 });
+// Two agents in two rooms writing the same file, one writing a file of its own, and two reviewers
+// with findings, one of them failed.
+const report = Array.from({ length: 12 }, (_, i) => `${i + 1}. The wizard writes the config twice when the folder already exists.`).join("\n");
+const busy = office([
+  { id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", writing: "lib/wizard.mjs" }, { id: "w2", writing: "README.md" }, { id: "v1", type: "reviewer", role: "reviewer", status: "done", report }] }] },
+  { id: "b", sessions: [{ id: "s-b", team: [{ id: "w9", writing: "lib/wizard.mjs" }, { id: "v9", type: "reviewer", role: "reviewer", status: "failed", report: "Ran out of time." }] }] },
+]);
+busy.meaning.conflicts = [{ file: "lib/wizard.mjs", agents: ["w1", "w9"], by: "rules" }];
+const busyScene = layout(busy, viewerFor(busy, "s-a"), { columns: 90 });
 // Element constructors that record what they were given.
 const el = new Proxy({}, { get: (_, type) => (props) => ({ type, props }) });
 
@@ -42,6 +51,14 @@ test("desktop: a keyed hover box over every seat, holding that person's card", (
   assert.equal(card.props.children[0].props.children[0], scene.people[1].card.title);
 });
 
+test("desktop: write bubbles, red for a possible conflict, and info icons are in the SVG", () => {
+  const svg = renderSvg(busyScene);
+  assert.equal((svg.match(/class="bub c"/g) || []).length, 2);
+  assert.equal((svg.match(/class="bub w"/g) || []).length, 1);
+  assert.equal((svg.match(/class="info-c"/g) || []).length, 2);
+  assert.ok(svg.includes(">✎ wizard.m…<") && svg.includes(">✎ README.md<"));
+});
+
 test("terminal: every person is a dot and a role letter, a waiting arrow shifts with the tick, the same every time", () => {
   const a = renderCells(scene, 0);
   assert.deepEqual(a, renderCells(scene, 0));
@@ -59,6 +76,26 @@ test("terminal: every person is a dot and a role letter, a waiting arrow shifts 
   assert.deepEqual([arrow(a), arrow(renderCells(scene, 1)), arrow(renderCells(scene, 2))], ["›··", "·›·", "··›"]);
 });
 
+test("terminal: ✎ and the file's name above a writer, coloured by clash, and i beside a reviewer with findings", () => {
+  const cells = renderCells(busyScene);
+  const rows = text(cells);
+  const by = Object.fromEntries(busyScene.people.map((p) => [p.id, p]));
+  const above = (p) => rows[p.y - 1].slice(p.x - 3, p.x + 7);
+  assert.equal(above(by.w1), "✎wizard.m…");
+  assert.equal(above(by.w2), "✎README.md");
+  assert.equal(rows[by.v1.y].slice(by.v1.x, by.v1.x + 3), "●Vi");
+  assert.equal(rows[by.v9.y].slice(by.v9.x, by.v9.x + 4), "●V×i");
+  const words = new Uint32Array(Uint8Array.from(atob(cells.cells), (c) => c.charCodeAt(0)).buffer);
+  const ink = (p) => words[((p.y - 1) * cells.columns + p.x - 3) * 3 + 1];
+  assert.deepEqual([ink(by.w1), ink(by.w9), ink(by.w2)], [0xf07d61, 0xf07d61, 0xf3c24f]);
+});
+
+test("terminal: the selected person's detail is cut to the rows kept for it", () => {
+  const detail = (rows) => drawTerminal(busyScene, el, { selected: "v1", detailRows: rows }).props.children.slice(1);
+  assert.ok(detail(Infinity).length > 8);
+  assert.equal(detail(5).length, 5);
+});
+
 test("terminal: a focusable label per person, and the selected person's detail under the plan", () => {
   const tree = drawTerminal(scene, el, { selected: "w1" });
   const [plan, ...detail] = tree.props.children;
@@ -74,7 +111,8 @@ test("terminal: a focusable label per person, and the selected person's detail u
 
 test("desktop: every hover card is wide enough for its text and stays inside the plan", () => {
   const small = layout(m, viewerFor(m, "s-a"), { columns: 40 });
-  for (const s of [scene, small]) {
+  const busySmall = layout(busy, viewerFor(busy, "s-a"), { columns: 40 });
+  for (const s of [scene, small, busyScene, busySmall]) {
     for (const seat of drawDesktop(s, el).props.children.slice(1)) {
       const card = seat.props.children.find((c) => c.props.hover).props;
       const x = seat.props.left + card.left;
@@ -82,6 +120,21 @@ test("desktop: every hover card is wide enough for its text and stays inside the
       assert.ok(card.width >= 12, "wide enough to read");
       assert.ok(x >= 0 && x + card.width <= s.w, `inside the plan's width: ${x}..${x + card.width} of ${s.w}`);
       assert.ok(y >= 0, "not above the plan");
+      // Its rows as drawDesktop counts them: each line wrapped inside the border and padding.
+      const texts = card.children.map((t) => t.props.children[0]);
+      const h = texts.reduce((n, l) => n + Math.max(1, Math.ceil(l.length / (card.width - 4))), 0) + 2;
+      assert.ok(y + h <= s.h, `inside the plan's height: ${y}..${y + h} of ${s.h}`);
     }
   }
+});
+
+test("desktop: a report card taller than the plan is cut to it, ending in …", () => {
+  const one = office([{ id: "a", sessions: [{ id: "s-a", team: [{ id: "v1", type: "reviewer", role: "reviewer", status: "done", report }] }] }]);
+  const short = layout(one, viewerFor(one, "s-a"));
+  const seat = drawDesktop(short, el).props.children.find((c) => c.props.key === "seat:v1");
+  const card = seat.props.children.find((c) => c.props.hover).props;
+  const texts = card.children.map((t) => t.props.children[0]);
+  assert.equal(texts.length, short.h - 2);
+  assert.ok(texts.length < 1 + short.people.find((p) => p.id === "v1").card.lines.length);
+  assert.equal(texts.at(-1), "…");
 });

@@ -17,6 +17,8 @@ const ROOM_MIN_W = 40;
 const HEAD_H = 3; // a room's title row, its small print and a blank row
 const FOLD_W = 34;
 const FOLD_H = 3; // a folded room: its frame round one line
+const CARD_TEXT = 44; // a card's text width: the Desktop card is at most 48 columns, less its border and padding
+const REPORT_LINES = 8; // a report's lines on the card; the full text is /office's (#52)
 
 // How each status is drawn. The viewer's own lead is drawn as "you" whatever its status.
 const LOOK = { working: "work", done: "ok", idle: "idle", stalled: "stall", failed: "fail", stopped: "stop" };
@@ -32,16 +34,18 @@ export function viewerFor(model, sessionId) {
  *   { w, h, order, hidden,
  *     rooms:  [{ id, x, y, w, h, title, sub, you, idle, folded }],
  *     tables: [{ x, y, w }],                       two rows tall
- *     people: [{ id, x, y, role, look, label, card: { title, lines } }],
+ *     people: [{ id, x, y, role, look, label, bubble: { file, clash } | null, info, card: { title, lines } }],
  *     lines:  [{ from: waiter id, to: agent id }]  only between people drawn }
  *
  * columns: the width to fill. rows: the height to fit (the terminal's pane); rooms past it fold,
  *          then drop, counted in `hidden`. order: the room ids in the order the host first saw
  *          them; the scene's `order` adds new rooms at the end, for the host to pass next time.
  * now:     ms since the epoch, for the idle times and the cards; the model's own time by default.
+ * touchedWindowMinutes: the engine's window for a possible conflict, for the card's wording. The
+ *          model doesn't carry it, so it is config.json's default unless the host passes it.
  */
-export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt) } = {}) {
-  const office = index(model, viewer, now);
+export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30 } = {}) {
+  const office = index(model, viewer, now, touchedWindowMinutes);
   const seen = [...order, ...model.rooms.map((r) => r.id).filter((id) => !order.includes(id))];
   const rank = new Map(seen.map((id, i) => [id, i]));
   const rooms = [...model.rooms].sort((a, b) => rank.get(a.id) - rank.get(b.id));
@@ -96,8 +100,9 @@ function place(office, plan, width) {
 }
 
 // The model looked up by id once, for the room drawing.
-function index(model, viewer, now) {
+function index(model, viewer, now, window) {
   const sessions = new Map(model.sessions.map((s) => [s.id, s]));
+  const rooms = new Map(model.rooms.flatMap((r) => r.sessions.map((id) => [id, r]))); // session id → its room
   const agents = new Map(model.agents.map((a) => [a.id, a]));
   const team = new Map(); // session id → its subagents, in the model's order
   for (const a of model.agents) {
@@ -105,16 +110,22 @@ function index(model, viewer, now) {
     if (!team.has(a.session)) team.set(a.session, []);
     team.get(a.session).push(a);
   }
-  return { sessions, agents, team, viewer, now };
+  const conflicts = new Map(); // file → everyone who edited it inside the touched window
+  for (const c of model.meaning.conflicts) conflicts.set(c.file, [...(conflicts.get(c.file) || []), ...c.agents]);
+  const findings = new Set(model.meaning.findings.map((f) => f.report));
+  const reports = new Map(); // agent id → its latest report
+  for (const r of model.reports) if (!reports.has(r.agent) || r.at >= reports.get(r.agent).at) reports.set(r.agent, r);
+  return { sessions, rooms, agents, team, conflicts, findings, reports, viewer, now, window };
 }
 
-// A room folds when its sessions are idle and none of its agents is working or stalled.
+// A room folds when its sessions are idle, none of its agents is working or stalled, and none has
+// findings still to read.
 function restful(office, room) {
   return room.sessions.every((id) => {
     const s = office.sessions.get(id);
     if (s.status !== "idle") return false;
     const people = [office.agents.get(s.lead), ...(office.team.get(id) || [])].filter(Boolean);
-    return !people.some((a) => a.status === "working" || a.status === "stalled");
+    return !people.some((a) => a.status === "working" || a.status === "stalled" || office.findings.has(a.id));
   });
 }
 
@@ -149,7 +160,7 @@ function drawRoom(scene, office, room, fold, x, y, width) {
   const you = room.sessions.includes(office.viewer.session);
   const idle = sessions.every((s) => s.status === "idle");
   const since = Math.max(...sessions.map((s) => Date.parse(s.lastActive)));
-  const title = room.title || sessions.map((s) => s.title).filter(Boolean).join(" + ") || "Untitled session";
+  const title = roomTitle(office, room);
   let sub;
   if (fold) sub = idle ? `idle ${duration(office.now - since)} · lights off` : "folded to fit";
   else sub = sessions.map((s) => [s.branch, folderName(s.checkout)].filter(Boolean).join(" · ")).join("  |  ") + (idle ? `  ·  idle ${duration(office.now - since)}` : "");
@@ -175,24 +186,71 @@ function drawRoom(scene, office, room, fold, x, y, width) {
   }
 }
 
+function roomTitle(office, room) {
+  return room.title || room.sessions.map((id) => office.sessions.get(id).title).filter(Boolean).join(" + ") || "Untitled session";
+}
+
+function labelOf(office, a) {
+  if (a.startedBy === null) return a.session === office.viewer.session ? "you" : "lead";
+  return a.agentType || a.role || "other";
+}
+
 function person(office, a, session, x, y) {
   const you = a.startedBy === null && a.session === office.viewer.session;
-  const role = you ? "you" : a.role || "other";
-  const label = you ? "you" : a.startedBy === null ? "lead" : a.agentType || role;
-  return { id: a.id, x, y, role, look: you ? "you" : LOOK[a.status] || "idle", label, card: card(office, a, session, label) };
+  const label = labelOf(office, a);
+  // A write bubble turns red when anyone else, in any room, edited the file lately: never for the
+  // agent's own edits.
+  const file = a.doing && a.doing.kind === "write" ? a.doing.file : null;
+  const others = file ? (office.conflicts.get(file) || []).filter((id) => id !== a.id) : [];
+  return {
+    id: a.id,
+    x,
+    y,
+    role: you ? "you" : a.role || "other",
+    look: you ? "you" : LOOK[a.status] || "idle",
+    label,
+    bubble: file ? { file, clash: others.length > 0 } : null,
+    info: office.findings.has(a.id),
+    card: card(office, a, session, label, others),
+  };
 }
 
 // The hover card (the terminal's detail lines): role and agent type, status and for how long,
-// what it is doing, its description, and its own worktree when it has one.
-function card(office, a, session, label) {
+// what it is doing and who else edited that file lately, its description, its own worktree when
+// it has one, and the start of its report when that is a finding.
+function card(office, a, session, label, others) {
   const lines = [];
   lines.push(`role ${a.role || "other"}${a.agentType ? ` · type ${a.agentType}` : ""}`);
   lines.push(`${a.status} for ${duration(office.now - Date.parse(a.statusSince))}`);
   if (a.doing) lines.push(`${DOING[a.doing.kind] || a.doing.kind}${a.doing.file ? " " + a.doing.file : ""}`);
+  for (const id of others) {
+    const b = office.agents.get(id);
+    const where = b && office.rooms.get(b.session);
+    lines.push(`possible conflict: also edited in the last ${office.window}m by ${b ? labelOf(office, b) : id}${where ? " in " + roomTitle(office, where) : ""}`);
+  }
   const description = a.extra && typeof a.extra.description === "string" ? a.extra.description : null;
   if (description) lines.push(description);
   if (a.checkout && a.checkout !== session.checkout) lines.push(`own worktree: ${[a.branch, a.checkout].filter(Boolean).join(" · ")}`);
+  if (office.findings.has(a.id) && office.reports.has(a.id)) lines.push(...reportLines(office.reports.get(a.id).text));
   return { title: label, lines };
+}
+
+// A report's first lines, wrapped to the card's text width at spaces, its blank lines left out,
+// ending in "…" when there is more.
+function reportLines(text) {
+  const out = [];
+  for (const line of String(text).split(/\r?\n/)) {
+    let rest = line.trimEnd();
+    while (rest.trim() && out.length <= REPORT_LINES) {
+      let cut = rest.length <= CARD_TEXT ? rest.length : rest.lastIndexOf(" ", CARD_TEXT);
+      if (cut < 1 || !rest.slice(0, cut).trim()) cut = CARD_TEXT;
+      out.push(rest.slice(0, cut).trimEnd());
+      rest = rest.slice(cut).trimStart();
+    }
+  }
+  if (out.length <= REPORT_LINES) return out;
+  const last = out[REPORT_LINES - 1];
+  return [...out.slice(0, REPORT_LINES - 1), (last.length < CARD_TEXT ? last : last.slice(0, CARD_TEXT - 1)) + "…"];
 }
 
 const DOING = { write: "writing", read: "reading", run: "running a command", search: "searching", talk: "talking" };

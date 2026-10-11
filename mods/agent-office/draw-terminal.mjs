@@ -16,6 +16,8 @@ const INK = {
   stall: 0xc79be0,
   fail: 0xc79be0,
   stop: 0x7d908c,
+  clash: 0xf07d61,
+  info: 0x7aa7f5,
   youWash: 0x1b3033,
   table: 0x24343a,
 };
@@ -25,6 +27,7 @@ const MARK = { stall: "!", fail: "×", stop: "■" };
 const PHASES = ["›··", "·›·", "··›"];
 
 const clip = (t, n) => ([...t].length > n ? [...t].slice(0, Math.max(0, n - 1)).join("") + "…" : t);
+const base = (file) => file.split(/[\\/]/).pop();
 
 /** scene, tick → { columns, rows, cells }: the Raster's props, cells as RasterProps' base64. */
 export function renderCells(scene, tick = 0) {
@@ -65,6 +68,9 @@ export function renderCells(scene, tick = 0) {
   for (const p of scene.people) {
     put(p.x, p.y, "●" + (GLYPH[p.role] || "?"), INK[p.look]);
     if (MARK[p.look]) put(p.x + 2, p.y, MARK[p.look], INK[p.look === "stop" ? "dim" : "stall"]);
+    if (p.info) put(p.x + (MARK[p.look] ? 3 : 2), p.y, "i", INK.info);
+    // The write bubble: the file's name on the row above the figure, amber, or red for a clash.
+    if (p.bubble) put(p.x - 3, p.y - 1, "✎" + clip(base(p.bubble.file), 9), p.bubble.clash ? INK.clash : INK.work);
     if (awaited.has(p.id)) put(p.x - 3, p.y, PHASES[tick % PHASES.length], INK.dim);
     put(p.x - 3, p.y + 1, clip(p.label, 10), p.role === "you" ? INK.you : INK.dim);
   }
@@ -81,9 +87,9 @@ export function renderCells(scene, tick = 0) {
  * between people, then the selected person's detail under the plan.
  *
  * el: the surface's elements ({ Box, Text, Raster, Button }). selected: an agent id or null.
- * onSelect(id): what a press on a person runs.
+ * onSelect(id): what a press on a person runs. detailRows: the rows the detail is cut to.
  */
-export function drawTerminal(scene, el, { tick = 0, selected = null, onSelect = () => {} } = {}) {
+export function drawTerminal(scene, el, { tick = 0, selected = null, onSelect = () => {}, detailRows = Infinity } = {}) {
   const { Box, Text, Raster, Button } = el;
   const plan = renderCells(scene, tick);
   const seats = scene.people.map((p) =>
@@ -106,7 +112,7 @@ export function drawTerminal(scene, el, { tick = 0, selected = null, onSelect = 
   );
   const rows = [Box({ position: "relative", children: [Raster({ key: "plan", ...plan }), ...seats] })];
   const who = scene.people.find((p) => p.id === selected);
-  if (who) rows.push(...detailLines(who).map((line, i) => Text({ bold: i === 0, wrap: "truncate-end", children: [line] })));
+  if (who) rows.push(...detailLines(who).slice(0, detailRows).map((line, i) => Text({ bold: i === 0, wrap: "truncate-end", children: [line] })));
   return Box({ flexDirection: "column", children: rows });
 }
 

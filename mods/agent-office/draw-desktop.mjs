@@ -18,9 +18,9 @@ const SANS = "system-ui,'Segoe UI',Arial,sans-serif";
 // The prototype's colours, light and dark.
 const STYLE = `
 :root{--ground:#e7eae5;--sheet:#f5f6f2;--ink:#1a2528;--ink-2:#4d5c5f;--rule:#bcc6c1;--wall:#2b3a3e;--table:#d6dcd6;
---lamp:#e2a91f;--ok:#2f8a55;--you:#2c6d71;--you-wash:rgba(44,109,113,.10);--stall:#9a5ab8}
+--lamp:#e2a91f;--ok:#2f8a55;--you:#2c6d71;--you-wash:rgba(44,109,113,.10);--stall:#9a5ab8;--clash:#c4462e;--info:#2e64c8;--bubble-ink:#1a1a12}
 @media (prefers-color-scheme:dark){:root{--ground:#0f1618;--sheet:#152024;--ink:#e3eae6;--ink-2:#9db0ac;--rule:#30444a;--wall:#c9d6d2;
---table:#22323a;--lamp:#f3c24f;--ok:#6cc28a;--you:#71bdb9;--you-wash:rgba(113,189,185,.12);--stall:#c79be0}}
+--table:#22323a;--lamp:#f3c24f;--ok:#6cc28a;--you:#71bdb9;--you-wash:rgba(113,189,185,.12);--stall:#c79be0;--clash:#f07d61;--info:#7aa7f5}}
 .wall{fill:none;stroke:var(--wall);stroke-width:2}
 .room-you{fill:var(--you-wash)}.room-dim{fill:var(--ground);opacity:.6}
 .table{fill:var(--table);stroke:var(--rule)}
@@ -38,7 +38,10 @@ const STYLE = `
 .acc-ring{fill:var(--sheet);fill-opacity:.55;stroke:var(--ink);stroke-width:1.4}
 .acc-star{fill:var(--lamp);stroke:var(--ink);stroke-width:.6}
 .badge{fill:var(--sheet);stroke:var(--ink);stroke-width:.8}.badge-t{font:700 9px ${SANS};fill:var(--ink)}
-.stop-sq{fill:var(--ink-2)}`;
+.stop-sq{fill:var(--ink-2)}
+.bub{stroke:var(--wall);stroke-width:.8}.bub.w{fill:var(--lamp)}.bub.c{fill:var(--clash)}
+.bub-t{font:700 10px ${FONT};fill:var(--bubble-ink)}
+.info-c{fill:var(--info)}.info-t{font:700 10px Georgia,serif;fill:var(--sheet)}`;
 
 // The profile silhouettes: one body, one accessory per role (#46).
 const BODY = `<g class="body"><circle cx="12" cy="8.6" r="4.6"/><path d="M2.6 23.4c0-5.6 4.2-9 9.4-9s9.4 3.4 9.4 9z"/></g>`;
@@ -58,6 +61,7 @@ const SYMBOLS = Object.entries(ACCESSORY)
 const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const clip = (t, n) => ([...t].length > n ? [...t].slice(0, Math.max(0, n - 1)).join("") + "…" : t);
 const px = (n) => Math.round(n * 10) / 10;
+const base = (file) => file.split(/[\\/]/).pop();
 
 // A person's figure is two cells wide (the terminal's dot and letter); its centre in pixels.
 const centre = (p) => [px((p.x + 1) * CELL.w), px((p.y + 0.5) * CELL.h)];
@@ -100,6 +104,20 @@ export function renderSvg(scene) {
       out.push(`<circle class="badge" cx="${px(cx + 11)}" cy="${px(cy - 15)}" r="5.5"/><text class="badge-t" x="${px(cx + 11)}" y="${px(cy - 11.8)}" text-anchor="middle">${p.look === "fail" ? "×" : "!"}</text>`);
     }
     if (p.look === "stop") out.push(`<rect class="stop-sq" x="${px(cx + 7)}" y="${px(cy - 19)}" width="8" height="8" rx="1"/>`);
+    // The info icon sits where a status mark would, and beside it when there is one.
+    if (p.info) {
+      const ix = cx + (["stall", "fail", "stop"].includes(p.look) ? 24 : 12);
+      out.push(`<circle class="info-c" cx="${px(ix)}" cy="${px(cy - 15)}" r="6.5"/><text class="info-t" x="${px(ix)}" y="${px(cy - 11.5)}" text-anchor="middle">i</text>`);
+    }
+    if (p.bubble) {
+      // In the row above the figure, its tail on the figure; kept within the seat's own columns so
+      // neighbouring bubbles and the room's wall stay clear. Nine letters, as on the terminal.
+      const t = "✎ " + clip(base(p.bubble.file), 9);
+      const bw = [...t].length * 6.4 + 12;
+      const bx = Math.max(cx - bw / 2, (p.x - 3) * CELL.w);
+      const by = (p.y - 1) * CELL.h - 1;
+      out.push(`<path class="bub ${p.bubble.clash ? "c" : "w"}" d="M${px(bx + 3)} ${px(by)}h${px(bw - 6)}a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H${px(cx + 3)}l-3 3-3-3H${px(bx + 3)}a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3z"/><text class="bub-t" x="${px(bx + bw / 2)}" y="${px(by + 10.5)}" text-anchor="middle">${esc(t)}</text>`);
+    }
     out.push(`<text class="t lab${p.role === "you" ? " youc" : ""}" x="${cx}" y="${px((p.y + 1) * CELL.h + 13)}" text-anchor="middle">${esc(clip(p.label, 12))}</text>`);
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><style>${STYLE}</style><defs>${SYMBOLS}</defs>${out.join("")}</svg>`;
@@ -118,10 +136,15 @@ export function drawDesktop(scene, el) {
     const seat = { top: p.y - 1, left: p.x - 3, w: 9, h: 3 };
     // The card is sized to its text and kept inside the plan: anything past the plan's edge makes
     // the pane scroll and clips the card.
-    const lines = [p.card.title, ...p.card.lines];
+    let lines = [p.card.title, ...p.card.lines];
     const cardW = Math.min(Math.max(...lines.map((l) => l.length)) + 4, Math.max(12, Math.min(48, scene.w)));
     // Border and padding take four columns; a long line (a description) wraps inside the rest.
-    const cardH = lines.reduce((n, l) => n + Math.max(1, Math.ceil(l.length / (cardW - 4))), 0) + 2;
+    const rowsOf = (l) => Math.max(1, Math.ceil(l.length / (cardW - 4)));
+    // A card taller than the plan (a report on a short plan) is cut to it, ending in "…".
+    let kept = 0;
+    for (let n = 0; kept < lines.length && n + rowsOf(lines[kept]) <= Math.max(1, scene.h) - 2; kept++) n += rowsOf(lines[kept]);
+    if (kept < lines.length) lines = [...lines.slice(0, Math.max(1, kept - 1)), "…"];
+    const cardH = lines.reduce((n, l) => n + rowsOf(l), 0) + 2;
     let left = seat.w;
     if (seat.left + left + cardW > scene.w) left = -cardW;
     if (seat.left + left < 0) left = Math.max(-seat.left, Math.min(0, scene.w - cardW - seat.left));
@@ -147,8 +170,8 @@ export function drawDesktop(scene, el) {
           paddingX: 1,
           backgroundColor: "#152024",
           children: [
-            Text({ bold: true, color: "#e3eae6", children: [p.card.title] }),
-            ...p.card.lines.map((line) => Text({ color: "#e3eae6", children: [line] })),
+            Text({ bold: true, color: "#e3eae6", children: [lines[0]] }),
+            ...lines.slice(1).map((line) => Text({ color: "#e3eae6", children: [line] })),
           ],
         }),
       ],
