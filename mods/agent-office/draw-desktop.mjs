@@ -72,7 +72,9 @@ export function renderSvg(scene) {
     const wash = r.you ? "room-you" : r.idle ? "room-dim" : null;
     if (wash) out.push(`<rect class="${wash}" x="${x}" y="${y}" width="${w}" height="${h}"/>`);
     out.push(`<rect class="wall" x="${x}" y="${y}" width="${w}" height="${h}" rx="2"/>`);
-    const title = esc(clip((r.you ? "★ " : "") + r.title, Math.floor((w - 20) / 7.4)));
+    // A folded strip has its status on the right, so its title gets only the room left of that.
+    const room = r.folded ? w - 30 - r.sub.length * 6.4 : w - 20;
+    const title = esc(clip((r.you ? "★ " : "") + r.title, Math.max(4, Math.floor(room / 7.4))));
     if (r.folded) {
       const mid = px(y + h / 2 + 4);
       out.push(`<text class="title${r.you ? " youc" : ""}" x="${x + 10}" y="${mid}">${title}</text>`);
@@ -110,23 +112,34 @@ export function renderSvg(scene) {
 export function drawDesktop(scene, el) {
   const { Box, Text, Svg } = el;
   const svg = Svg({ source: renderSvg(scene), alt: describe(scene), width: px(scene.w * CELL.w), height: px(Math.max(1, scene.h) * CELL.h) });
-  const seats = scene.people.map((p) =>
+  const seats = scene.people.map((p) => {
     // A whole seat (the room above the figure, the figure, its label) is the hover spot: the cell
     // size is only roughly known, so the spot is generous rather than exact.
-    Box({
+    const seat = { top: p.y - 1, left: p.x - 3, w: 9, h: 3 };
+    // The card is sized to its text and kept inside the plan: anything past the plan's edge makes
+    // the pane scroll and clips the card.
+    const lines = [p.card.title, ...p.card.lines];
+    const cardW = Math.min(Math.max(...lines.map((l) => l.length)) + 4, Math.max(12, Math.min(48, scene.w)));
+    // Border and padding take four columns; a long line (a description) wraps inside the rest.
+    const cardH = lines.reduce((n, l) => n + Math.max(1, Math.ceil(l.length / (cardW - 4))), 0) + 2;
+    let left = seat.w;
+    if (seat.left + left + cardW > scene.w) left = -cardW;
+    if (seat.left + left < 0) left = Math.max(-seat.left, Math.min(0, scene.w - cardW - seat.left));
+    const top = Math.max(-seat.top, Math.min(0, Math.max(1, scene.h) - cardH - seat.top));
+    return Box({
       key: "seat:" + p.id,
       position: "absolute",
-      top: p.y - 1,
-      left: p.x - 3,
-      width: 9,
-      height: 3,
+      top: seat.top,
+      left: seat.left,
+      width: seat.w,
+      height: seat.h,
       children: [
-        Text({ children: [" ".repeat(9)] }),
-        // The card opens toward the middle of the plan, so it stays inside the pane.
+        Text({ children: [" ".repeat(seat.w)] }),
         Box({
           position: "absolute",
-          top: 0,
-          ...(p.x < scene.w / 2 ? { left: 9 } : { right: 9 }),
+          top,
+          left,
+          width: cardW,
           display: "none",
           hover: { display: "flex" },
           flexDirection: "column",
@@ -139,8 +152,8 @@ export function drawDesktop(scene, el) {
           ],
         }),
       ],
-    }),
-  );
+    });
+  });
   return Box({ position: "relative", children: [svg, ...seats] });
 }
 

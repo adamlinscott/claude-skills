@@ -71,3 +71,17 @@ test("terminal: a focusable label per person, and the selected person's detail u
   assert.equal(detail[0].props.children[0], "worker · role worker · type worker");
   assert.equal(detail[1].props.children[0], "working for 5m");
 });
+
+test("desktop: every hover card is wide enough for its text and stays inside the plan", () => {
+  const small = layout(m, viewerFor(m, "s-a"), { columns: 40 });
+  for (const s of [scene, small]) {
+    for (const seat of drawDesktop(s, el).props.children.slice(1)) {
+      const card = seat.props.children.find((c) => c.props.hover).props;
+      const x = seat.props.left + card.left;
+      const y = seat.props.top + card.top;
+      assert.ok(card.width >= 12, "wide enough to read");
+      assert.ok(x >= 0 && x + card.width <= s.w, `inside the plan's width: ${x}..${x + card.width} of ${s.w}`);
+      assert.ok(y >= 0, "not above the plan");
+    }
+  }
+});
