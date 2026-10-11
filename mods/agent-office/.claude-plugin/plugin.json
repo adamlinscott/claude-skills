@@ -1,0 +1,6 @@
+{
+  "name": "agent-office",
+  "version": "0.1.0",
+  "description": "Agent Office: a pane drawing this project's sessions and their agents as an office floor plan. Run /agent-office to open or close it.",
+  "author": { "name": "Adam Linscott" }
+}

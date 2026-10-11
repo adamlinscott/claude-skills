@@ -9,5 +9,6 @@
   "streamSeconds": 1,
   "tailBytes": 1048576,
   "gitCacheSeconds": 60,
-  "decisionModel": "none"
+  "decisionModel": "none",
+  "autoOpen": false
 }
