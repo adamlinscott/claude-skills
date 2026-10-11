@@ -1,0 +1,155 @@
+// Agent Office's Desktop drawing: a laid-out scene (layout.mjs) as one SVG for an image-mode `Svg`,
+// ported from the agreed prototype's renderSvg (#46), plus a keyed `Box` over each seat holding a
+// hover card with that person's detail (#43: interactive Svg reloads on every redraw, Box hover
+// cards survive them).
+//
+// The SVG is drawn on the scene's cell grid at the Desktop's rough cell size, so a Box placed in
+// cells lands over the figure it belongs to. Motion is CSS inside the SVG: the dots on a waiting
+// line travel from the agent waiting toward the agent working, at the app's own frame rate.
+//
+// Pure: no Node imports and no `$`. The host hands in the surface's element constructors.
+
+/** One layout cell in Desktop pixels (measured roughly on #43). */
+export const CELL = { w: 7.9, h: 19 };
+
+const FONT = "ui-monospace,Consolas,Menlo,monospace";
+const SANS = "system-ui,'Segoe UI',Arial,sans-serif";
+
+// The prototype's colours, light and dark.
+const STYLE = `
+:root{--ground:#e7eae5;--sheet:#f5f6f2;--ink:#1a2528;--ink-2:#4d5c5f;--rule:#bcc6c1;--wall:#2b3a3e;--table:#d6dcd6;
+--lamp:#e2a91f;--ok:#2f8a55;--you:#2c6d71;--you-wash:rgba(44,109,113,.10);--stall:#9a5ab8}
+@media (prefers-color-scheme:dark){:root{--ground:#0f1618;--sheet:#152024;--ink:#e3eae6;--ink-2:#9db0ac;--rule:#30444a;--wall:#c9d6d2;
+--table:#22323a;--lamp:#f3c24f;--ok:#6cc28a;--you:#71bdb9;--you-wash:rgba(113,189,185,.12);--stall:#c79be0}}
+.wall{fill:none;stroke:var(--wall);stroke-width:2}
+.room-you{fill:var(--you-wash)}.room-dim{fill:var(--ground);opacity:.6}
+.table{fill:var(--table);stroke:var(--rule)}
+.t{font-family:${FONT};font-size:10.5px;fill:var(--ink-2)}
+.title{font:700 13px ${SANS};fill:var(--ink)}.youc{fill:var(--you)}
+.lab{font-size:10px;fill:var(--ink)}
+.flow{fill:none;stroke:var(--ink-2);stroke-width:2.2;stroke-linecap:round;stroke-dasharray:.1 7;animation:flow 1s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-7.1}}
+@media (prefers-reduced-motion:reduce){.flow{animation:none}}
+.glow{fill:var(--lamp);opacity:.18}
+.av{color:var(--ink-2)}.av.work{color:var(--lamp)}.av.ok{color:var(--ok)}.av.you{color:var(--you)}
+.av.idle,.av.stop{color:var(--ink-2);opacity:.5}.av.stall,.av.fail{color:var(--stall)}
+.body{fill:currentColor}
+.acc{fill:var(--ink)}.acc-line{fill:none;stroke:var(--ink);stroke-width:1.2;stroke-linecap:round}
+.acc-ring{fill:var(--sheet);fill-opacity:.55;stroke:var(--ink);stroke-width:1.4}
+.acc-star{fill:var(--lamp);stroke:var(--ink);stroke-width:.6}
+.badge{fill:var(--sheet);stroke:var(--ink);stroke-width:.8}.badge-t{font:700 9px ${SANS};fill:var(--ink)}
+.stop-sq{fill:var(--ink-2)}`;
+
+// The profile silhouettes: one body, one accessory per role (#46).
+const BODY = `<g class="body"><circle cx="12" cy="8.6" r="4.6"/><path d="M2.6 23.4c0-5.6 4.2-9 9.4-9s9.4 3.4 9.4 9z"/></g>`;
+const ACCESSORY = {
+  worker: `<path class="acc" d="M6.6 7.9a5.4 5.4 0 0 1 10.8 0z"/><rect class="acc" x="5" y="7.6" width="14" height="1.7" rx=".8"/>`,
+  scout: `<path class="acc" d="M7.4 7.6a4.6 4.6 0 0 1 9.2 0z"/><path class="acc" d="M12 6.6h7.6a1 1 0 0 1 0 1.9H12z"/>`,
+  researcher: `<circle class="acc-line" cx="9.8" cy="9" r="1.9"/><circle class="acc-line" cx="14.2" cy="9" r="1.9"/><path class="acc-line" d="M11.7 9h.6"/>`,
+  reviewer: `<circle class="acc-ring" cx="17.6" cy="15.8" r="3.3"/><path class="acc-line" style="stroke-width:2" d="M20 18.2l2.6 2.6"/>`,
+  lead: `<path class="acc" d="M12 15.1l-1.3 1.5 1.3 5.4 1.3-5.4z"/><path class="acc" d="M10.6 14.6h2.8l-1.4 1.4z"/>`,
+  you: `<path class="acc-star" d="M18.4 12.6l.9 1.9 2.1.3-1.5 1.5.4 2.1-1.9-1-1.9 1 .4-2.1-1.5-1.5 2.1-.3z"/>`,
+  other: "",
+};
+const SYMBOLS = Object.entries(ACCESSORY)
+  .map(([role, acc]) => `<symbol id="av-${role}" viewBox="0 0 24 24">${BODY}${acc}</symbol>`)
+  .join("");
+
+const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const clip = (t, n) => ([...t].length > n ? [...t].slice(0, Math.max(0, n - 1)).join("") + "…" : t);
+const px = (n) => Math.round(n * 10) / 10;
+
+// A person's figure is two cells wide (the terminal's dot and letter); its centre in pixels.
+const centre = (p) => [px((p.x + 1) * CELL.w), px((p.y + 0.5) * CELL.h)];
+
+/** scene → the SVG document for an image-mode Svg, `width` × `height` pixels. */
+export function renderSvg(scene) {
+  const width = px(scene.w * CELL.w);
+  const height = px(Math.max(1, scene.h) * CELL.h);
+  const out = [];
+  for (const r of scene.rooms) {
+    const [x, y, w, h] = [px(r.x * CELL.w), px(r.y * CELL.h), px(r.w * CELL.w), px(r.h * CELL.h)];
+    const wash = r.you ? "room-you" : r.idle ? "room-dim" : null;
+    if (wash) out.push(`<rect class="${wash}" x="${x}" y="${y}" width="${w}" height="${h}"/>`);
+    out.push(`<rect class="wall" x="${x}" y="${y}" width="${w}" height="${h}" rx="2"/>`);
+    const title = esc(clip((r.you ? "★ " : "") + r.title, Math.floor((w - 20) / 7.4)));
+    if (r.folded) {
+      const mid = px(y + h / 2 + 4);
+      out.push(`<text class="title${r.you ? " youc" : ""}" x="${x + 10}" y="${mid}">${title}</text>`);
+      out.push(`<text class="t" x="${px(x + w - 10)}" y="${mid}" text-anchor="end">${esc(r.sub)}</text>`);
+    } else {
+      out.push(`<text class="title${r.you ? " youc" : ""}" x="${x + 10}" y="${px(y + CELL.h * 0.85)}">${title}</text>`);
+      out.push(`<text class="t" x="${x + 10}" y="${px(y + CELL.h * 1.75)}">${esc(clip(r.sub, Math.floor((w - 20) / 6.4)))}</text>`);
+    }
+  }
+  for (const t of scene.tables) out.push(`<rect class="table" x="${px(t.x * CELL.w)}" y="${px(t.y * CELL.h + 4)}" width="${px(t.w * CELL.w)}" height="${px(2 * CELL.h - 8)}" rx="4"/>`);
+  const at = new Map(scene.people.map((p) => [p.id, p]));
+  for (const l of scene.lines) {
+    const [ax, ay] = centre(at.get(l.from));
+    const [bx, by] = centre(at.get(l.to));
+    // From beside the waiter, curving into the agent it waits on, ending short of the figure.
+    out.push(`<path class="flow" d="M${px(ax + 14)} ${ay}C${px((ax + bx) / 2)} ${ay} ${bx} ${px((ay + by) / 2)} ${bx} ${px(by + (by < ay ? 16 : -18))}"/>`);
+  }
+  for (const p of scene.people) {
+    const [cx, cy] = centre(p);
+    if (p.look === "work") out.push(`<circle class="glow" cx="${cx}" cy="${px(cy - 3)}" r="15"/>`);
+    out.push(`<use href="#av-${ACCESSORY[p.role] === undefined ? "other" : p.role}" class="av ${p.look}" x="${px(cx - 13)}" y="${px(cy - 17)}" width="26" height="26"/>`);
+    if (p.look === "stall" || p.look === "fail") {
+      out.push(`<circle class="badge" cx="${px(cx + 11)}" cy="${px(cy - 15)}" r="5.5"/><text class="badge-t" x="${px(cx + 11)}" y="${px(cy - 11.8)}" text-anchor="middle">${p.look === "fail" ? "×" : "!"}</text>`);
+    }
+    if (p.look === "stop") out.push(`<rect class="stop-sq" x="${px(cx + 7)}" y="${px(cy - 19)}" width="8" height="8" rx="1"/>`);
+    out.push(`<text class="t lab${p.role === "you" ? " youc" : ""}" x="${cx}" y="${px((p.y + 1) * CELL.h + 13)}" text-anchor="middle">${esc(clip(p.label, 12))}</text>`);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><style>${STYLE}</style><defs>${SYMBOLS}</defs>${out.join("")}</svg>`;
+}
+
+/**
+ * The pane's plan on the Desktop: the Svg, with a keyed Box over each seat whose card appears
+ * while the pointer is over it. el: the surface's elements ({ Box, Text, Svg }).
+ */
+export function drawDesktop(scene, el) {
+  const { Box, Text, Svg } = el;
+  const svg = Svg({ source: renderSvg(scene), alt: describe(scene), width: px(scene.w * CELL.w), height: px(Math.max(1, scene.h) * CELL.h) });
+  const seats = scene.people.map((p) =>
+    // A whole seat (the room above the figure, the figure, its label) is the hover spot: the cell
+    // size is only roughly known, so the spot is generous rather than exact.
+    Box({
+      key: "seat:" + p.id,
+      position: "absolute",
+      top: p.y - 1,
+      left: p.x - 3,
+      width: 9,
+      height: 3,
+      children: [
+        Text({ children: [" ".repeat(9)] }),
+        // The card opens toward the middle of the plan, so it stays inside the pane.
+        Box({
+          position: "absolute",
+          top: 0,
+          ...(p.x < scene.w / 2 ? { left: 9 } : { right: 9 }),
+          display: "none",
+          hover: { display: "flex" },
+          flexDirection: "column",
+          borderStyle: "round",
+          paddingX: 1,
+          backgroundColor: "#152024",
+          children: [
+            Text({ bold: true, color: "#e3eae6", children: [p.card.title] }),
+            ...p.card.lines.map((line) => Text({ color: "#e3eae6", children: [line] })),
+          ],
+        }),
+      ],
+    }),
+  );
+  return Box({ position: "relative", children: [svg, ...seats] });
+}
+
+// What the plan says for a reader that cannot see it: each room and who is in it.
+function describe(scene) {
+  if (!scene.rooms.length) return "Agent Office floor plan: no sessions in this project yet.";
+  const rooms = scene.rooms.map((r) => {
+    const people = scene.people.filter((p) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
+    return `${r.you ? "your room, " : ""}${r.title}${people.length ? ": " + people.map((p) => `${p.label} ${p.card.lines[1]}`).join(", ") : r.folded ? " (" + r.sub + ")" : ""}`;
+  });
+  return "Agent Office floor plan. " + rooms.join(". ") + ".";
+}
