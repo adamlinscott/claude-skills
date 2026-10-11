@@ -63,7 +63,7 @@ _Avoid_: role, kind
 ### What people are doing
 
 **Status**:
-What an agent is doing itself right now: working, idle, done, stalled or failed. Waiting on others is not a status.
+What an agent is doing itself right now: working, idle, done, stalled, stopped or failed. Stalled is gone quiet and may still answer; stopped is ended early by someone, and never answers. Waiting on others is not a status.
 _Avoid_: state, phase
 
 **Wait**:
@@ -83,7 +83,7 @@ A report worth other people reading, marked with an info icon.
 _Avoid_: card, board item, note
 
 **Possible conflict**:
-A file an agent is writing that someone else edited recently.
+A file that more than one agent edited recently; git history later shows whether it is a real conflict.
 _Avoid_: collision, clash
 
 ### Looking at the office

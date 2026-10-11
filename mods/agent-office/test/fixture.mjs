@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { nodeIo } from "../cli.mjs";
-import { createDiscover } from "../discover.mjs";
+import { createEngine } from "../engine.mjs";
 
 export const defaultsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const NOW = Date.parse("2026-10-09T12:00:00Z");
@@ -86,7 +86,12 @@ export function agent(home, sessionId, agentId, meta, lines, { slug = "proj", ag
   return p;
 }
 
-export function discoverIn(home, opts = {}) {
+/** An engine for the project holding `project`, reading <home>/.claude, with the clock at NOW and no git binary. */
+export function engineIn(home, project, opts = {}) {
   const io = nodeIo({ claudeDir: path.join(home, ".claude"), now: () => NOW, run: null, ...opts });
-  return createDiscover(io, { defaultsDir });
+  return createEngine(io, { defaultsDir, project });
 }
+
+/** Records keyed by their id without the "claude-code:" prefix: a subagent's own id, or "<session>:lead". */
+export const byId = (records) => Object.fromEntries(records.map((r) => [r.id.replace(/^claude-code:/, ""), r]));
+export const cc = (id) => "claude-code:" + id;

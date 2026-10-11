@@ -36,11 +36,11 @@ OfficeModel
 
   meaning
     roles         [{ agent, role, by: "source" | "rules" }]          when not given by the source
-    conflicts     [{ file, agents: [agent id], by }]                  a write someone else touched recently
+    conflicts     [{ file, agents: [agent id], by }]                  a file more than one agent edited recently; git history later shows whether it is a real conflict
     findings      [{ report: agent id, by }]                          a report worth an info icon
 ```
 
-`status` is one of `working`, `idle`, `done`, `stalled`, `failed`. Waiting is never a status: an agent with waits can be working or idle.
+`status` is one of `working`, `idle`, `done`, `stalled`, `stopped`, `failed`. `stalled` means gone quiet, and it may still answer; `stopped` means someone ended it early, and it never answers or leaves a report. Waiting is never a status: an agent with waits can be working or idle.
 
 `role` comes from the role catalogue, an open list (worker, scout, researcher, reviewer, lead, and any added later, such as accountant). An agent type with no catalogue entry gets `other`.
 
