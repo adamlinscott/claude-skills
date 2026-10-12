@@ -46,10 +46,13 @@ const BYTE_KEYS = new Set(["tailBytes"]);
 // spin the machine.
 const FLOORS = new Map([["streamSeconds", 0.25]]);
 
-// Every number in config.json is a window or a size, so it must be finite and above zero.
+// Every number in config.json is a window or a size, so it must be finite and above zero; a
+// window in ZERO_OFF may also be 0, which turns its feature off.
+const ZERO_OFF = new Set(["lightsOffHours"]);
 function fits(key, value, fallback) {
   if (typeof fallback === "number") {
     if (BYTE_KEYS.has(key)) return Number.isSafeInteger(value) && value > 0;
+    if (ZERO_OFF.has(key) && value === 0) return true;
     return typeof value === "number" && Number.isFinite(value) && value > 0 && value >= (FLOORS.get(key) ?? 0);
   }
   if (Array.isArray(fallback)) return Array.isArray(value);

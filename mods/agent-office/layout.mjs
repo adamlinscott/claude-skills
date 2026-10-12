@@ -3,7 +3,8 @@
 // the terminal as cells, the Desktop pane as an SVG with each cell scaled to pixels.
 //
 // Grid layout A, as agreed on #46: the viewer's room first, then every other room in a fixed
-// place, rooms with the lights off after the rest, drawn faded. Placing rooms (layout) is a
+// place, whether its lights are on or off: the office changes gradually, so a room dims where it
+// stands rather than moving. Placing rooms (layout) is a
 // separate step from drawing one (drawRoom), and a room is drawn from its list of sessions, so a
 // later layout or a room of several sessions changes neither.
 //
@@ -52,19 +53,15 @@ export function layout(model, viewer, { columns = 124, rows = Infinity, order = 
   const width = Math.max(columns, ROOM_MIN_W);
 
   const yours = rooms.find((r) => r.sessions.includes(viewer.session));
-  const lit = rooms.filter((r) => r !== yours && !lightsOff(office, r));
-  const off = rooms.filter((r) => r !== yours && lightsOff(office, r));
-  // Squeezed into `rows`: open rooms fold from the last, so lights-off rooms first, then rooms drop
-  // from the end.
-  let plan = [yours, ...lit, ...off].filter(Boolean).map((room) => ({ room, fold: false }));
+  // Squeezed into `rows`: rooms fold where they stand, lights-off rooms from the last first, then
+  // lit ones from the last; then rooms drop from the end.
+  let plan = [yours, ...rooms.filter((r) => r !== yours)].filter(Boolean).map((room) => ({ room, fold: false }));
   let hidden = 0;
   const tall = () => place(office, plan, width).h + (hidden ? 1 : 0) > rows;
   while (tall()) {
-    const last = plan.findLast((p) => !p.fold && p.room !== yours);
+    const last = plan.findLast((p) => !p.fold && p.room !== yours && lightsOff(office, p.room)) || plan.findLast((p) => !p.fold && p.room !== yours);
     if (!last) break;
-    // It joins the folded strips, ahead of the rooms that were folded already.
     last.fold = true;
-    plan = [...plan.filter((p) => !p.fold), last, ...plan.filter((p) => p.fold && p !== last)];
   }
   while (tall() && plan.length > 1) {
     plan = plan.slice(0, -1);
@@ -75,7 +72,8 @@ export function layout(model, viewer, { columns = 124, rows = Infinity, order = 
   const placed = place(office, plan, width);
   for (const { p, x, y } of placed.at) drawRoom(scene, office, p.room, p.fold, x, y, width);
   scene.h = placed.h + (hidden ? 1 : 0);
-  const drawn = new Set(scene.people.map((q) => q.id));
+  // A lights-off room is still: its waits draw no lines.
+  const drawn = new Set(scene.people.filter((q) => !q.off).map((q) => q.id));
   scene.lines = model.waits.filter((w) => drawn.has(w.waiter) && drawn.has(w.on)).map((w) => ({ from: w.waiter, to: w.on }));
   return scene;
 }
@@ -159,9 +157,10 @@ function drawRoom(scene, office, room, fold, x, y, width) {
   const since = Math.max(...sessions.map((s) => Date.parse(s.lastActive)));
   const title = roomTitle(office, room);
   let sub;
-  if (off) sub = `lights off · idle ${duration(office.now - since)}`;
-  else if (fold) sub = "folded to fit";
-  else sub = sessions.map((s) => [s.branch, folderName(s.checkout)].filter(Boolean).join(" · ")).join("  |  ") + (idle ? `  ·  idle ${duration(office.now - since)}` : "");
+  const where = sessions.map((s) => [s.branch, folderName(s.checkout)].filter(Boolean).join(" · ")).join("  |  ");
+  if (fold && !off) sub = "folded to fit";
+  else if (off) sub = (fold ? "" : where + "  ·  ") + `lights off · idle ${duration(office.now - since)}`;
+  else sub = where + (idle ? `  ·  idle ${duration(office.now - since)}` : "");
   scene.rooms.push({ id: room.id, x, y, w, h, title, sub, you, idle, folded: fold, off });
   if (fold) return;
 

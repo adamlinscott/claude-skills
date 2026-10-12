@@ -42,22 +42,23 @@ test("no idle folding: an idle room with nobody working stays open, in its place
   assert.equal(who(scene, "q1").off, false);
 });
 
-test("lights off: after the rooms with lights on, full size with their people, all marked off; never your room", () => {
+test("lights off: in the room's own place, full size with its people, all marked off and still; never your room", () => {
   const night = { status: "idle", idle: 180, lights: "off", lead: "idle" };
   const m = office([
-    { id: "dark", sessions: [{ id: "s-d", ...night, team: [{ id: "d1", status: "stalled" }] }] },
+    { id: "dark", sessions: [{ id: "s-d", ...night, team: [{ id: "d1", status: "stalled", waited: true }] }] },
     { id: "mine", sessions: [{ id: "s-m", ...night }] },
     { id: "lit", sessions: [{ id: "s-l" }] },
   ]);
   const scene = layout(m, viewer(m, "s-m"));
   const room = (id) => scene.rooms.find((r) => r.id === id);
-  assert.deepEqual(roomIds(scene), ["room:mine", "room:lit", "room:dark"]);
-  assert.deepEqual([room("room:dark").off, room("room:dark").folded, room("room:dark").sub], [true, false, "lights off · idle 3h"]);
+  assert.deepEqual(roomIds(scene), ["room:mine", "room:dark", "room:lit"]);
+  assert.deepEqual([room("room:dark").off, room("room:dark").folded, room("room:dark").sub], [true, false, "b-s-d · s-d  ·  lights off · idle 3h"]);
+  assert.deepEqual(scene.lines, [], "a lights-off room's waits draw no moving line");
   assert.equal(room("room:mine").off, false);
   assert.equal(room("room:lit").off, false);
   assert.deepEqual([who(scene, "s-d:lead").off, who(scene, "d1").off, who(scene, "d1").look], [true, true, "stall"]);
   assert.equal(who(scene, "s-m:lead").off, false);
-  assert.deepEqual(scene.tables.map((t) => t.off), [false, false, true]);
+  assert.deepEqual(scene.tables.map((t) => t.off), [false, true, false]);
 });
 
 test("a room is drawn from its list of sessions: each session gets its lead and its own table", () => {
@@ -167,11 +168,11 @@ test("fitting rows: open rooms fold from the last, then rooms past the bottom ar
   assert.equal(squeezed.rooms.find((r) => r.id === "room:d").folded, true);
   assert.equal(squeezed.rooms.find((r) => r.id === "room:d").sub, "folded to fit");
 
-  // Two rooms fold either way; with b's lights off, b folds before c does.
+  // Rooms fold where they stand; with b's lights off, b folds first.
   assert.deepEqual(squeezed.rooms.map((r) => [r.id, r.folded]), [["room:a", false], ["room:b", false], ["room:c", true], ["room:d", true]]);
   const night = office(rooms.map((r) => (r.id === "b" ? { ...r, sessions: [{ ...r.sessions[0], status: "idle", lights: "off" }] } : r)));
   const dark = layout(night, viewer(night, "s-a"), { columns: 84, rows: 20 });
-  assert.deepEqual(dark.rooms.map((r) => [r.id, r.folded]), [["room:a", false], ["room:c", false], ["room:d", true], ["room:b", true]]);
+  assert.deepEqual(dark.rooms.map((r) => [r.id, r.folded]), [["room:a", false], ["room:b", true], ["room:c", true], ["room:d", true]]);
 
   const tiny = layout(m, viewer(m, "s-a"), { columns: 40, rows: 12 });
   assert.ok(tiny.hidden > 0);

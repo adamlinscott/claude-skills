@@ -414,6 +414,13 @@ test("config: streamSeconds below its floor falls back to the repo default", asy
   assert.equal(await streamSeconds(0.25), 0.25);
 });
 
+test("config: a person's own lightsOffHours 0 turns lights-off rooms off", async () => {
+  const claudeDir = path.join(tempRoot(), ".claude");
+  fs.mkdirSync(path.join(claudeDir, "agent-office"), { recursive: true });
+  fs.writeFileSync(path.join(claudeDir, "agent-office", "config.json"), JSON.stringify({ lightsOffHours: 0 }));
+  assert.equal((await loadConfig(nodeIo({ claudeDir }), defaultsDir)).lightsOffHours, 0);
+});
+
 test("roles: agent types and user keys named like Object.prototype members are plain strings", async () => {
   const { home, main } = office();
   session(home, "s", [line.user(main, "x")]);
