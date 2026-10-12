@@ -1,13 +1,15 @@
 // Agent Office's pane: the hooks module Claude Code loads for this mod. It is the host
-// (docs/designs/agent-office-model.md, layers): it runs the office engine while the pane is open,
-// keeps the latest office model, and draws it through the shared layout and the two renderers.
+// (docs/designs/agent-office-model.md, layers): it runs the office engine for the life of the
+// session, keeps the latest office model, and draws it through the shared layout and the two
+// renderers. The model also flags a possible conflict to an agent as it edits (flags.mjs), so the
+// engine runs whether or not anyone opens the pane.
 //
 //   /agent-office opens the pane, and closes it when it is open. autoOpen in config.json (or the
 //   person's ~/.claude/agent-office/config.json) opens it at session start.
 //
 // The engine is `node cli.mjs --stream`, one model per line. A stream that ends is started again;
-// one that keeps failing gives way to `--json` on a timer. Closing the pane lets the stream go,
-// which ends the process (at its next line); Claude Code also ends it with the session.
+// one that keeps failing gives way to `--json` on a timer. Closing the pane leaves it running;
+// Claude Code ends it with the session.
 //
 // Relative imports resolve from this hooks/ folder, so the shared modules are one level up.
 
@@ -16,6 +18,7 @@ import { layout, statusLine, viewerFor, drawable } from "../layout.mjs";
 import { drawDesktop } from "../draw-desktop.mjs";
 import { drawTerminal, renderCells, seatOf } from "../draw-terminal.mjs";
 import { nextTitle, writtenTitles, cleanTitle, TITLE_SYSTEM } from "../titles.mjs";
+import { conflictNote } from "../flags.mjs";
 
 const PANE = "agent-office";
 const RESTARTS = 3; // streams in a row that end without a model before falling back to --json
@@ -27,8 +30,7 @@ const UNDER_PLAN_ROWS = 6; // the terminal rows kept for the status line and the
 let model = null;
 let engine = "stopped"; // starting | running | restarting | fallback | stopped
 let run = 0; // the current engine run; an older run's loop sees the change and stops
-let letGo = null; // lets the current stream go, which ends its process
-let timers = [];
+let config = { touchedTools: ["Edit", "Write", "NotebookEdit"], touchedWindowMinutes: 30 }; // until session start reads it
 let viewer = null; // the model's id for this session
 let order = []; // room ids in the order this pane first saw them
 let selected = null; // the person the terminal's focus ring is on
@@ -42,10 +44,10 @@ let asking = false; // one title call in flight at a time
 export function register(on) {
   on("session.start", async ($, e, next) => {
     await $.command.register({ name: "agent-office", description: "Open or close the Agent Office floor plan of this project" });
-    if ((await readConfig($)).autoOpen === true) {
-      start($)
-        .then(() => $.ui.open({ id: PANE, title: "Agent Office" }))
-        .catch((err) => $.ui.log("agent-office: could not open the pane: " + message(err), { to: "debug" }));
+    config = { ...config, ...(await readConfig($)) };
+    start($).catch((err) => $.ui.log("agent-office: could not start the engine: " + message(err), { to: "debug" }));
+    if (config.autoOpen === true) {
+      $.ui.open({ id: PANE, title: "Agent Office" }).catch((err) => $.ui.log("agent-office: could not open the pane: " + message(err), { to: "debug" }));
     }
     return next(e);
   });
@@ -60,10 +62,26 @@ export function register(on) {
     return {};
   });
 
-  // Every close comes through here, the person's and this module's own.
+  // Every close comes through here, the person's and this module's own. The engine keeps running
+  // for the flags; only what the pane drew is let go, so nothing redraws a closed pane.
   on("ui.close", ($, e, next) => {
-    if (e.id === PANE) stop();
+    if (e.id === PANE) {
+      for (const k of Object.keys(shown)) delete shown[k];
+      selected = null;
+    }
     return next(e);
+  });
+
+  // After an edit by any agent in this session, a note when someone else in the office edited the
+  // same file lately. The tool's result is kept as it is (with its ref); a failed or refused call
+  // gets none. Filtered here rather than by matcher so the person's touchedTools applies.
+  on("tool.call", async ($, e, next) => {
+    const r = await next(e);
+    if (r.deny || r.isError || !config.touchedTools.includes(e.tool) || !drawable(model) || !viewer) return r;
+    const agent = e.agentId ? "claude-code:" + e.agentId : viewer + ":lead";
+    const path = e.tool === "NotebookEdit" ? e.notebook_path : e.file_path;
+    const note = conflictNote(model, { agent, session: viewer, path }, { now: Date.now(), window: config.touchedWindowMinutes, titles: writtenTitles(titles) });
+    return note ? { ...r, context: [...(r.context || []), note] } : r;
   });
 
   // The terminal's selection is wherever the pane's focus ring is: Tab and the arrows walk it
@@ -109,10 +127,11 @@ function frame(columns, rows) {
   return { status, scene };
 }
 
-// Redraw only when something a surface draws has changed.
+// Redraw only when something a surface draws has changed. No surface drawn is a closed pane (or
+// one about to draw for the first time, which needs no nudge).
 function changed($) {
   const surfaces = Object.values(shown);
-  if (!surfaces.length || surfaces.some((s) => JSON.stringify(frame(s.columns, s.rows)) !== s.key)) $.ui.invalidate("ui.render");
+  if (surfaces.some((s) => JSON.stringify(frame(s.columns, s.rows)) !== s.key)) $.ui.invalidate("ui.render");
 }
 
 function select($, id) {
@@ -128,34 +147,20 @@ async function start($) {
   const cwd = await $.session.cwd();
   const cli = $.plugin.root.replace(/\\/g, "/") + "/cli.mjs";
 
-  timers = [
-    $.clock.every(REFRESH_MS, () => {
-      changed($);
-      askTitle($);
-    }),
-    // The terminal's arrows move by repainting the plan's cells: no pane redraw.
-    $.clock.every(ANIMATE_MS, () => {
-      const t = shown.terminal;
-      if (!t || !t.scene || !t.scene.lines.length) return;
-      tick += 1;
-      const { columns, rows, cells } = renderCells(t.scene, tick);
-      $.ui.blit({ requestId: PANE, key: "plan", columns, rows, cells }).catch(() => {});
-    }),
-  ];
+  // The engine runs for the session, so these do too; with the pane closed they find nothing drawn.
+  $.clock.every(REFRESH_MS, () => {
+    changed($);
+    askTitle($);
+  });
+  // The terminal's arrows move by repainting the plan's cells: no pane redraw.
+  $.clock.every(ANIMATE_MS, () => {
+    const t = shown.terminal;
+    if (!t || !t.scene || !t.scene.lines.length) return;
+    tick += 1;
+    const { columns, rows, cells } = renderCells(t.scene, tick);
+    $.ui.blit({ requestId: PANE, key: "plan", columns, rows, cells }).catch(() => {});
+  });
   stream($, me, cli, cwd).catch((err) => $.ui.log("agent-office: the engine loop failed: " + message(err), { to: "debug" }));
-}
-
-function stop() {
-  run += 1;
-  engine = "stopped";
-  if (letGo) letGo();
-  letGo = null;
-  for (const t of timers) t.cancel();
-  timers = [];
-  model = null;
-  order = [];
-  selected = null;
-  for (const k of Object.keys(shown)) delete shown[k];
 }
 
 function accept($, me, text) {
@@ -175,9 +180,10 @@ function accept($, me, text) {
 
 // Asks the small model for the next room title that is due, in the background: drawing never
 // waits on it. The branch shows until a title comes back; a failed call or an empty reply leaves
-// it, and is tried again once the rate limit allows.
+// it, and is tried again once the rate limit allows. Only while the pane is drawn: the engine runs
+// all session, and nobody needs a title written for a pane that isn't open.
 function askTitle($) {
-  if (asking || !drawable(model)) return;
+  if (asking || !drawable(model) || !Object.keys(shown).length) return;
   const now = Date.now();
   const ask = nextTitle(model, titles, now);
   if (!ask) return;
@@ -207,7 +213,6 @@ async function stream($, me, cli, cwd) {
   while (me === run && failures < RESTARTS) {
     let got = false;
     const it = $.process.spawn({ argv: ["node", cli, "--stream", "--project", cwd], cwd })[Symbol.asyncIterator]();
-    letGo = () => it.return && it.return().catch(() => {});
     try {
       let buffer = "";
       for (;;) {
