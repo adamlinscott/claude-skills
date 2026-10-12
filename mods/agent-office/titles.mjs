@@ -45,9 +45,21 @@ export function titlePrompt({ branch, files, types, tasks }) {
   return out.join("\n");
 }
 
+// The reply's text. The types promise a string, but the Claude app's build has answered with an
+// object; read text from the usual shapes ({ text }, { content: string | [{ type: "text", text }] })
+// and never print an object as a title.
+function replyText(reply) {
+  if (typeof reply === "string") return reply;
+  if (!reply || typeof reply !== "object") return "";
+  if (typeof reply.text === "string") return reply.text;
+  if (typeof reply.content === "string") return reply.content;
+  if (Array.isArray(reply.content)) return reply.content.filter((b) => b && typeof b.text === "string").map((b) => b.text).join("\n");
+  return "";
+}
+
 /** The title from a reply: its first line, unquoted, clipped; null when nothing is left. */
 export function cleanTitle(reply) {
-  const first = String(reply || "").split(/\r?\n/).map((l) => l.trim()).find(Boolean) || "";
+  const first = replyText(reply).split(/\r?\n/).map((l) => l.trim()).find(Boolean) || "";
   const title = first.replace(/^["'`*]+|["'`*.]+$/g, "").trim();
   if (!title) return null;
   return title.length <= MAX_TITLE ? title : title.slice(0, MAX_TITLE - 1).trimEnd() + "…";

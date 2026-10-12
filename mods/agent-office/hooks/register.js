@@ -188,7 +188,10 @@ function askTitle($) {
     .complete({ model: "haiku", system: TITLE_SYSTEM, prompt: ask.prompt, maxTokens: 40 })
     .then((reply) => {
       const title = cleanTitle(reply);
-      if (!title) return;
+      if (!title) {
+        if (reply && typeof reply === "object") $.ui.log("agent-office: a title reply had no text; its keys: " + Object.keys(reply).join(", "), { to: "debug" });
+        return;
+      }
       titles.set(ask.session, { key: ask.key, title, at: now });
       changed($);
     })

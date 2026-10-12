@@ -41,5 +41,9 @@ test("cache: asks only for branch stand-ins, again only when the inputs change, 
 test("a reply becomes a title: its first line, unquoted; empty is none", () => {
   assert.equal(cleanTitle('\n"Fixing the setup wizard."\nmore'), "Fixing the setup wizard");
   assert.equal(cleanTitle("  \n "), null);
+  // The Claude app's build has answered with an object, not the string its types promise.
+  assert.equal(cleanTitle({ text: "Room titles" }), "Room titles");
+  assert.equal(cleanTitle({ content: [{ type: "text", text: "Room titles" }] }), "Room titles");
+  assert.equal(cleanTitle({ usage: {} }), null);
   assert.equal(cleanTitle("x".repeat(80)).length, 60);
 });
