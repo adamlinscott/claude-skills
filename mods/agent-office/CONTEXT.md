@@ -22,6 +22,10 @@ _Avoid_: worktree, branch (a room may span several)
 One conversation between a human and their lead agent, as one agent tool records it.
 _Avoid_: room (a session is in a room), chat, thread
 
+**Lights off**:
+A room whose sessions have all gone quiet for a while. It stays in the office for some hours, as it was when it went quiet, faded and out of reach, then leaves.
+_Avoid_: archived, closed, asleep
+
 ### People
 
 **Person**:

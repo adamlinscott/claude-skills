@@ -20,6 +20,8 @@ const INK = {
   info: 0x7aa7f5,
   youWash: 0x1b3033,
   table: 0x24343a,
+  off: 0x56625f, // every letter in a lights-off room
+  offTable: 0x1c2629,
 };
 const GLYPH = { you: "★", lead: "L", worker: "W", scout: "S", researcher: "R", reviewer: "V" };
 // The mark after the figure: stalled !, failed ×, stopped ■ (ended early, never answers).
@@ -74,6 +76,17 @@ export function renderCells(scene, tick = 0) {
     if (awaited.has(p.id)) put(p.x - 3, p.y, PHASES[tick % PHASES.length], INK.dim);
     put(p.x - 3, p.y + 1, clip(p.label, 10), p.role === "you" ? INK.you : INK.dim);
   }
+  // A lights-off room, as it was, in one dim colour.
+  for (const r of scene.rooms.filter((r) => r.off)) {
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) {
+        const i = at(x, y);
+        if (i < 0) continue;
+        fg[i] = INK.off;
+        if (bg[i] !== DEFAULT) bg[i] = INK.offTable;
+      }
+    }
+  }
   if (scene.hidden) put(0, H - 1, `+${scene.hidden} more room${scene.hidden > 1 ? "s" : ""}: give the pane more rows to see ${scene.hidden > 1 ? "them" : "it"}`, INK.dim);
 
   const words = new Uint32Array(W * H * 3);
@@ -84,7 +97,7 @@ export function renderCells(scene, tick = 0) {
 /**
  * The pane's tree on the terminal: the plan as a Raster keyed "plan", a plain Button over each
  * person's label so the pane's focus ring (Tab and the arrows, once the pane has the keys) walks
- * between people, then the selected person's detail under the plan.
+ * between people, none in a lights-off room, then the selected person's detail under the plan.
  *
  * el: the surface's elements ({ Box, Text, Raster, Button }). selected: an agent id or null.
  * onSelect(id): what a press on a person runs. detailRows: the rows the detail is cut to.
@@ -92,7 +105,7 @@ export function renderCells(scene, tick = 0) {
 export function drawTerminal(scene, el, { tick = 0, selected = null, onSelect = () => {}, detailRows = Infinity } = {}) {
   const { Box, Text, Raster, Button } = el;
   const plan = renderCells(scene, tick);
-  const seats = scene.people.map((p) =>
+  const seats = scene.people.filter((p) => !p.off).map((p) =>
     Box({
       key: "at:" + p.id,
       position: "absolute",

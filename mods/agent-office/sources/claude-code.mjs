@@ -120,11 +120,14 @@ export function createClaudeCode(io) {
   }
 
   // Every session transcript whose newest write (its own, or any subagent's) is inside the idle
-  // window. Filtering on mtime first means a quiet transcript is never opened. A subagent is kept
-  // while it is inside the idle window or the touched-file window, whichever is wider, so its
-  // edits still count towards a possible conflict.
+  // window, lights on, or inside `lightsOffHours`, lights off. Filtering on mtime first means a
+  // quiet transcript is never opened. A subagent is kept while it is inside the idle window or the
+  // touched-file window, whichever is wider, so its edits still count towards a possible conflict.
+  // With the lights off that window ends at the session's last activity, not now: the room keeps
+  // whoever was there when it went quiet.
   async function findSessions(projectsDir, now, config) {
     const idleMs = config.idleMinutes * 60000;
+    const keepMs = Math.max(idleMs, config.lightsOffHours * 3600000);
     const agentWindowMs = Math.max(idleMs, config.touchedWindowMinutes * 60000);
     const out = [];
     for (const slug of await io.listDir(projectsDir)) {
@@ -134,21 +137,23 @@ export function createClaudeCode(io) {
         if (entry.isDir || !entry.name.endsWith(".jsonl")) continue;
         const path = join(slugDir, entry.name);
         const st = await io.stat(path);
-        if (!st || now - st.mtimeMs > SUBAGENT_LOOKBACK_MS) continue;
+        if (!st || now - st.mtimeMs > Math.max(SUBAGENT_LOOKBACK_MS, keepMs)) continue;
         const id = entry.name.slice(0, -".jsonl".length);
-        const agents = [];
+        const all = [];
         // Subagents of subagents sit in the same folder; meta.json says who started them.
         const subDir = join(slugDir, `${id}/subagents`);
         for (const f of await io.listDir(subDir)) {
           const m = /^agent-(.+)\.jsonl$/.exec(f.name);
           if (f.isDir || !m) continue;
           const ast = await io.stat(join(subDir, f.name));
-          if (ast && now - ast.mtimeMs <= agentWindowMs) {
-            agents.push({ id: m[1], path: join(subDir, f.name), metaPath: join(subDir, `agent-${m[1]}.meta.json`), ...ast });
-          }
+          if (ast) all.push({ id: m[1], path: join(subDir, f.name), metaPath: join(subDir, `agent-${m[1]}.meta.json`), ...ast });
         }
-        const lastActive = Math.max(st.mtimeMs, ...agents.map((a) => a.mtimeMs));
-        if (now - lastActive <= idleMs) out.push({ id, path, size: st.size, ownMtime: st.mtimeMs, lastActive, agents });
+        const lastActive = Math.max(st.mtimeMs, ...all.map((a) => a.mtimeMs));
+        if (now - lastActive > keepMs) continue;
+        const lit = now - lastActive <= idleMs;
+        const from = lit ? now : lastActive;
+        const agents = all.filter((a) => from - a.mtimeMs <= agentWindowMs);
+        out.push({ id, path, size: st.size, ownMtime: st.mtimeMs, lastActive, lights: lit ? "on" : "off", agents });
       }
     }
     return out;
@@ -194,6 +199,7 @@ export function createClaudeCode(io) {
       checkout: where.toplevel,
       lastActive: iso(c.lastActive),
       status: now - c.lastActive <= config.activeMinutes * 60000 ? "active" : "idle",
+      lights: c.lights,
     });
 
     // The lead works while its turn is open: from a prompt (or a notification it takes up) until

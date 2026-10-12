@@ -3,7 +3,7 @@
 // the terminal as cells, the Desktop pane as an SVG with each cell scaled to pixels.
 //
 // Grid layout A, as agreed on #46: the viewer's room first, then every other room in a fixed
-// place, idle rooms with nothing to show folded into a one-line strip. Placing rooms (layout) is a
+// place, rooms with the lights off after the rest, drawn faded. Placing rooms (layout) is a
 // separate step from drawing one (drawRoom), and a room is drawn from its list of sessions, so a
 // later layout or a room of several sessions changes neither.
 //
@@ -32,9 +32,9 @@ export function viewerFor(model, sessionId) {
 /**
  * model, viewer → scene, in terminal cells:
  *   { w, h, order, hidden,
- *     rooms:  [{ id, x, y, w, h, title, sub, you, idle, folded }],
- *     tables: [{ x, y, w }],                       two rows tall
- *     people: [{ id, x, y, role, look, label, bubble: { file, clash } | null, info, card: { title, lines } }],
+ *     rooms:  [{ id, x, y, w, h, title, sub, you, idle, folded, off }],
+ *     tables: [{ x, y, w, off }],                  two rows tall
+ *     people: [{ id, x, y, role, look, label, bubble: { file, clash } | null, info, off, card: { title, lines } }],
  *     lines:  [{ from: waiter id, to: agent id }]  only between people drawn }
  *
  * columns: the width to fill. rows: the height to fit (the terminal's pane); rooms past it fold,
@@ -52,10 +52,11 @@ export function layout(model, viewer, { columns = 124, rows = Infinity, order = 
   const width = Math.max(columns, ROOM_MIN_W);
 
   const yours = rooms.find((r) => r.sessions.includes(viewer.session));
-  const open = rooms.filter((r) => r !== yours && !restful(office, r));
-  const folded = rooms.filter((r) => r !== yours && restful(office, r));
-  // Squeezed into `rows`: open rooms fold from the last, then rooms drop from the end.
-  let plan = [...(yours ? [{ room: yours, fold: false }] : []), ...open.map((room) => ({ room, fold: false })), ...folded.map((room) => ({ room, fold: true }))];
+  const lit = rooms.filter((r) => r !== yours && !lightsOff(office, r));
+  const off = rooms.filter((r) => r !== yours && lightsOff(office, r));
+  // Squeezed into `rows`: open rooms fold from the last, so lights-off rooms first, then rooms drop
+  // from the end.
+  let plan = [yours, ...lit, ...off].filter(Boolean).map((room) => ({ room, fold: false }));
   let hidden = 0;
   const tall = () => place(office, plan, width).h + (hidden ? 1 : 0) > rows;
   while (tall()) {
@@ -118,15 +119,10 @@ function index(model, viewer, now, window) {
   return { sessions, rooms, agents, team, conflicts, findings, reports, viewer, now, window };
 }
 
-// A room folds when its sessions are idle, none of its agents is working or stalled, and none has
-// findings still to read.
-function restful(office, room) {
-  return room.sessions.every((id) => {
-    const s = office.sessions.get(id);
-    if (s.status !== "idle") return false;
-    const people = [office.agents.get(s.lead), ...(office.team.get(id) || [])].filter(Boolean);
-    return !people.some((a) => a.status === "working" || a.status === "stalled" || office.findings.has(a.id));
-  });
+// A room's lights are off once all its sessions have gone quiet past the engine's idle window. The
+// viewer's own room never is: the pane is open in it.
+function lightsOff(office, room) {
+  return !room.sessions.includes(office.viewer.session) && room.sessions.every((id) => office.sessions.get(id).lights === "off");
 }
 
 // Seats per row at a table: half the team, at most what fits across `width`.
@@ -159,12 +155,14 @@ function drawRoom(scene, office, room, fold, x, y, width) {
   const sessions = room.sessions.map((id) => office.sessions.get(id));
   const you = room.sessions.includes(office.viewer.session);
   const idle = sessions.every((s) => s.status === "idle");
+  const off = lightsOff(office, room);
   const since = Math.max(...sessions.map((s) => Date.parse(s.lastActive)));
   const title = roomTitle(office, room);
   let sub;
-  if (fold) sub = idle ? `idle ${duration(office.now - since)} · lights off` : "folded to fit";
+  if (off) sub = `lights off · idle ${duration(office.now - since)}`;
+  else if (fold) sub = "folded to fit";
   else sub = sessions.map((s) => [s.branch, folderName(s.checkout)].filter(Boolean).join(" · ")).join("  |  ") + (idle ? `  ·  idle ${duration(office.now - since)}` : "");
-  scene.rooms.push({ id: room.id, x, y, w, h, title, sub, you, idle, folded: fold });
+  scene.rooms.push({ id: room.id, x, y, w, h, title, sub, you, idle, folded: fold, off });
   if (fold) return;
 
   let cy = y + HEAD_H;
@@ -173,14 +171,14 @@ function drawRoom(scene, office, room, fold, x, y, width) {
     const per = seatsPerRow(subs.length, width);
     const tx = x + 2 + LEAD_W;
     const lead = office.agents.get(s.lead);
-    if (lead) scene.people.push(person(office, lead, s, x + 4, cy + 4));
-    scene.tables.push({ x: tx, y: cy + 4, w: per * SEAT - 1 });
+    if (lead) scene.people.push(person(office, lead, s, x + 4, cy + 4, off));
+    scene.tables.push({ x: tx, y: cy + 4, w: per * SEAT - 1, off });
     subs.forEach((a, i) => {
       const row = Math.floor(i / per);
       const col = i % per;
       // Row 0 sits above the table, the rest below it.
       const fy = row === 0 ? cy + 1 : cy + 7 + 3 * (row - 1);
-      scene.people.push(person(office, a, s, tx + col * SEAT + 4, fy));
+      scene.people.push(person(office, a, s, tx + col * SEAT + 4, fy, off));
     });
     cy += blockH(Math.ceil(subs.length / per));
   }
@@ -195,7 +193,7 @@ function labelOf(office, a) {
   return a.agentType || a.role || "other";
 }
 
-function person(office, a, session, x, y) {
+function person(office, a, session, x, y, off) {
   const you = a.startedBy === null && a.session === office.viewer.session;
   const label = labelOf(office, a);
   // A write bubble turns red when anyone else, in any room, edited the file lately: never for the
@@ -211,6 +209,7 @@ function person(office, a, session, x, y) {
     label,
     bubble: file ? { file, clash: others.length > 0 } : null,
     info: office.findings.has(a.id),
+    off,
     card: card(office, a, session, label, others),
   };
 }

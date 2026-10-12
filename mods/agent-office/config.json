@@ -1,6 +1,7 @@
 {
   "activeMinutes": 2,
   "idleMinutes": 30,
+  "lightsOffHours": 24,
   "quietSeconds": 60,
   "stalledMinutes": 5,
   "touchedWindowMinutes": 30,

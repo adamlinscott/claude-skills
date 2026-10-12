@@ -41,7 +41,8 @@ const STYLE = `
 .stop-sq{fill:var(--ink-2)}
 .bub{stroke:var(--wall);stroke-width:.8}.bub.w{fill:var(--lamp)}.bub.c{fill:var(--clash)}
 .bub-t{font:700 10px ${FONT};fill:var(--bubble-ink)}
-.info-c{fill:var(--info)}.info-t{font:700 10px Georgia,serif;fill:var(--sheet)}`;
+.info-c{fill:var(--info)}.info-t{font:700 10px Georgia,serif;fill:var(--sheet)}
+.off{opacity:.45;filter:saturate(.15)}`;
 
 // The profile silhouettes: one body, one accessory per role (#46).
 const BODY = `<g class="body"><circle cx="12" cy="8.6" r="4.6"/><path d="M2.6 23.4c0-5.6 4.2-9 9.4-9s9.4 3.4 9.4 9z"/></g>`;
@@ -70,8 +71,12 @@ const centre = (p) => [px((p.x + 1) * CELL.w), px((p.y + 0.5) * CELL.h)];
 export function renderSvg(scene) {
   const width = px(scene.w * CELL.w);
   const height = px(Math.max(1, scene.h) * CELL.h);
-  const out = [];
+  // Lights-off rooms go in one faded group: every colour, text and figure in them, as they were.
+  const lit = [];
+  const dark = [];
+  const into = (item) => (item.off ? dark : lit);
   for (const r of scene.rooms) {
+    const out = into(r);
     const [x, y, w, h] = [px(r.x * CELL.w), px(r.y * CELL.h), px(r.w * CELL.w), px(r.h * CELL.h)];
     const wash = r.you ? "room-you" : r.idle ? "room-dim" : null;
     if (wash) out.push(`<rect class="${wash}" x="${x}" y="${y}" width="${w}" height="${h}"/>`);
@@ -88,15 +93,16 @@ export function renderSvg(scene) {
       out.push(`<text class="t" x="${x + 10}" y="${px(y + CELL.h * 1.75)}">${esc(clip(r.sub, Math.floor((w - 20) / 6.4)))}</text>`);
     }
   }
-  for (const t of scene.tables) out.push(`<rect class="table" x="${px(t.x * CELL.w)}" y="${px(t.y * CELL.h + 4)}" width="${px(t.w * CELL.w)}" height="${px(2 * CELL.h - 8)}" rx="4"/>`);
+  for (const t of scene.tables) into(t).push(`<rect class="table" x="${px(t.x * CELL.w)}" y="${px(t.y * CELL.h + 4)}" width="${px(t.w * CELL.w)}" height="${px(2 * CELL.h - 8)}" rx="4"/>`);
   const at = new Map(scene.people.map((p) => [p.id, p]));
   for (const l of scene.lines) {
     const [ax, ay] = centre(at.get(l.from));
     const [bx, by] = centre(at.get(l.to));
     // From beside the waiter, curving into the agent it waits on, ending short of the figure.
-    out.push(`<path class="flow" d="M${px(ax + 14)} ${ay}C${px((ax + bx) / 2)} ${ay} ${bx} ${px((ay + by) / 2)} ${bx} ${px(by + (by < ay ? 16 : -18))}"/>`);
+    into(at.get(l.from)).push(`<path class="flow" d="M${px(ax + 14)} ${ay}C${px((ax + bx) / 2)} ${ay} ${bx} ${px((ay + by) / 2)} ${bx} ${px(by + (by < ay ? 16 : -18))}"/>`);
   }
   for (const p of scene.people) {
+    const out = into(p);
     const [cx, cy] = centre(p);
     if (p.look === "work") out.push(`<circle class="glow" cx="${cx}" cy="${px(cy - 3)}" r="15"/>`);
     out.push(`<use href="#av-${ACCESSORY[p.role] === undefined ? "other" : p.role}" class="av ${p.look}" x="${px(cx - 13)}" y="${px(cy - 17)}" width="26" height="26"/>`);
@@ -120,17 +126,17 @@ export function renderSvg(scene) {
     }
     out.push(`<text class="t lab${p.role === "you" ? " youc" : ""}" x="${cx}" y="${px((p.y + 1) * CELL.h + 13)}" text-anchor="middle">${esc(clip(p.label, 12))}</text>`);
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><style>${STYLE}</style><defs>${SYMBOLS}</defs>${out.join("")}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><style>${STYLE}</style><defs>${SYMBOLS}</defs>${lit.join("")}${dark.length ? `<g class="off">${dark.join("")}</g>` : ""}</svg>`;
 }
 
 /**
  * The pane's plan on the Desktop: the Svg, with a keyed Box over each seat whose card appears
- * while the pointer is over it. el: the surface's elements ({ Box, Text, Svg }).
+ * while the pointer is over it; none in a lights-off room. el: the surface's elements ({ Box, Text, Svg }).
  */
 export function drawDesktop(scene, el) {
   const { Box, Text, Svg } = el;
   const svg = Svg({ source: renderSvg(scene), alt: describe(scene), width: px(scene.w * CELL.w), height: px(Math.max(1, scene.h) * CELL.h) });
-  const seats = scene.people.map((p) => {
+  const seats = scene.people.filter((p) => !p.off).map((p) => {
     // A whole seat (the room above the figure, the figure, its label) is the hover spot: the cell
     // size is only roughly known, so the spot is generous rather than exact.
     const seat = { top: p.y - 1, left: p.x - 3, w: 9, h: 3 };
@@ -185,7 +191,7 @@ function describe(scene) {
   if (!scene.rooms.length) return "Agent Office floor plan: no sessions in this project yet.";
   const rooms = scene.rooms.map((r) => {
     const people = scene.people.filter((p) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
-    return `${r.you ? "your room, " : ""}${r.title}${people.length ? ": " + people.map((p) => `${p.label} ${p.card.lines[1]}`).join(", ") : r.folded ? " (" + r.sub + ")" : ""}`;
+    return `${r.you ? "your room, " : ""}${r.title}${r.off || r.folded ? " (" + r.sub + ")" : ""}${people.length ? ": " + people.map((p) => `${p.label} ${p.card.lines[1]}`).join(", ") : ""}`;
   });
   return "Agent Office floor plan. " + rooms.join(". ") + ".";
 }

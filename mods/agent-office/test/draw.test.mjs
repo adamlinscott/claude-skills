@@ -128,6 +128,26 @@ test("desktop: every hover card is wide enough for its text and stays inside the
   }
 });
 
+test("lights off: faded in the SVG and dim in the cells, with no hover box or seat button for its people", () => {
+  const night = office([
+    { id: "a", sessions: [{ id: "s-a" }] },
+    { id: "z", sessions: [{ id: "s-z", status: "idle", idle: 180, lights: "off", lead: "idle", team: [{ id: "v9", type: "reviewer", role: "reviewer", status: "done", report: "Looks fine." }] }] },
+  ]);
+  const s = layout(night, viewerFor(night, "s-a"), { columns: 90 });
+  const svg = renderSvg(s);
+  const faded = svg.slice(svg.indexOf('<g class="off">'));
+  assert.ok(faded.includes("Room z") && faded.includes('class="info-c"') && !faded.includes("Room a"));
+  assert.deepEqual(drawDesktop(s, el).props.children.slice(1).map((b) => b.props.key), ["seat:s-a:lead"]);
+  const [, ...seats] = drawTerminal(s, el).props.children[0].props.children;
+  assert.deepEqual(seats.map((b) => seatOf(b.props.children[0].props.key)), ["s-a:lead"]);
+  assert.equal(seats[0].props.children[0].props.autoFocus, true);
+  const cells = renderCells(s);
+  const words = new Uint32Array(Uint8Array.from(atob(cells.cells), (c) => c.charCodeAt(0)).buffer);
+  const v9 = s.people.find((p) => p.id === "v9");
+  assert.equal(text(cells)[v9.y].slice(v9.x, v9.x + 3), "●Vi");
+  assert.equal(words[(v9.y * cells.columns + v9.x) * 3 + 1], 0x56625f);
+});
+
 test("desktop: a report card taller than the plan is cut to it, ending in …", () => {
   const one = office([{ id: "a", sessions: [{ id: "s-a", team: [{ id: "v1", type: "reviewer", role: "reviewer", status: "done", report }] }] }]);
   const short = layout(one, viewerFor(one, "s-a"));

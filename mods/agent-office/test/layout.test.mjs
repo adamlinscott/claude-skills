@@ -29,22 +29,35 @@ test("fixed places: rooms keep the order the pane first saw them in, and a new r
   assert.deepEqual(next.order, ["room:a", "room:b", "room:c"]);
 });
 
-test("folding: an idle room with nobody working or stalled folds into a strip; yours never does", () => {
+test("no idle folding: an idle room with nobody working stays open, in its place, dimmed", () => {
   const m = office([
-    { id: "mine", sessions: [{ id: "s-m", status: "idle", lead: "idle" }] },
+    { id: "mine", sessions: [{ id: "s-m" }] },
     { id: "quiet", sessions: [{ id: "s-q", status: "idle", lead: "idle", team: [{ id: "q1", status: "done" }] }] },
-    { id: "stuck", sessions: [{ id: "s-s", status: "idle", lead: "idle", team: [{ id: "s1", status: "stalled" }] }] },
     { id: "busy", sessions: [{ id: "s-b" }] },
   ]);
   const scene = layout(m, viewer(m, "s-m"));
+  const quiet = scene.rooms.find((r) => r.id === "room:quiet");
+  assert.deepEqual(roomIds(scene), ["room:mine", "room:quiet", "room:busy"]);
+  assert.deepEqual([quiet.folded, quiet.idle, quiet.off], [false, true, false]);
+  assert.equal(who(scene, "q1").off, false);
+});
+
+test("lights off: after the rooms with lights on, full size with their people, all marked off; never your room", () => {
+  const night = { status: "idle", idle: 180, lights: "off", lead: "idle" };
+  const m = office([
+    { id: "dark", sessions: [{ id: "s-d", ...night, team: [{ id: "d1", status: "stalled" }] }] },
+    { id: "mine", sessions: [{ id: "s-m", ...night }] },
+    { id: "lit", sessions: [{ id: "s-l" }] },
+  ]);
+  const scene = layout(m, viewer(m, "s-m"));
   const room = (id) => scene.rooms.find((r) => r.id === id);
-  assert.deepEqual(roomIds(scene), ["room:mine", "room:stuck", "room:busy", "room:quiet"]);
-  assert.equal(room("room:quiet").folded, true);
-  assert.equal(room("room:quiet").h, 3);
-  assert.match(room("room:quiet").sub, /^idle 10m · lights off$/);
-  assert.equal(room("room:stuck").folded, false);
-  assert.equal(room("room:mine").folded, false);
-  assert.equal(who(scene, "q1"), undefined, "a folded room draws nobody");
+  assert.deepEqual(roomIds(scene), ["room:mine", "room:lit", "room:dark"]);
+  assert.deepEqual([room("room:dark").off, room("room:dark").folded, room("room:dark").sub], [true, false, "lights off · idle 3h"]);
+  assert.equal(room("room:mine").off, false);
+  assert.equal(room("room:lit").off, false);
+  assert.deepEqual([who(scene, "s-d:lead").off, who(scene, "d1").off, who(scene, "d1").look], [true, true, "stall"]);
+  assert.equal(who(scene, "s-m:lead").off, false);
+  assert.deepEqual(scene.tables.map((t) => t.off), [false, false, true]);
 });
 
 test("a room is drawn from its list of sessions: each session gets its lead and its own table", () => {
@@ -64,7 +77,9 @@ test("waits give lines, from the agent waiting to the agent it waits on, only be
     { id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", waited: true }, { id: "w2", status: "done" }] }] },
     { id: "z", sessions: [{ id: "s-z", status: "idle", lead: "idle", team: [{ id: "w9", status: "idle", waited: true }] }] },
   ]);
-  const scene = layout(m, viewer(m, "s-a"));
+  // Stacked, with the second room folded to fit: its people aren't drawn.
+  const scene = layout(m, viewer(m, "s-a"), { columns: 40, rows: 18 });
+  assert.equal(scene.rooms[1].folded, true);
   assert.deepEqual(scene.lines, [{ from: "s-a:lead", to: "w1" }]);
 });
 
@@ -151,6 +166,12 @@ test("fitting rows: open rooms fold from the last, then rooms past the bottom ar
   assert.equal(squeezed.rooms[0].folded, false, "your room stays open");
   assert.equal(squeezed.rooms.find((r) => r.id === "room:d").folded, true);
   assert.equal(squeezed.rooms.find((r) => r.id === "room:d").sub, "folded to fit");
+
+  // Two rooms fold either way; with b's lights off, b folds before c does.
+  assert.deepEqual(squeezed.rooms.map((r) => [r.id, r.folded]), [["room:a", false], ["room:b", false], ["room:c", true], ["room:d", true]]);
+  const night = office(rooms.map((r) => (r.id === "b" ? { ...r, sessions: [{ ...r.sessions[0], status: "idle", lights: "off" }] } : r)));
+  const dark = layout(night, viewer(night, "s-a"), { columns: 84, rows: 20 });
+  assert.deepEqual(dark.rooms.map((r) => [r.id, r.folded]), [["room:a", false], ["room:c", false], ["room:d", true], ["room:b", true]]);
 
   const tiny = layout(m, viewer(m, "s-a"), { columns: 40, rows: 12 });
   assert.ok(tiny.hidden > 0);

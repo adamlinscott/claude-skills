@@ -44,7 +44,7 @@ test("groups sessions by git common dir across worktrees; skips bad lines; title
   assert.equal(s["s-wt"].checkout, normalize(wt));
 });
 
-test("liveness: active, idle, hidden — and a busy subagent keeps a quiet session live", async () => {
+test("liveness: active, idle, lights off — and a busy subagent keeps a quiet session live", async () => {
   const { home, main } = office();
   session(home, "active", [line.user(main, "x")], { age: 30 });
   session(home, "idle", [line.user(main, "x")], { age: 10 * 60 });
@@ -55,9 +55,42 @@ test("liveness: active, idle, hidden — and a busy subagent keeps a quiet sessi
   const s = await sessionsOf(home, main);
   assert.equal(s.active.status, "active");
   assert.equal(s.idle.status, "idle");
-  assert.equal(s.gone, undefined);
+  assert.deepEqual([s.active.lights, s.idle.lights, s.waiting.lights], ["on", "on", "on"]);
+  assert.deepEqual([s.gone.status, s.gone.lights], ["idle", "off"]);
   assert.equal(s.waiting.status, "active");
   assert.equal(s.waiting.lastActive, at(20));
+});
+
+test("lights off: kept until lightsOffHours, with the subagents in view when the session went quiet", async () => {
+  const { home, main } = office();
+  const hours = (h) => h * 3600;
+  fs.mkdirSync(path.join(home, ".claude", "agent-office"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".claude", "agent-office", "config.json"), JSON.stringify({ lightsOffHours: 5 }));
+  session(home, "last-night", [line.user(main, "x", hours(3))], { age: hours(3) });
+  // Ten minutes before the lead's last line, inside the window back from it; an hour before, not.
+  agent(home, "last-night", "late", { agentType: "reviewer" }, [line.text(main, "Looks fine.", hours(3) + 600)], { age: hours(3) + 600 });
+  agent(home, "last-night", "early", { agentType: "worker" }, [line.text(main, "Done.", hours(4))], { age: hours(4) });
+  session(home, "too-old", [line.user(main, "x", hours(6))], { age: hours(6) });
+  const m = await modelOf(home, main);
+  const s = byId(m.sessions);
+  assert.deepEqual([s["last-night"].lights, s["last-night"].status], ["off", "idle"]);
+  assert.equal(s["too-old"], undefined);
+  assert.deepEqual(m.agents.map((a) => a.id), [cc("last-night:lead"), cc("late")]);
+  assert.equal(byId(m.agents).late.status, "done"); // worked out at now, by the usual rules
+});
+
+test("lights off: lightsOffHours 0 drops a session once it has been quiet for idleMinutes", async () => {
+  const { root, home, main } = office();
+  const defaults = path.join(root, "defaults");
+  fs.mkdirSync(defaults);
+  const config = JSON.parse(fs.readFileSync(path.join(defaultsDir, "config.json"), "utf8"));
+  fs.writeFileSync(path.join(defaults, "config.json"), JSON.stringify({ ...config, lightsOffHours: 0 }));
+  fs.copyFileSync(path.join(defaultsDir, "roles.json"), path.join(defaults, "roles.json"));
+  session(home, "idle", [line.user(main, "x")], { age: 10 * 60 });
+  session(home, "gone", [line.user(main, "x")], { age: 40 * 60 });
+  const io = nodeIo({ claudeDir: path.join(home, ".claude"), now: () => NOW, run: null });
+  const m = await createEngine(io, { defaultsDir: defaults, project: main }).model();
+  assert.deepEqual(m.sessions.map((x) => [x.id, x.lights]), [[cc("idle"), "on"]]);
 });
 
 test("no self: the model is viewer-neutral, the same from any folder of the project", async () => {

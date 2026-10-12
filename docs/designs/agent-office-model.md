@@ -23,7 +23,7 @@ OfficeModel
 
   humans          [{ id, name }]                      name from git user.name; email stays on the machine
   sessions        [{ id, source, owner: human id, lead: agent id, title, branch, checkout,
-                     lastActive, status: "active" | "idle" }]
+                     lastActive, status: "active" | "idle", lights: "on" | "off" }]
   rooms           [{ id, sessions: [session id], title }]
 
   agents          [{ id, source, session, startedBy: agent id | null (a lead),
@@ -41,6 +41,8 @@ OfficeModel
 ```
 
 `status` is one of `working`, `idle`, `done`, `stalled`, `stopped`, `failed`. `stalled` means gone quiet, and it may still answer; `stopped` means someone ended it early, and it never answers or leaves a report. Waiting is never a status: an agent with waits can be working or idle.
+
+A session's `lights` go `off` once it has been quiet for `idleMinutes`. The engine keeps it for up to `lightsOffHours` after its last activity, with the subagents that were in view when it went quiet; their statuses are still worked out at the model's time. Views draw a room whose sessions all have the lights off faded, and don't let anyone interact with it.
 
 `role` comes from the role catalogue, an open list (worker, scout, researcher, reviewer, lead, and any added later, such as accountant). An agent type with no catalogue entry gets `other`.
 
