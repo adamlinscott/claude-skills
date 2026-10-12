@@ -44,6 +44,19 @@ test("groups sessions by git common dir across worktrees; skips bad lines; title
   assert.equal(s["s-wt"].checkout, normalize(wt));
 });
 
+test("titleFrom says whose the title is; an agent's task is its meta.json description, a lead's null", async () => {
+  const { home, main } = office();
+  session(home, "named", [line.user(main, "hi", 30, { gitBranch: "main" }), line.title("Room label")]);
+  session(home, "bare", [line.user(main, "hi", 30, { gitBranch: "fix/wizard" })]);
+  agent(home, "bare", "w", { agentType: "worker", description: "Fix the wizard" }, [line.tool(main, "Read", { file_path: "x" }, 5)], { age: 5 });
+  agent(home, "bare", "q", { agentType: "scout", description: "" }, [line.tool(main, "Read", { file_path: "x" }, 5)], { age: 5 });
+  const m = await modelOf(home, main);
+  const s = byId(m.sessions);
+  assert.deepEqual([s.named.title, s.named.titleFrom, s.bare.title, s.bare.titleFrom], ["Room label", "source", "fix/wizard", "branch"]);
+  const a = byId(m.agents);
+  assert.deepEqual([a.w.task, a.q.task, a["bare:lead"].task], ["Fix the wizard", null, null]);
+});
+
 test("liveness: active, idle, lights off — and a busy subagent keeps a quiet session live", async () => {
   const { home, main } = office();
   session(home, "active", [line.user(main, "x")], { age: 30 });

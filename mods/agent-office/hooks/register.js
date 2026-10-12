@@ -15,6 +15,7 @@ import { loadConfig } from "../engine.mjs";
 import { layout, statusLine, viewerFor, drawable } from "../layout.mjs";
 import { drawDesktop } from "../draw-desktop.mjs";
 import { drawTerminal, renderCells, seatOf } from "../draw-terminal.mjs";
+import { nextTitle, writtenTitles, cleanTitle, TITLE_SYSTEM } from "../titles.mjs";
 
 const PANE = "agent-office";
 const RESTARTS = 3; // streams in a row that end without a model before falling back to --json
@@ -33,6 +34,10 @@ let order = []; // room ids in the order this pane first saw them
 let selected = null; // the person the terminal's focus ring is on
 let tick = 0;
 const shown = {}; // surface → what it last drew: { columns, rows, key, scene }
+// Titles written for rooms named only by their branch: session id → { key, title, at }. Kept for
+// the life of the module, so reopening the pane doesn't ask again.
+const titles = new Map();
+let asking = false; // one title call in flight at a time
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
@@ -99,7 +104,7 @@ export function register(on) {
 function frame(columns, rows) {
   const status = statusLine(model, engine);
   if (!drawable(model)) return { status, scene: null };
-  const scene = layout(model, viewerFor(model, viewer), { columns, rows, order, now: Date.now() });
+  const scene = layout(model, viewerFor(model, viewer), { columns, rows, order, now: Date.now(), titles: writtenTitles(titles) });
   order = scene.order;
   return { status, scene };
 }
@@ -124,7 +129,10 @@ async function start($) {
   const cli = $.plugin.root.replace(/\\/g, "/") + "/cli.mjs";
 
   timers = [
-    $.clock.every(REFRESH_MS, () => changed($)),
+    $.clock.every(REFRESH_MS, () => {
+      changed($);
+      askTitle($);
+    }),
     // The terminal's arrows move by repainting the plan's cells: no pane redraw.
     $.clock.every(ANIMATE_MS, () => {
       const t = shown.terminal;
@@ -161,7 +169,34 @@ function accept($, me, text) {
   model = next;
   if (engine !== "fallback") engine = "running";
   changed($);
+  askTitle($);
   return true;
+}
+
+// Asks the small model for the next room title that is due, in the background: drawing never
+// waits on it. The branch shows until a title comes back; a failed call or an empty reply leaves
+// it, and is tried again once the rate limit allows.
+function askTitle($) {
+  if (asking || !drawable(model)) return;
+  const now = Date.now();
+  const ask = nextTitle(model, titles, now);
+  if (!ask) return;
+  const before = titles.get(ask.session);
+  titles.set(ask.session, { key: before ? before.key : null, title: before ? before.title : null, at: now });
+  asking = true;
+  $.model
+    .complete({ model: "haiku", system: TITLE_SYSTEM, prompt: ask.prompt, maxTokens: 40 })
+    .then((reply) => {
+      const title = cleanTitle(reply);
+      if (!title) return;
+      titles.set(ask.session, { key: ask.key, title, at: now });
+      changed($);
+    })
+    .catch((err) => $.ui.log("agent-office: could not write a room title: " + message(err), { to: "debug" }))
+    .finally(() => {
+      asking = false;
+      askTitle($); // the next room due, so a morning start doesn't wait on the refresh timer
+    });
 }
 
 async function stream($, me, cli, cwd) {

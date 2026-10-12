@@ -22,12 +22,13 @@ OfficeModel
   sources         [{ id: "claude-code", status: null | one-line problem, errors: { count, first } }]
 
   humans          [{ id, name }]                      name from git user.name; email stays on the machine
-  sessions        [{ id, source, owner: human id, lead: agent id, title, branch, checkout,
+  sessions        [{ id, source, owner: human id, lead: agent id, title,
+                     titleFrom: "source" | "branch", branch, checkout,
                      lastActive, status: "active" | "idle", lights: "on" | "off" }]
   rooms           [{ id, sessions: [session id], title }]
 
   agents          [{ id, source, session, startedBy: agent id | null (a lead),
-                     agentType, role, status, statusSince, lastActive,
+                     agentType, role, task: short task name | null, status, statusSince, lastActive,
                      doing: { kind: "write" | "read" | "run" | "search" | "talk", file?, since } | null,
                      checkout?, branch? }]
   edits           [{ agent, file, at }]               file relative to the repo root, forward slashes
@@ -41,6 +42,8 @@ OfficeModel
 ```
 
 `status` is one of `working`, `idle`, `done`, `stalled`, `stopped`, `failed`. `stalled` means gone quiet, and it may still answer; `stopped` means someone ended it early, and it never answers or leaves a report. Waiting is never a status: an agent with waits can be working or idle.
+
+A session's `title` is the tool's own when it has one (`titleFrom: "source"`), else its branch as a stand-in (`titleFrom: "branch"`). A host may have a title written for a branch stand-in and draw that instead. An agent's `task` is the short task name it was started with; a lead has none.
 
 A session's `lights` go `off` once it has been quiet for `idleMinutes`. The engine keeps it for up to `lightsOffHours` after its last activity, with the subagents that were in view when it went quiet; their statuses are still worked out at the model's time. Views draw a room whose sessions all have the lights off faded, and don't let anyone interact with it.
 

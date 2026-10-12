@@ -61,6 +61,38 @@ test("lights off: in the room's own place, full size with its people, all marked
   assert.deepEqual(scene.tables.map((t) => t.off), [false, true, false]);
 });
 
+test("small print: now: the newest working subagent's task, else last: the one active last; nothing without a task", () => {
+  const m = office([
+    { id: "busy", sessions: [{ id: "s-b", team: [{ id: "b1", task: "Old task" }, { id: "b2", task: "New task" }, { id: "b3" }, { id: "b4", status: "done", task: "Done task" }] }] },
+    { id: "dark", sessions: [{ id: "s-d", status: "idle", idle: 180, lights: "off", lead: "idle", team: [{ id: "d1", status: "done", task: "Earlier" }, { id: "d2", status: "stopped", task: "Latest" }] }] },
+    { id: "bare", sessions: [{ id: "s-n", team: [{ id: "n1" }] }] },
+  ]);
+  const set = (id, fields) => Object.assign(m.agents.find((a) => a.id === id), fields);
+  set("b1", { statusSince: "2026-10-11T14:40:00.000Z" });
+  set("b2", { statusSince: "2026-10-11T14:50:00.000Z" });
+  set("b4", { statusSince: "2026-10-11T14:59:00.000Z" }); // started later, but not working
+  set("d1", { lastActive: "2026-10-11T11:00:00.000Z" });
+  set("d2", { lastActive: "2026-10-11T11:30:00.000Z" });
+  const sub = (scene, id) => scene.rooms.find((r) => r.id === id).sub;
+  const scene = layout(m, viewer(m, "s-b"));
+  assert.equal(sub(scene, "room:busy"), "b-s-b · s-b  ·  now: New task");
+  assert.equal(sub(scene, "room:dark"), "b-s-d · s-d  ·  lights off · idle 3h  ·  last: Latest");
+  assert.equal(sub(scene, "room:bare"), "b-s-n · s-n");
+});
+
+test("titles: a written title replaces a branch stand-in, in the room and in a card's conflict line, never Claude Code's own", () => {
+  const m = office([
+    { id: "a", sessions: [{ id: "s-a", titleFrom: "branch", team: [{ id: "w1", writing: "lib/a.mjs" }] }] },
+    { id: "b", sessions: [{ id: "s-b", team: [{ id: "w2", writing: "lib/a.mjs" }] }] },
+  ]);
+  m.meaning.conflicts = [{ file: "lib/a.mjs", agents: ["w1", "w2"], by: "rules" }];
+  const titles = { "s-a": "Fixing the setup wizard", "s-b": "Never shown" };
+  const scene = layout(m, viewer(m, "s-b"), { titles });
+  assert.deepEqual(scene.rooms.map((r) => r.title), ["Room b", "Fixing the setup wizard"]);
+  assert.match(who(scene, "w2").card.lines.find((l) => l.startsWith("possible conflict")), / in Fixing the setup wizard$/);
+  assert.equal(layout(m, viewer(m, "s-b")).rooms[1].title, "Room a", "the branch stand-in until a title is written");
+});
+
 test("a room is drawn from its list of sessions: each session gets its lead and its own table", () => {
   const m = office([{ id: "pair", sessions: [{ id: "s1", team: [{ id: "w1" }, { id: "w2" }] }, { id: "s2", team: [{ id: "w3" }] }] }]);
   const scene = layout(m, viewer(m, "s1"));
@@ -92,8 +124,8 @@ test("statuses: stopped is its own faded look, apart from failed and stalled", (
   assert.equal(who(scene, "s-a:lead").look, "work");
 });
 
-test("the card: role and agent type, status and for how long, what it is doing, its description", () => {
-  const m = office([{ id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", type: "worker-light", extra: { description: "Fix the wizard" } }] }] }]);
+test("the card: role and agent type, status and for how long, what it is doing, its task", () => {
+  const m = office([{ id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", type: "worker-light", task: "Fix the wizard" }] }] }]);
   m.agents[1].doing = { kind: "write", file: "lib/wizard.mjs", since: m.generatedAt };
   Object.assign(m.agents[1], { checkout: "C:/w/.claude/worktrees/x", branch: "x" });
   assert.deepEqual(who(layout(m, viewer(m, "s-a")), "w1").card, {

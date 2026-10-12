@@ -44,9 +44,10 @@ export function viewerFor(model, sessionId) {
  * now:     ms since the epoch, for the idle times and the cards; the model's own time by default.
  * touchedWindowMinutes: the engine's window for a possible conflict, for the card's wording. The
  *          model doesn't carry it, so it is config.json's default unless the host passes it.
+ * titles:  session id → a title the host had written for it, used in place of a branch stand-in.
  */
-export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30 } = {}) {
-  const office = index(model, viewer, now, touchedWindowMinutes);
+export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30, titles = {} } = {}) {
+  const office = index(model, viewer, now, touchedWindowMinutes, titles);
   const seen = [...order, ...model.rooms.map((r) => r.id).filter((id) => !order.includes(id))];
   const rank = new Map(seen.map((id, i) => [id, i]));
   const rooms = [...model.rooms].sort((a, b) => rank.get(a.id) - rank.get(b.id));
@@ -99,7 +100,7 @@ function place(office, plan, width) {
 }
 
 // The model looked up by id once, for the room drawing.
-function index(model, viewer, now, window) {
+function index(model, viewer, now, window, titles) {
   const sessions = new Map(model.sessions.map((s) => [s.id, s]));
   const rooms = new Map(model.rooms.flatMap((r) => r.sessions.map((id) => [id, r]))); // session id → its room
   const agents = new Map(model.agents.map((a) => [a.id, a]));
@@ -114,7 +115,7 @@ function index(model, viewer, now, window) {
   const findings = new Set(model.meaning.findings.map((f) => f.report));
   const reports = new Map(); // agent id → its latest report
   for (const r of model.reports) if (!reports.has(r.agent) || r.at >= reports.get(r.agent).at) reports.set(r.agent, r);
-  return { sessions, rooms, agents, team, conflicts, findings, reports, viewer, now, window };
+  return { sessions, rooms, agents, team, conflicts, findings, reports, viewer, now, window, titles };
 }
 
 // A room's lights are off once all its sessions have gone quiet past the engine's idle window. The
@@ -158,9 +159,11 @@ function drawRoom(scene, office, room, fold, x, y, width) {
   const title = roomTitle(office, room);
   let sub;
   const where = sessions.map((s) => [s.branch, folderName(s.checkout)].filter(Boolean).join(" · ")).join("  |  ");
+  // The task goes last: the drawing clips small print from the end.
+  const task = fold ? "" : nowLine(office, room);
   if (fold && !off) sub = "folded to fit";
-  else if (off) sub = (fold ? "" : where + "  ·  ") + `lights off · idle ${duration(office.now - since)}`;
-  else sub = where + (idle ? `  ·  idle ${duration(office.now - since)}` : "");
+  else if (off) sub = (fold ? "" : where + "  ·  ") + `lights off · idle ${duration(office.now - since)}` + task;
+  else sub = where + (idle ? `  ·  idle ${duration(office.now - since)}` : "") + task;
   scene.rooms.push({ id: room.id, x, y, w, h, title, sub, you, idle, folded: fold, off });
   if (fold) return;
 
@@ -184,7 +187,23 @@ function drawRoom(scene, office, room, fold, x, y, width) {
 }
 
 function roomTitle(office, room) {
-  return room.title || room.sessions.map((id) => office.sessions.get(id).title).filter(Boolean).join(" + ") || "Untitled session";
+  const sessions = room.sessions.map((id) => office.sessions.get(id));
+  // A v1 room's title is its session's, so a written title stands in for the room's too.
+  if (sessions.some((s) => written(office, s))) return sessions.map((s) => written(office, s) || s.title).filter(Boolean).join(" + ");
+  return room.title || sessions.map((s) => s.title).filter(Boolean).join(" + ") || "Untitled session";
+}
+
+const written = (office, s) => (s.titleFrom === "branch" && office.titles[s.id]) || null;
+
+// What the room is doing: the task of its newest working subagent (by start, which is a working
+// agent's statusSince), else the task of the one active last. Empty when no subagent has a task.
+function nowLine(office, room) {
+  const tasked = room.sessions.flatMap((id) => office.team.get(id) || []).filter((a) => a.task);
+  const newest = (list, key) => list.reduce((best, a) => (!best || a[key] > best[key] ? a : best), null);
+  const working = newest(tasked.filter((a) => a.status === "working"), "statusSince");
+  if (working) return `  ·  now: ${working.task}`;
+  const last = newest(tasked, "lastActive");
+  return last ? `  ·  last: ${last.task}` : "";
 }
 
 function labelOf(office, a) {
@@ -214,7 +233,7 @@ function person(office, a, session, x, y, off) {
 }
 
 // The hover card (the terminal's detail lines): role and agent type, status and for how long,
-// what it is doing and who else edited that file lately, its description, its own worktree when
+// what it is doing and who else edited that file lately, its task, its own worktree when
 // it has one, and the start of its report when that is a finding.
 function card(office, a, session, label, others) {
   const lines = [];
@@ -226,8 +245,7 @@ function card(office, a, session, label, others) {
     const where = b && office.rooms.get(b.session);
     lines.push(`possible conflict: also edited in the last ${office.window}m by ${b ? labelOf(office, b) : id}${where ? " in " + roomTitle(office, where) : ""}`);
   }
-  const description = a.extra && typeof a.extra.description === "string" ? a.extra.description : null;
-  if (description) lines.push(description);
+  if (a.task) lines.push(a.task);
   if (a.checkout && a.checkout !== session.checkout) lines.push(`own worktree: ${[a.branch, a.checkout].filter(Boolean).join(" · ")}`);
   if (office.findings.has(a.id) && office.reports.has(a.id)) lines.push(...reportLines(office.reports.get(a.id).text));
   return { title: label, lines };
