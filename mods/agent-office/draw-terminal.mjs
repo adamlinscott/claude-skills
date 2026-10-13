@@ -72,7 +72,8 @@ export function renderCells(scene, tick = 0) {
     if (MARK[p.look]) put(p.x + 2, p.y, MARK[p.look], INK[p.look === "stop" ? "dim" : "stall"]);
     if (p.info) put(p.x + (MARK[p.look] ? 3 : 2), p.y, "i", INK.info);
     // The write bubble: the file's name on the row above the figure, amber, or red for a clash.
-    if (p.bubble) put(p.x - 3, p.y - 1, "✎" + clip(base(p.bubble.file), 9), p.bubble.clash ? INK.clash : INK.work);
+    if (p.bubble && p.bubble.dot) put(p.x + 1, p.y - 1, "●", INK.clash);
+    else if (p.bubble) put(p.x - 3, p.y - 1, "✎" + clip(base(p.bubble.file), 9), p.bubble.clash ? INK.clash : INK.work);
     if (awaited.has(p.id)) put(p.x - 3, p.y, PHASES[tick % PHASES.length], INK.dim);
     put(p.x - 3, p.y + 1, clip(p.label, 10), p.role === "you" ? INK.you : INK.dim);
   }

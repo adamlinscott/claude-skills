@@ -15,7 +15,7 @@
 
 import { loadConfig } from "../engine.mjs";
 import { layout, statusLine, viewerFor, drawable } from "../layout.mjs";
-import { drawDesktop } from "../draw-desktop.mjs";
+import { drawDesktop, renderSvg } from "../draw-desktop.mjs";
 import { drawTerminal, renderCells, seatOf } from "../draw-terminal.mjs";
 import { nextTitle, writtenTitles, cleanTitle, TITLE_SYSTEM } from "../titles.mjs";
 import { conflictNote, writtenPaths } from "../flags.mjs";
@@ -127,10 +127,21 @@ export function register(on) {
     const out = [];
     if (view.status) out.push(el.Text({ dimColor: true, wrap: "truncate-end", children: [view.status] }));
     if (view.scene && terminal) out.push(drawTerminal(view.scene, el, { tick, onSelect: (id) => select($, id), detailRows: UNDER_PLAN_ROWS - (view.status ? 1 : 0) }));
-    else if (view.scene) out.push(drawDesktop(view.scene, el, { now: Date.now(), onSelect: (id) => pick($, id) }));
+    else if (view.scene) out.push(drawDesktop(view.scene, el, { source: planSource(view.scene), onSelect: (id) => pick($, id) }));
     else if (!view.status) out.push(el.Text({ dimColor: true, children: ["Waiting for the office…"] }));
     return el.Box({ flexDirection: "column", children: out });
   });
+}
+
+// The plan's SVG, the same string as last time unless the drawing itself changed. A new string
+// reloads the image (a blink, and the dots restarting), so a change that only touches the cards,
+// the details or the status line keeps the picture as it is. A new drawing starts its dots at the
+// wall clock's place in their cycle, so they carry on rather than jump back.
+let plan = { base: null, source: null };
+function planSource(scene) {
+  const base = renderSvg(scene);
+  if (base !== plan.base) plan = { base, source: renderSvg(scene, { now: Date.now() }) };
+  return plan.source;
 }
 
 // What a surface of this size draws now: the status line and the scene (none for a model this

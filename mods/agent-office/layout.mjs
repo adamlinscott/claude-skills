@@ -230,7 +230,7 @@ function nowLine(office, room) {
 }
 
 function labelOf(office, a) {
-  if (a.startedBy === null) return a.session === office.viewer.session ? "you" : "lead";
+  if (a.startedBy === null) return a.session === office.viewer.session ? "lead (you)" : "lead";
   return a.agentType || a.role || "other";
 }
 
@@ -262,8 +262,11 @@ function writeBubble(office, a) {
   const key = e.file.toLowerCase();
   const others = (office.conflicts.get(key) || []).filter((id) => id !== a.id);
   const checked = office.reads.get(a.id + "\n" + key) >= office.edited.get(key);
-  if (others.length && !checked) return { bubble: { file: e.file, clash: true }, others };
-  if (office.now - Date.parse(e.at) <= office.bubbleMs) return { bubble: { file: e.file, clash: false }, others: [] };
+  // A red bubble shrinks to a dot, a notification light, once bubbleSeconds have passed since the
+  // file's newest edit by anyone; a fresh edit brings the full bubble back.
+  const fresh = office.now - Math.max(Date.parse(e.at), Date.parse(office.edited.get(key)) || 0) <= office.bubbleMs;
+  if (others.length && !checked) return { bubble: { file: e.file, clash: true, dot: !fresh }, others };
+  if (office.now - Date.parse(e.at) <= office.bubbleMs) return { bubble: { file: e.file, clash: false, dot: false }, others: [] };
   return { bubble: null, others: [] };
 }
 

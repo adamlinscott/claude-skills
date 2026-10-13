@@ -182,3 +182,20 @@ test("desktop: a report card taller than the plan is cut to it, ending in …", 
   assert.ok(texts.length < 1 + short.people.find((p) => p.id === "v1").card.lines.length);
   assert.equal(texts.at(-1), "…");
 });
+
+test("a red bubble past its seconds is drawn as a red dot on both panes", () => {
+  const m = office([
+    { id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", writing: "lib/wizard.mjs" }] }] },
+    { id: "b", sessions: [{ id: "s-b", team: [{ id: "w9", writing: "lib/wizard.mjs" }] }] },
+  ]);
+  m.meaning.conflicts = [{ file: "lib/wizard.mjs", agents: ["w1", "w9"], by: "rules" }];
+  const scene = layout(m, viewerFor(m, "s-a"), { now: Date.parse(m.generatedAt) + 60000 });
+  const w1 = scene.people.find((p) => p.id === "w1");
+  assert.equal(w1.bubble.dot, true);
+  const svg = renderSvg(scene);
+  assert.ok(svg.includes('<circle class="bub c"') && !svg.includes("✎"));
+  const { columns, cells } = renderCells(scene);
+  const bytes = Buffer.from(cells, "base64");
+  const ch = (x, y) => String.fromCodePoint(bytes.readUInt32LE((y * columns + x) * 12));
+  assert.equal(ch(w1.x + 1, w1.y - 1), "●");
+});

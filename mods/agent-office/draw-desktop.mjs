@@ -125,7 +125,10 @@ export function renderSvg(scene, { now } = {}) {
       const ix = cx + (["stall", "fail", "stop"].includes(p.look) ? 24 : 12);
       out.push(`<circle class="info-c" cx="${px(ix)}" cy="${px(cy - 15)}" r="6.5"/><text class="info-t" x="${px(ix)}" y="${px(cy - 11.5)}" text-anchor="middle">i</text>`);
     }
-    if (p.bubble) {
+    if (p.bubble && p.bubble.dot) {
+      // A conflict past its first seconds: a red light above the figure until it is checked.
+      out.push(`<circle class="bub c" cx="${px(cx + 9)}" cy="${px((p.y - 1) * CELL.h + 9)}" r="4"/>`);
+    } else if (p.bubble) {
       // In the row above the figure, its tail on the figure; kept within the seat's own columns so
       // neighbouring bubbles and the room's wall stay clear. Nine letters, as on the terminal.
       const t = "✎ " + clip(base(p.bubble.file), 9);
@@ -145,9 +148,9 @@ export function renderSvg(scene, { now } = {}) {
  * Under the plan, the scene's details in a bordered panel.
  * el: the surface's elements ({ Box, Text, Svg, Button }).
  */
-export function drawDesktop(scene, el, { now, onSelect = () => {} } = {}) {
+export function drawDesktop(scene, el, { now, source, onSelect = () => {} } = {}) {
   const { Box, Text, Svg, Button } = el;
-  const svg = Svg({ source: renderSvg(scene, { now }), alt: describe(scene), width: px(scene.w * CELL.w), height: px(Math.max(1, scene.h) * CELL.h) });
+  const svg = Svg({ source: source ?? renderSvg(scene, { now }), alt: describe(scene), width: px(scene.w * CELL.w), height: px(Math.max(1, scene.h) * CELL.h) });
   const seats = scene.people.filter((p) => !p.off).map((p) => {
     // A whole seat (the room above the figure, the figure, its label) is the hover spot: the cell
     // size is only roughly known, so the spot is generous rather than exact.
