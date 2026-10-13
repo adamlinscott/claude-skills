@@ -119,7 +119,7 @@ export function register(on) {
     const out = [];
     if (view.status) out.push(el.Text({ dimColor: true, wrap: "truncate-end", children: [view.status] }));
     if (view.scene && terminal) out.push(drawTerminal(view.scene, el, { tick, selected, onSelect: (id) => select($, id), detailRows: UNDER_PLAN_ROWS - (view.status ? 1 : 0) }));
-    else if (view.scene) out.push(drawDesktop(view.scene, el));
+    else if (view.scene) out.push(drawDesktop(view.scene, el, { now: Date.now() }));
     else if (!view.status) out.push(el.Text({ dimColor: true, children: ["Waiting for the office…"] }));
     return el.Box({ flexDirection: "column", children: out });
   });

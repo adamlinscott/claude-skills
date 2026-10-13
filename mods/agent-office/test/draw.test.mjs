@@ -38,6 +38,8 @@ test("desktop: every person, room and waiting line is in the SVG, the same every
   for (const look of ["you", "work", "stop", "fail"]) assert.ok(svg.includes(`class="av ${look}"`), look);
   assert.equal((svg.match(/class="flow"/g) || []).length, scene.lines.length);
   assert.equal(scene.lines.length, 1);
+  // A redraw restarts the animation, so the line starts where the wall clock has it: no jump back.
+  assert.ok(renderSvg(scene, { now: 12345 }).includes('class="flow" style="animation-delay:-345ms" marker-end="url(#flow-head)"'));
 });
 
 test("desktop: a keyed hover box over every seat, holding that person's card", () => {

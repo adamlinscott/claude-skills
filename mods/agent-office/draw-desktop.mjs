@@ -29,6 +29,7 @@ const STYLE = `
 .lab{font-size:10px;fill:var(--ink)}
 .flow{fill:none;stroke:var(--ink-2);stroke-width:2.2;stroke-linecap:round;stroke-dasharray:.1 7;animation:flow 1s linear infinite}
 @keyframes flow{to{stroke-dashoffset:-7.1}}
+.flow-head{fill:var(--ink-2)}
 @media (prefers-reduced-motion:reduce){.flow{animation:none}}
 .glow{fill:var(--lamp);opacity:.18}
 .av{color:var(--ink-2)}.av.work{color:var(--lamp)}.av.ok{color:var(--ok)}.av.you{color:var(--you)}
@@ -67,8 +68,16 @@ const base = (file) => file.split(/[\\/]/).pop();
 // A person's figure is two cells wide (the terminal's dot and letter); its centre in pixels.
 const centre = (p) => [px((p.x + 1) * CELL.w), px((p.y + 0.5) * CELL.h)];
 
-/** scene → the SVG document for an image-mode Svg, `width` × `height` pixels. */
-export function renderSvg(scene) {
+// Each redraw loads a fresh SVG and so restarts its animation. Started at the wall clock's place in
+// the one-second cycle, the dots carry on from where they were instead of jumping back.
+const phase = (now) => (now === undefined ? "" : ` style="animation-delay:-${Math.round(now % 1000)}ms"`);
+
+/**
+ * scene → the SVG document for an image-mode Svg, `width` × `height` pixels. now: the wall clock
+ * in ms, to keep the waiting lines' motion continuous across redraws; left out, the SVG is the same
+ * every time.
+ */
+export function renderSvg(scene, { now } = {}) {
   const width = px(scene.w * CELL.w);
   const height = px(Math.max(1, scene.h) * CELL.h);
   // Lights-off rooms go in one faded group: every colour, text and figure in them, as they were.
@@ -99,7 +108,7 @@ export function renderSvg(scene) {
     const [ax, ay] = centre(at.get(l.from));
     const [bx, by] = centre(at.get(l.to));
     // From beside the waiter, curving into the agent it waits on, ending short of the figure.
-    into(at.get(l.from)).push(`<path class="flow" d="M${px(ax + 14)} ${ay}C${px((ax + bx) / 2)} ${ay} ${bx} ${px((ay + by) / 2)} ${bx} ${px(by + (by < ay ? 16 : -18))}"/>`);
+    into(at.get(l.from)).push(`<path class="flow"${phase(now)} marker-end="url(#flow-head)" d="M${px(ax + 14)} ${ay}C${px((ax + bx) / 2)} ${ay} ${bx} ${px((ay + by) / 2)} ${bx} ${px(by + (by < ay ? 16 : -18))}"/>`);
   }
   for (const p of scene.people) {
     const out = into(p);
@@ -126,16 +135,16 @@ export function renderSvg(scene) {
     }
     out.push(`<text class="t lab${p.role === "you" ? " youc" : ""}" x="${cx}" y="${px((p.y + 1) * CELL.h + 13)}" text-anchor="middle">${esc(clip(p.label, 12))}</text>`);
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><style>${STYLE}</style><defs>${SYMBOLS}</defs>${lit.join("")}${dark.length ? `<g class="off">${dark.join("")}</g>` : ""}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><style>${STYLE}</style><defs>${SYMBOLS}<marker id="flow-head" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse" orient="auto"><path class="flow-head" d="M0 0L6 3L0 6z"/></marker></defs>${lit.join("")}${dark.length ? `<g class="off">${dark.join("")}</g>` : ""}</svg>`;
 }
 
 /**
  * The pane's plan on the Desktop: the Svg, with a keyed Box over each seat whose card appears
  * while the pointer is over it; none in a lights-off room. el: the surface's elements ({ Box, Text, Svg }).
  */
-export function drawDesktop(scene, el) {
+export function drawDesktop(scene, el, { now } = {}) {
   const { Box, Text, Svg } = el;
-  const svg = Svg({ source: renderSvg(scene), alt: describe(scene), width: px(scene.w * CELL.w), height: px(Math.max(1, scene.h) * CELL.h) });
+  const svg = Svg({ source: renderSvg(scene, { now }), alt: describe(scene), width: px(scene.w * CELL.w), height: px(Math.max(1, scene.h) * CELL.h) });
   const seats = scene.people.filter((p) => !p.off).map((p) => {
     // A whole seat (the room above the figure, the figure, its label) is the hover spot: the cell
     // size is only roughly known, so the spot is generous rather than exact.
