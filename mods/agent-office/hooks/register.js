@@ -41,6 +41,10 @@ let picked = null; // the person whose details the Claude app's panel shows: a p
 // This session's own context window, for its lead's model: { model, window, compactAt, tokens,
 // counted: whether the breakdown came back }. Read in the background, never on a render.
 let own = null;
+// How this machine's Claude login is billed, from this session's rate limits: "subscription",
+// "api", or null until a reading says. Every session here shares the login, so it is everyone's.
+let billing = null;
+let prices = {}; // prices.json's models, overridden per model by the person's config.json `prices`
 let measuring = false;
 let measuredAt = 0;
 let tick = 0;
@@ -54,6 +58,7 @@ export function register(on) {
   on("session.start", async ($, e, next) => {
     await $.command.register({ name: "agent-office", description: "Open or close the Agent Office floor plan of this project" });
     config = { ...config, ...(await readConfig($)) };
+    prices = await readPrices($);
     start($).catch((err) => $.ui.log("agent-office: could not start the engine: " + message(err), { to: "debug" }));
     if (config.autoOpen === true) {
       $.ui.open({ id: PANE, title: "Agent Office" }).catch((err) => $.ui.log("agent-office: could not open the pane: " + message(err), { to: "debug" }));
@@ -160,6 +165,8 @@ function frame(columns, rows, surface) {
     selected: surface === "terminal" ? selected : picked,
     contextWindows: config.contextWindows,
     own,
+    prices,
+    billing,
   });
   order = scene.order;
   return { status, scene };
@@ -185,7 +192,7 @@ function pick($, id) {
 // Reads this session's own context window in the background while the pane is drawn, for the
 // model its lead's newest reply used: the plain call (free) at most every MEASURE_MS, and the
 // breakdown, estimated locally, until one has come back for that model. Whatever comes back is
-// read defensively: only positive numbers count.
+// read defensively: only positive numbers count. The same call gives the billing.
 function measure($) {
   if (measuring || !drawable(model) || !Object.keys(shown).length) return;
   const lead = model.agents.find((a) => a.id === viewer + ":lead");
@@ -208,6 +215,7 @@ function measure($) {
         tokens: positive(context.tokens),
         counted: !!b || !!(before && before.counted),
       };
+      billing = billingOf(u && u.rateLimits) ?? billing;
       changed($);
     })
     .catch((err) => $.ui.log("agent-office: could not read the context window: " + message(err), { to: "debug" }))
@@ -217,6 +225,24 @@ function measure($) {
 }
 
 const positive = (n) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null);
+
+// A subscription's rate limits carry its five-hour and seven-day windows; off one the list is
+// empty. Only read once the lead has replied, so an empty list is a reading, not a missing one.
+// Read defensively: the Claude app has sent objects where strings were promised, so a window is
+// recognised anywhere in its entry. Anything else (not a list, a gateway's spend limit alone) says
+// nothing.
+function billingOf(limits) {
+  if (!Array.isArray(limits)) return null;
+  if (!limits.length) return "api";
+  const said = (l) => {
+    try {
+      return /five_hour|seven_day/.test(JSON.stringify(l));
+    } catch {
+      return false;
+    }
+  };
+  return limits.some(said) ? "subscription" : null;
+}
 
 async function start($) {
   if (engine !== "stopped") return;
@@ -332,11 +358,16 @@ async function stream($, me, cli, cwd) {
   }
 }
 
+// The person's Claude folder, with forward slashes.
+async function claudeDir($) {
+  const home = String((await $.env.get("CLAUDE_CONFIG_DIR")) || ((await $.env.get("USERPROFILE")) || (await $.env.get("HOME")) || "") + "/.claude");
+  return home.replace(/\\/g, "/");
+}
+
 // The mod's config.json, overridden per key by <claude dir>/agent-office/config.json.
 async function readConfig($) {
-  const home = String((await $.env.get("CLAUDE_CONFIG_DIR")) || ((await $.env.get("USERPROFILE")) || (await $.env.get("HOME")) || "") + "/.claude");
   const io = {
-    claudeDir: home.replace(/\\/g, "/"),
+    claudeDir: await claudeDir($),
     stat: async (p) => ((await $.fs.exists(p)) ? {} : null),
     read: (p) => $.fs.read(p),
   };
@@ -345,6 +376,24 @@ async function readConfig($) {
   } catch {
     return {};
   }
+}
+
+// prices.json's models, each overridden by an entry under `prices` in <claude dir>/agent-office/
+// config.json. loadConfig keeps only the keys config.json has, so the override is read here. A
+// broken file counts as empty; a broken entry is passed over when the cost is worked out.
+async function readPrices($) {
+  const json = async (p) => {
+    try {
+      const value = (await $.fs.exists(p)) ? JSON.parse(await $.fs.read(p)) : null;
+      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    } catch {
+      return {};
+    }
+  };
+  const table = (t) => (t && typeof t === "object" && !Array.isArray(t) ? t : {});
+  const own = (await json($.plugin.root.replace(/\\/g, "/") + "/prices.json")).models;
+  const user = (await json((await claudeDir($)) + "/agent-office/config.json")).prices;
+  return { ...table(own), ...table(user) };
 }
 
 const message = (err) => String((err && err.message) || err);

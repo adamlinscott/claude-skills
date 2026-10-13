@@ -51,9 +51,11 @@ export function viewerFor(model, sessionId) {
  * selected: the agent id whose details to give, or null.
  * contextWindows: config.json's table, model id → { window, compactAt } in tokens, "*" the default.
  * own:     the viewer's own session's reading, { model, window, compactAt, tokens }, or null.
+ * prices:  prices.json's models with the person's overrides, model id → USD per million tokens.
+ * billing: how this machine's Claude login is billed, "subscription" or "api", or null when unknown.
  */
-export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30, bubbleSeconds = 10, titles = {}, selected = null, contextWindows = {}, own = null } = {}) {
-  const office = { ...index(model, viewer, now, touchedWindowMinutes, bubbleSeconds, titles), contextWindows, own };
+export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30, bubbleSeconds = 10, titles = {}, selected = null, contextWindows = {}, own = null, prices = {}, billing = null } = {}) {
+  const office = { ...index(model, viewer, now, touchedWindowMinutes, bubbleSeconds, titles), contextWindows, own, prices, billing };
   const seen = [...order, ...model.rooms.map((r) => r.id).filter((id) => !order.includes(id))];
   const rank = new Map(seen.map((id, i) => [id, i]));
   const rooms = [...model.rooms].sort((a, b) => rank.get(a.id) - rank.get(b.id));
@@ -282,8 +284,8 @@ function card(office, a, session, label, others) {
 const roleLine = (a) => `role ${a.role || "other"}${a.agentType ? ` · type ${a.agentType}` : ""}`;
 
 // The card's lines between its status and its report: what it is doing, who else edited that
-// file lately, its task and its own worktree.
-function about(office, a, session, others) {
+// file lately, its task (unless `task` is false) and its own worktree.
+function about(office, a, session, others, task = true) {
   const lines = [];
   if (a.doing) lines.push(`${DOING[a.doing.kind] || a.doing.kind}${a.doing.file ? " " + a.doing.file : ""}`);
   for (const id of others) {
@@ -291,44 +293,74 @@ function about(office, a, session, others) {
     const where = b && office.rooms.get(b.session);
     lines.push(`possible conflict: also edited in the last ${office.window}m by ${b ? labelOf(office, b) : id}${where ? " in " + roomTitle(office, where) : ""}`);
   }
-  if (a.task) lines.push(a.task);
+  if (task && a.task) lines.push(a.task);
   if (a.checkout && a.checkout !== session.checkout) lines.push(`own worktree: ${[a.branch, a.checkout].filter(Boolean).join(" · ")}`);
   return lines;
 }
 
-// How an ended or stuck status reads in the details: whether the agent finished its task.
-const SPELLED = {
-  done: (d) => `done ${d} ago: it finished its task`,
-  stalled: (d) => `stalled for ${d}: gone quiet before finishing its task`,
-  stopped: (d) => `stopped ${d} ago: ended early, so it leaves no report`,
-  failed: (d) => `failed ${d} ago: it ended with an error`,
-};
+// How a status reads in the details: an ended one by how long ago it ended.
+const ENDED = new Set(["done", "stopped", "failed"]);
 
-// The details panel (#58): who, its status, its report's first line, its waits, its tokens and
-// context, and when it last acted. `more` is the card's lines the panel doesn't say.
+// The details panel (#58): technical metadata, not what the agent did. Who and on what model, its
+// status, when it last acted, its waits, its context, its tokens and their cost at API prices, and
+// how this machine is billed. `more` is the card's lines the panel doesn't say, less the task.
 function details(office, a) {
   const since = duration(office.now - Date.parse(a.statusSince));
-  const lines = [`${labelOf(office, a)} · ${roleLine(a)}`, SPELLED[a.status] ? SPELLED[a.status](since) : `${a.status} for ${since}`];
-  const report = office.reports.get(a.id);
-  const first = report && String(report.text).split(/\r?\n/).find((l) => l.trim());
-  if (first) lines.push(`report: ${first.trim()}`);
+  const who = [];
+  for (const part of [labelOf(office, a), a.role, a.agentType, a.usage && a.usage.model]) if (part && !who.includes(part)) who.push(part);
+  const lines = [who.join(" · "), ENDED.has(a.status) ? `${a.status} ${since} ago` : `${a.status} ${since}`, `last acted ${duration(office.now - Date.parse(a.lastActive))} ago`];
   const names = (ids) => ids.map((id) => (office.agents.has(id) ? labelOf(office, office.agents.get(id)) : id)).join(", ");
   const on = office.waits.filter((w) => w.waiter === a.id).map((w) => w.on);
   const by = office.waits.filter((w) => w.on === a.id).map((w) => w.waiter);
   if (on.length) lines.push(`waiting on: ${names(on)}`);
   if (by.length) lines.push(`waited on by: ${names(by)}`);
-  if (a.usage) {
+  const u = a.usage;
+  if (u) {
     // The viewer's own lead reads its context live from the session when the host has it.
     const mine = a.startedBy === null && a.session === office.viewer.session && office.own && positive(office.own.tokens);
-    const used = mine ? office.own.tokens : a.usage.context;
-    lines.push(`tokens: ${tokens(used)} context now · ${tokens(a.usage.output)} output so far`);
-    const w = contextWindow(a.usage.model, office.contextWindows, office.own);
-    if (!w) lines.push(`context: ${tokens(used)} · window unknown for ${a.usage.model}`);
+    const used = mine ? office.own.tokens : u.context;
+    const w = contextWindow(u.model, office.contextWindows, office.own);
+    if (!w) lines.push(`context: ${tokens(used)} · window unknown for ${u.model}`);
     else lines.push(`context: ${tokens(used)} of ${tokens(w.window)} (${percent(used, w.window)}%)${w.compactAt ? ` · compacts at ${percent(w.compactAt, w.window)}%` : ""}`);
+    lines.push(`tokens: ${tokens(u.input + u.cacheWrite + u.cacheRead)} in (${tokens(u.cacheRead)} cached) · ${tokens(u.output)} out`);
+    const usd = cost(u, office.prices);
+    lines.push(usd === null ? `cost: no price for ${u.model}` : `cost: ${usd < 0.01 ? "under $0.01" : "~$" + usd.toFixed(2)} at API prices`);
   }
-  lines.push(`last acted ${duration(office.now - Date.parse(a.lastActive))} ago`);
-  return { id: a.id, lines, more: about(office, a, office.sessions.get(a.session), writeBubble(office, a).others) };
+  if (BILLING[office.billing]) lines.push(`billing: ${BILLING[office.billing]}`);
+  return { id: a.id, lines, more: about(office, a, office.sessions.get(a.session), writeBubble(office, a).others, false) };
 }
+
+const BILLING = { subscription: "Claude subscription", api: "API key" };
+
+/**
+ * What an agent's usage would cost at API list prices, in USD, or null when its model has no
+ * price. prices: model id → USD per million tokens, { input, output, cacheWrite5m, cacheWrite1h,
+ * cacheRead }, with `over100k` the same for a reply whose prompt is over 100k tokens. A model id
+ * matches the longest key it starts with, at a "-" or "[" (a date or a [1m] tag) or its end.
+ * Cache writes not counted as an hour's are priced as five minutes'.
+ */
+export function cost(usage, prices) {
+  const rate = priceFor(usage.model, prices);
+  if (!rate) return null;
+  const at = (t, r) => (t.input * r.input + (t.cacheWrite - t.cacheWrite1h) * r.cacheWrite5m + t.cacheWrite1h * r.cacheWrite1h + t.cacheRead * r.cacheRead + t.output * r.output) / 1e6;
+  const big = rate.over100k && usage.over100k;
+  if (!big) return at(usage, rate);
+  const rest = Object.fromEntries(Object.keys(big).map((k) => [k, usage[k] - big[k]]));
+  return at(rest, rate) + at(big, rate.over100k);
+}
+
+function priceFor(model, prices) {
+  const table = prices && typeof prices === "object" ? prices : {};
+  const key = Object.keys(table)
+    .filter((k) => typeof model === "string" && model.startsWith(k) && (model.length === k.length || "-[".includes(model[k.length])))
+    .sort((x, y) => y.length - x.length)[0];
+  const rate = key && price(table[key]);
+  return rate ? { ...rate, over100k: price(table[key].over100k) } : null;
+}
+
+// A price entry with every field a number of dollars, or null.
+const PRICE_KEYS = ["input", "output", "cacheWrite5m", "cacheWrite1h", "cacheRead"];
+const price = (p) => (p && typeof p === "object" && PRICE_KEYS.every((k) => typeof p[k] === "number" && Number.isFinite(p[k]) && p[k] >= 0) ? Object.fromEntries(PRICE_KEYS.map((k) => [k, p[k]])) : null);
 
 /**
  * A model's context window, { window, compactAt } in tokens (compactAt null when unknown), or null

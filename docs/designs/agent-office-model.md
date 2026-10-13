@@ -30,7 +30,8 @@ OfficeModel
   agents          [{ id, source, session, startedBy: agent id | null (a lead),
                      agentType, role, task: short task name | null, status, statusSince, lastActive,
                      doing: { kind: "write" | "read" | "run" | "search" | "talk", file?, since } | null,
-                     usage: { model, context, output, at } | null,
+                     usage: { model, context, input, cacheWrite, cacheWrite1h, cacheRead, output,
+                              over100k: { input, cacheWrite, cacheWrite1h, cacheRead, output }, at } | null,
                      checkout?, branch? }]
   edits           [{ agent, file, at }]               file relative to the repo root, forward slashes
   reads           [{ agent, file, at }]               the same, for files an agent read
@@ -47,7 +48,7 @@ OfficeModel
 
 A session's `title` is the tool's own when it has one (`titleFrom: "source"`), else its branch as a stand-in (`titleFrom: "branch"`). A host may have a title written for a branch stand-in and draw that instead. An agent's `task` is the short task name it was started with; a lead has none.
 
-An agent's `usage` comes from its newest reply: the `model` id it ran on, its `context` size in tokens (the reply's input plus cache-read and cache-written tokens, so a compaction shows as a drop) and that reply's time `at`. `output` is the output tokens summed over the part of the transcript the engine has read. It is null until a reply with usage is read. The model carries no context window: a view looks one up by model id in config.json's `contextWindows` (`{ "<model id>": { window, compactAt } }` in tokens, `"*"` as a default), or takes it from its own session for the model that session runs.
+An agent's `usage` comes from its newest reply: the `model` id it ran on, its `context` size in tokens (the reply's input plus cache-read and cache-written tokens, so a compaction shows as a drop) and that reply's time `at`. `input`, `cacheWrite`, `cacheRead` and `output` are its token counts summed over the part of the transcript the engine has read, each reply counted once; `cacheWrite1h` is the part of `cacheWrite` cached for an hour (the rest is five minutes'), and `over100k` is the same counts again for only the replies whose prompt (input plus both cache counts) was over 100k tokens, for a model priced higher above that. It is null until a reply with usage is read. A view prices the totals at API list prices from the mod's prices.json, which a person's config.json overrides per model under `prices`. The model carries no context window: a view looks one up by model id in config.json's `contextWindows` (`{ "<model id>": { window, compactAt } }` in tokens, `"*"` as a default), or takes it from its own session for the model that session runs.
 
 `edits` and `reads` hold the newest time per agent and file inside `touchedWindowMinutes`. A read is a read tool on a file, or a shell command reading one where the source can tell. Views use reads to tell when an agent has checked a file it was warned about.
 

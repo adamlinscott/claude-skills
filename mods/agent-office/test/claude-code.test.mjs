@@ -322,25 +322,26 @@ test("doing: the last tool call's kind, shown while working or stalled; a file o
   assert.deepEqual(a.r.doing, { kind: "read", since: at(5) });
 });
 
-test("usage: the newest reply's model and context, output summed once per reply; a made-up line is no reply", async () => {
+test("usage: the newest reply's model and context; token totals summed once per reply, with the 1h cache writes and the replies over 100k apart; a made-up line is no reply", async () => {
   const { home, main } = office();
-  const u = (input, read, written, output) => ({ input_tokens: input, cache_read_input_tokens: read, cache_creation_input_tokens: written, output_tokens: output });
+  const u = (input, read, written, output, oneHour) => ({ input_tokens: input, cache_read_input_tokens: read, cache_creation_input_tokens: written, output_tokens: output, ...(oneHour == null ? {} : { cache_creation: { ephemeral_1h_input_tokens: oneHour, ephemeral_5m_input_tokens: written - oneHour } }) });
   const p = session(home, "s", [
     line.user(main, "go", 60),
-    line.reply(main, "m1", u(2, 1000, 500, 300), 50),
-    line.reply(main, "m1", u(2, 1000, 500, 300), 50), // the same reply's next block
-    line.reply(main, "m2", u(3, 1500, 200, 40), 40),
+    line.reply(main, "m1", u(2, 1000, 500, 100), 50),
+    line.reply(main, "m1", u(2, 1000, 500, 300), 50), // the same reply's next block, its output grown
+    line.reply(main, "m2", u(3, 150000, 200, 40, 150), 40), // a prompt over 100k
     line.reply(main, "x", u(0, 0, 0, 0), 30, "<synthetic>"),
   ]);
   agent(home, "s", "w", { agentType: "worker" }, [line.tool(main, "Read", { file_path: "x" }, 5)], { age: 5 });
   const engine = engineIn(home, main);
   const a = byId((await engine.model()).agents);
-  assert.deepEqual(a["s:lead"].usage, { model: "claude-opus-5-5", context: 1703, output: 340, at: at(40) });
+  const over100k = { input: 3, cacheWrite: 200, cacheWrite1h: 150, cacheRead: 150000, output: 40 };
+  assert.deepEqual(a["s:lead"].usage, { model: "claude-opus-5-5", context: 150203, input: 5, cacheWrite: 700, cacheWrite1h: 150, cacheRead: 151000, output: 340, over100k, at: at(40) });
   assert.equal(a.w.usage, null);
-  // An appended reply adds its output; after a compaction the context drops.
+  // An appended reply adds its counts; after a compaction the context drops.
   fs.appendFileSync(p, JSON.stringify(line.reply(main, "m3", u(1, 0, 20000, 60), 5, "claude-sonnet-5-5")) + "\n");
   touch(p, 5);
-  assert.deepEqual(byId((await engine.model()).agents)["s:lead"].usage, { model: "claude-sonnet-5-5", context: 20001, output: 400, at: at(5) });
+  assert.deepEqual(byId((await engine.model()).agents)["s:lead"].usage, { model: "claude-sonnet-5-5", context: 20001, input: 6, cacheWrite: 20700, cacheWrite1h: 150, cacheRead: 151000, output: 400, over100k, at: at(5) });
 });
 
 test("owner: git user.name names the human; without a git runner the owner is unknown", async () => {

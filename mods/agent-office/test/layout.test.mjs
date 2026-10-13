@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { layout, viewerFor, statusLine, drawable, contextWindow } from "../layout.mjs";
+import fs from "node:fs";
+import { layout, viewerFor, statusLine, drawable, contextWindow, cost } from "../layout.mjs";
 import { office, NOW } from "./office.mjs";
+
+const prices = JSON.parse(fs.readFileSync(new URL("../prices.json", import.meta.url), "utf8")).models;
+const tally = () => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 });
 
 const viewer = (m, session) => viewerFor(m, session);
 const roomIds = (scene) => scene.rooms.map((r) => r.id);
@@ -134,37 +138,73 @@ test("the card: role and agent type, status and for how long, what it is doing, 
   });
 });
 
-test("details: who, status spelled out, report, waits, tokens and context, last acted; only for someone drawn", () => {
-  const usage = (model, context, output) => ({ model, context, output, at: new Date(NOW).toISOString() });
+test("details: who and on what model, short status, last acted, waits, context, tokens, cost; no report or task; only for someone drawn", () => {
+  const usage = (model, context, input, cacheWrite, cacheWrite1h, cacheRead, output, over100k = tally()) => ({ model, context, input, cacheWrite, cacheWrite1h, cacheRead, output, over100k, at: new Date(NOW).toISOString() });
   const m = office([
     {
       id: "a",
-      sessions: [{ id: "s-a", usage: usage("opus", 100000, 2000), team: [{ id: "w1", waited: true, usage: usage("opus", 294000, 12345) }, { id: "v1", type: "reviewer", role: "reviewer", status: "done", report: "\nAll clear.\nMore.", usage: usage("haiku", 8400, 900) }] }],
+      sessions: [
+        {
+          id: "s-a",
+          usage: usage("claude-opus-5-5", 100000, 0, 0, 0, 0, 200),
+          team: [
+            { id: "w1", task: "Fix the wizard", waited: true, usage: usage("claude-opus-5-5", 294000, 2000, 400000, 100000, 800000, 41000) },
+            { id: "v1", type: "reviewer", role: "reviewer", status: "done", task: "Review it", report: "\nAll clear.\nMore.", usage: usage("claude-haiku-5-5-20261001", 8400, 11000, 0, 0, 189000, 7000, { ...tally(), input: 10000, cacheRead: 140000, output: 5000 }) },
+            { id: "x1", usage: usage("claude-opus-9", 500, 500, 0, 0, 0, 10) },
+          ],
+        },
+      ],
     },
   ]);
-  const details = (selected, opts) => layout(m, viewer(m, "s-a"), { selected, ...opts }).details;
-  const windows = { opus: { window: 1000000, compactAt: 920000 } };
+  const details = (selected, opts) => layout(m, viewer(m, "s-a"), { selected, prices, ...opts }).details;
+  const windows = { "claude-opus-5-5": { window: 1000000, compactAt: 920000 } };
+  // 2k × $4 + 300k × $5 + 100k × $8 + 800k × $0.20 + 41k × $20 per million = $3.288.
   assert.deepEqual(details("w1", { contextWindows: windows }).lines, [
-    "worker · role worker · type worker",
-    "working for 5m",
+    "worker · claude-opus-5-5",
+    "working 5m",
+    "last acted 1m ago",
     "waited on by: lead (you)",
-    "tokens: 294k context now · 12k output so far",
     "context: 294k of 1M (29%) · compacts at 92%",
-    "last acted 1m ago",
+    "tokens: 1.2M in (800k cached) · 41k out",
+    "cost: ~$3.29 at API prices",
   ]);
-  assert.deepEqual(details("v1", { contextWindows: windows }).lines, [
-    "reviewer · role reviewer · type reviewer",
-    "done 5m ago: it finished its task",
-    "report: All clear.",
-    "tokens: 8.4k context now · 900 output so far",
-    "context: 8.4k · window unknown for haiku",
+  // Haiku 5.5 by each reply's prompt: 1k × $0.10 + 49k × $0.01 + 2k × $0.50, plus the replies over
+  // 100k at 10k × $0.50 + 140k × $0.05 + 5k × $2.50 per million = $0.02609.
+  const v1 = details("v1", { contextWindows: windows });
+  assert.deepEqual(v1.lines, [
+    "reviewer · claude-haiku-5-5-20261001",
+    "done 5m ago",
     "last acted 1m ago",
+    "context: 8.4k · window unknown for claude-haiku-5-5-20261001",
+    "tokens: 200k in (189k cached) · 7k out",
+    "cost: ~$0.03 at API prices",
   ]);
+  assert.ok(![...v1.lines, ...v1.more].some((l) => /All clear|Review it/.test(l)), "no report or task in the panel");
+  assert.ok(!details("w1").more.includes("Fix the wizard"));
   // The viewer's own lead: its context live from the session, the window from the session too.
-  const own = { model: "opus", window: 1000000, compactAt: null, tokens: 120000 };
-  assert.deepEqual(details("s-a:lead", { own }).lines.slice(2), ["waiting on: worker", "tokens: 120k context now · 2k output so far", "context: 120k of 1M (12%)", "last acted <1m ago"]);
+  const own = { model: "claude-opus-5-5", window: 1000000, compactAt: null, tokens: 120000 };
+  assert.deepEqual(details("s-a:lead", { own }).lines, ["lead (you) · lead · claude-opus-5-5", "working 2m", "last acted <1m ago", "waiting on: worker", "context: 120k of 1M (12%)", "tokens: 0 in (0 cached) · 200 out", "cost: under $0.01 at API prices"]);
+  // A model with no price, or a broken price, says so; a family's newer model never takes its price.
+  assert.equal(details("x1").lines.at(-1), "cost: no price for claude-opus-9");
+  assert.equal(details("w1", { prices: { "claude-opus-5-5": { input: "4" } } }).lines.at(-1), "cost: no price for claude-opus-5-5");
   assert.equal(details(null), null);
   assert.equal(details("nobody"), null);
+});
+
+test("details: the billing line only when it is known", () => {
+  const m = office([{ id: "a", sessions: [{ id: "s-a" }] }]);
+  const last = (billing) => layout(m, viewer(m, "s-a"), { selected: "s-a:lead", billing }).details.lines.at(-1);
+  assert.equal(last("subscription"), "billing: Claude subscription");
+  assert.equal(last("api"), "billing: API key");
+  assert.equal(last(null), "last acted <1m ago");
+});
+
+test("cost: the longest price key the model id starts with, a dated or [1m] id included; cache writes split 1h and 5m", () => {
+  const u = (model) => ({ model, input: 1e6, cacheWrite: 3e6, cacheWrite1h: 1e6, cacheRead: 1e6, output: 1e6, over100k: tally() });
+  assert.equal(cost(u("claude-opus-5-5-20260901[1m]"), prices), 4 + 2 * 5 + 8 + 0.2 + 20);
+  assert.equal(cost(u("claude-opus-5"), prices), 5 + 2 * 6.25 + 10 + 0.5 + 25);
+  assert.equal(cost(u("claude-sonnet-4-20250514"), prices), 3 + 2 * 3.75 + 6 + 0.3 + 15);
+  assert.equal(cost(u("claude-opus-5x"), prices), null);
 });
 
 test("context window: config's entry for the model, then the viewer's own session on that model, then config's *", () => {

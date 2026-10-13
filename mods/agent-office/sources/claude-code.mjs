@@ -408,9 +408,9 @@ function newTranscriptState() {
     touches: [], // { at, cwd, name, path } for tool uses that name a file
     reads: [], // the same, for the files a tool use read
     usage: null, // { model, context, at } from the newest reply
-    output: 0, // output tokens over the replies read
-    replyId: null, // the newest reply's message id, and its output tokens as counted
-    replyOut: 0,
+    totals: tally(), // token counts summed over the replies read
+    over100k: tally(), // the part of them from replies whose prompt was over 100k tokens
+    reply: null, // the newest reply: { id, over100k, counts } as counted
   };
 }
 
@@ -497,24 +497,41 @@ function foldLine(st, line) {
   }
 }
 
-// The newest reply's model and context size (its input plus both cache counts), and the output
-// summed over the replies read. Each content block of a reply is its own line carrying the same
-// usage, so a reply counts once. A line the client made up (model "<synthetic>") is no reply.
+// The newest reply's model and context size (its input plus both cache counts), and its token
+// counts summed over the replies read: input, cache written (of it, for an hour), cache read and
+// output. Each content block of a reply is its own line carrying the same usage, so a reply counts
+// once: a line with the newest reply's id replaces that reply's counts. A reply whose prompt (its
+// input and both cache counts) is over 100k tokens is also summed in over100k, for a model priced
+// higher above that. A line the client made up (model "<synthetic>") is no reply.
+const tally = () => ({ input: 0, cacheWrite: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 });
+const OVER = 100000;
+
 function readUsage(st, message, at) {
   const u = message.usage;
   if (!u || typeof u !== "object" || typeof message.model !== "string" || !message.model || message.model.startsWith("<")) return;
-  const n = (key) => (Number.isFinite(u[key]) ? u[key] : 0);
-  const out = n("output_tokens");
-  const same = typeof message.id === "string" && message.id === st.replyId;
-  st.output += out - (same ? st.replyOut : 0);
-  st.replyId = typeof message.id === "string" ? message.id : null;
-  st.replyOut = out;
-  st.usage = { model: message.model, context: n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens"), at };
+  const n = (o, key) => (o && typeof o === "object" && Number.isFinite(o[key]) ? o[key] : 0);
+  const counts = {
+    input: n(u, "input_tokens"),
+    cacheWrite: n(u, "cache_creation_input_tokens"),
+    cacheWrite1h: n(u.cache_creation, "ephemeral_1h_input_tokens"),
+    cacheRead: n(u, "cache_read_input_tokens"),
+    output: n(u, "output_tokens"),
+  };
+  const id = typeof message.id === "string" ? message.id : null;
+  const prompt = counts.input + counts.cacheRead + counts.cacheWrite;
+  const before = st.reply && id && st.reply.id === id ? st.reply : null;
+  for (const key of Object.keys(counts)) {
+    st.totals[key] += counts[key] - (before ? before.counts[key] : 0);
+    if (before && before.over100k) st.over100k[key] -= before.counts[key];
+    if (prompt > OVER) st.over100k[key] += counts[key];
+  }
+  st.reply = { id, over100k: prompt > OVER, counts };
+  st.usage = { model: message.model, context: prompt, at };
 }
 
 // An agent's usage for the model: null until a reply with usage has been read.
 function usageOf(st, fallbackMs) {
-  return st.usage && { model: st.usage.model, context: st.usage.context, output: st.output, at: iso(st.usage.at, fallbackMs) };
+  return st.usage && { model: st.usage.model, context: st.usage.context, ...st.totals, over100k: { ...st.over100k }, at: iso(st.usage.at, fallbackMs) };
 }
 
 function setTurn(st, open, at) {

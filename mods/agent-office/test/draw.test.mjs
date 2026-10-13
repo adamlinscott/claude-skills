@@ -130,8 +130,8 @@ test("terminal: a focusable label per person, and the selected person's detail u
   const buttons = seats.map((s) => s.props.children[0]);
   assert.deepEqual(buttons.map((b) => seatOf(b.props.key)), scene.people.map((p) => p.id));
   assert.equal(buttons.find((b) => b.props.key === seatKey("s-a:lead")).props.autoFocus, true);
-  assert.equal(detail[0].props.children[0], "worker · role worker · type worker");
-  assert.equal(detail[1].props.children[0], "working for 5m");
+  assert.equal(detail[0].props.children[0], "worker");
+  assert.equal(detail[1].props.children[0], "working 5m");
 });
 
 test("desktop: every hover card is wide enough for its text and stays inside the plan", () => {
