@@ -168,10 +168,19 @@ export function drawDesktop(scene, el, { now, source, onSelect = () => {} } = {}
     for (let n = 0; kept < lines.length && n + rowsOf(lines[kept]) <= Math.max(1, scene.h) - 2; kept++) n += rowsOf(lines[kept]);
     if (kept < lines.length) lines = [...lines.slice(0, Math.max(1, kept - 1)), "…"];
     const cardH = lines.reduce((n, l) => n + rowsOf(l), 0) + 2;
+    // Beside the seat, right or else left, never over it: a card over the seat covers the name,
+    // which is the button that opens the details, so a click there would land on the card. With no
+    // room either side it goes above the seat or below it.
+    const H = Math.max(1, scene.h);
     let left = seat.w;
-    if (seat.left + left + cardW > scene.w) left = -cardW;
-    if (seat.left + left < 0) left = Math.max(-seat.left, Math.min(0, scene.w - cardW - seat.left));
-    const top = Math.max(-seat.top, Math.min(0, Math.max(1, scene.h) - cardH - seat.top));
+    let top = Math.max(-seat.top, Math.min(0, H - cardH - seat.top));
+    if (seat.left + seat.w + cardW > scene.w) {
+      if (seat.left - cardW >= 0) left = -cardW;
+      else {
+        left = Math.max(-seat.left, Math.min(0, scene.w - cardW - seat.left));
+        top = seat.top - cardH >= 0 ? -cardH : Math.min(seat.h, H - cardH - seat.top);
+      }
+    }
     return Box({
       key: "seat:" + p.id,
       position: "absolute",

@@ -137,7 +137,7 @@ test("terminal: a focusable label per person, and the selected person's detail u
 test("desktop: every hover card is wide enough for its text and stays inside the plan", () => {
   const small = layout(m, viewerFor(m, "s-a"), { columns: 40 });
   const busySmall = layout(busy, viewerFor(busy, "s-a"), { columns: 40 });
-  for (const s of [scene, small, busyScene, busySmall]) {
+  for (const s of [scene, small, busyScene, busySmall, layout(busy, viewerFor(busy, "s-a"), { columns: 70 })]) {
     for (const seat of seatsOf(drawDesktop(s, el))) {
       const card = seat.props.children.find((c) => c.props.hover).props;
       const x = seat.props.left + card.left;
@@ -149,6 +149,10 @@ test("desktop: every hover card is wide enough for its text and stays inside the
       const texts = card.children.map((t) => t.props.children[0]);
       const h = texts.reduce((n, l) => n + Math.max(1, Math.ceil(l.length / (card.width - 4))), 0) + 2;
       assert.ok(y + h <= s.h, `inside the plan's height: ${y}..${y + h} of ${s.h}`);
+      // Never over the seat's name, the button that opens the details: a click there must reach it.
+      const name = { x: seat.props.left, y: seat.props.top + 2, w: seat.props.width };
+      const overName = y <= name.y && name.y < y + h && x < name.x + name.w && name.x < x + card.width;
+      assert.ok(!overName, `card ${x},${y} ${card.width}x${h} covers the name at ${name.x},${name.y}`);
     }
   }
 });
