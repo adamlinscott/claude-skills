@@ -30,18 +30,20 @@ function roles(agents, given, catalogue) {
 }
 
 // A file that two or more agents edited inside the touched window, whatever each one's status
-// now. One item per file, naming everyone who edited it. Git history later shows whether it is a
-// real conflict; that is not decided here.
+// now. One item per file, naming everyone who edited it. Files match case-insensitively, named by
+// the first spelling seen. Git history later shows whether it is a real conflict; that is not
+// decided here.
 function conflicts(edits, given, since) {
   const out = given.map((c) => ({ file: c.file, agents: c.agents, by: "source" }));
-  const covered = new Set(out.map((c) => c.file));
-  const editors = new Map();
+  const covered = new Set(out.map((c) => c.file.toLowerCase()));
+  const editors = new Map(); // lower-cased file → { file, people }
   for (const e of edits) {
-    if (covered.has(e.file) || Date.parse(e.at) < since) continue;
-    if (!editors.has(e.file)) editors.set(e.file, new Set());
-    editors.get(e.file).add(e.agent);
+    const key = e.file.toLowerCase();
+    if (covered.has(key) || Date.parse(e.at) < since) continue;
+    if (!editors.has(key)) editors.set(key, { file: e.file, people: new Set() });
+    editors.get(key).people.add(e.agent);
   }
-  for (const [file, people] of editors) {
+  for (const { file, people } of editors.values()) {
     if (people.size > 1) out.push({ file, agents: [...people].sort(), by: "rules" });
   }
   return out;

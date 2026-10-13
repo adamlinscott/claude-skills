@@ -18,7 +18,7 @@ import { layout, statusLine, viewerFor, drawable } from "../layout.mjs";
 import { drawDesktop } from "../draw-desktop.mjs";
 import { drawTerminal, renderCells, seatOf } from "../draw-terminal.mjs";
 import { nextTitle, writtenTitles, cleanTitle, TITLE_SYSTEM } from "../titles.mjs";
-import { conflictNote } from "../flags.mjs";
+import { conflictNote, writtenPaths } from "../flags.mjs";
 
 const PANE = "agent-office";
 const RESTARTS = 3; // streams in a row that end without a model before falling back to --json
@@ -30,7 +30,7 @@ const UNDER_PLAN_ROWS = 6; // the terminal rows kept for the status line and the
 let model = null;
 let engine = "stopped"; // starting | running | restarting | fallback | stopped
 let run = 0; // the current engine run; an older run's loop sees the change and stops
-let config = { touchedTools: ["Edit", "Write", "NotebookEdit"], touchedWindowMinutes: 30 }; // until session start reads it
+let config = { touchedTools: ["Edit", "Write", "NotebookEdit"], shellTools: ["Bash", "PowerShell"], touchedWindowMinutes: 30 }; // until session start reads it
 let viewer = null; // the model's id for this session
 let order = []; // room ids in the order this pane first saw them
 let selected = null; // the person the terminal's focus ring is on
@@ -72,16 +72,20 @@ export function register(on) {
     return next(e);
   });
 
-  // After an edit by any agent in this session, a note when someone else in the office edited the
-  // same file lately. The tool's result is kept as it is (with its ref); a failed or refused call
-  // gets none. Filtered here rather than by matcher so the person's touchedTools applies.
+  // After an edit by any agent in this session, or a shell command that writes a file, a note per
+  // file someone else in the office edited lately. The tool's result is kept as it is (with its
+  // ref); a failed or refused call gets none. Filtered here rather than by matcher so the person's
+  // touchedTools and shellTools apply. The event carries no working folder, so a shell command's
+  // relative paths read against the session's.
   on("tool.call", async ($, e, next) => {
     const r = await next(e);
-    if (r.deny || r.isError || !config.touchedTools.includes(e.tool) || !drawable(model) || !viewer) return r;
+    if (r.deny || r.isError || !drawable(model) || !viewer) return r;
+    if (!config.touchedTools.includes(e.tool) && !config.shellTools.includes(e.tool)) return r;
     const agent = e.agentId ? "claude-code:" + e.agentId : viewer + ":lead";
-    const path = e.tool === "NotebookEdit" ? e.notebook_path : e.file_path;
-    const note = conflictNote(model, { agent, session: viewer, path }, { now: Date.now(), window: config.touchedWindowMinutes, titles: writtenTitles(titles) });
-    return note ? { ...r, context: [...(r.context || []), note] } : r;
+    const cwd = config.shellTools.includes(e.tool) ? await $.session.cwd() : null;
+    const opts = { now: Date.now(), window: config.touchedWindowMinutes, titles: writtenTitles(titles) };
+    const notes = writtenPaths(e, cwd, config).map((path) => conflictNote(model, { agent, session: viewer, path }, opts)).filter(Boolean);
+    return notes.length ? { ...r, context: [...(r.context || []), ...notes] } : r;
   });
 
   // The terminal's selection is wherever the pane's focus ring is: Tab and the arrows walk it

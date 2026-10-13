@@ -70,8 +70,8 @@ export function dirname(p) {
 
 /**
  * `p` relative to `root` with forward slashes, or null when `p` is not inside `root`. Windows
- * paths compare case-insensitively and come back lower-cased, so the same file always produces
- * the same string whichever way a tool happened to spell it.
+ * paths compare case-insensitively; the relative part keeps `p`'s own spelling, so whoever
+ * matches files by name compares them case-insensitively too.
  */
 export function relativeTo(root, p) {
   const win = isWindowsPath(root) || isWindowsPath(p);
@@ -81,8 +81,7 @@ export function relativeTo(root, p) {
   const nk = win ? n.toLowerCase() : n;
   const base = rk.endsWith("/") ? rk : rk + "/";
   if (!nk.startsWith(base)) return null;
-  const rel = n.slice(base.length);
-  return win ? rel.toLowerCase() : rel;
+  return n.slice(base.length);
 }
 
 // ── Git ──────────────────────────────────────────────────────────────────────────────────────

@@ -40,6 +40,15 @@ test("conflicts: a file two or more agents edited inside the touched window, wha
   ]);
 });
 
+test("conflicts: files match case-insensitively, named by the first spelling seen", () => {
+  const agents = [lead, person("a", "worker"), person("b", "worker")];
+  const edits = [
+    { agent: "a", file: "README.md", at: ago(5) },
+    { agent: "b", file: "readme.md", at: ago(2) },
+  ];
+  assert.deepEqual(workOutMeaning(facts({ agents, edits }), config, NOW).conflicts, [{ file: "README.md", agents: ["a", "b"], by: "rules" }]);
+});
+
 test("findings: reports from the agent types the config names, reviewer by default", () => {
   const agents = [lead, person("r", "reviewer"), person("w", "worker")];
   const reports = [{ agent: "r", at: ago(1), text: "Two bugs." }, { agent: "w", at: ago(1), text: "Built it." }];

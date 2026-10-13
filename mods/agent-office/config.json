@@ -6,6 +6,7 @@
   "stalledMinutes": 5,
   "touchedWindowMinutes": 30,
   "touchedTools": ["Edit", "Write", "NotebookEdit"],
+  "shellTools": ["Bash", "PowerShell"],
   "findingsFrom": ["reviewer"],
   "streamSeconds": 1,
   "tailBytes": 1048576,

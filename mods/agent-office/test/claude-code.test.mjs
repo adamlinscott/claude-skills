@@ -20,8 +20,6 @@ function office() {
 const modelOf = (home, project, opts) => engineIn(home, project, opts).model();
 const sessionsOf = async (home, project, opts) => byId((await modelOf(home, project, opts)).sessions);
 const agentsOf = async (home, project, opts) => byId((await modelOf(home, project, opts)).agents);
-// Windows paths are case-folded by shape; the temp folder decides which shape these tests get.
-const fold = (p) => (path.sep === "\\" ? p.toLowerCase() : p);
 
 test("groups sessions by git common dir across worktrees; skips bad lines; title falls back to branch", async () => {
   const { home, main, wt, other } = office();
@@ -520,13 +518,27 @@ test("edits: Edit/Write/NotebookEdit in the window, per agent with the newest ti
   agent(home, "s", "w", { agentType: "worker" }, [line.tool(wt, "Edit", { file_path: path.join(wt, "src", "c.mjs") }, 30)], { age: 30 });
   const m = await modelOf(home, main);
   assert.deepEqual(m.edits, [
-    ...[
-      { agent: cc("s:lead"), file: fold("Lib/A.mjs"), at: at(60) },
-      { agent: cc("s:lead"), file: "b.md", at: at(60) },
-      { agent: cc("s:lead"), file: "n.ipynb", at: at(60) },
-    ].sort((x, y) => (x.file < y.file ? -1 : 1)),
+    { agent: cc("s:lead"), file: "Lib/A.mjs", at: at(60) },
+    { agent: cc("s:lead"), file: "b.md", at: at(60) },
+    { agent: cc("s:lead"), file: "n.ipynb", at: at(60) },
     { agent: cc("w"), file: "src/c.mjs", at: at(30) },
   ]);
+});
+
+test("shell writes: a Bash append counts as an edit and shows as a write, its cd followed; a read-only command does neither", async () => {
+  const { home, main } = office();
+  session(home, "s", [line.user(main, "x")]);
+  const append = `cd "${path.join(main, "docs").replace(/\\/g, "/")}" && printf 'joke\\n' >> README.md && tail -n 3 README.md`;
+  agent(home, "s", "w", { agentType: "worker" }, [line.tool(main, "Bash", { command: append }, 5)], { age: 5 });
+  agent(home, "s", "r", { agentType: "worker" }, [line.tool(main, "Bash", { command: "tail -n 3 README.md" }, 5)], { age: 5 });
+  agent(home, "s", "p", { agentType: "worker" }, [line.tool(main, "PowerShell", { command: "Add-Content -Path notes.md -Value 'x'" }, 5)], { age: 5 });
+  const m = await modelOf(home, main);
+  const a = byId(m.agents);
+  assert.deepEqual(m.edits, [
+    { agent: cc("p"), file: "notes.md", at: at(5) },
+    { agent: cc("w"), file: "docs/README.md", at: at(5) },
+  ]);
+  assert.deepEqual([a.w.doing, a.r.doing, a.p.doing], [{ kind: "write", file: "docs/README.md", since: at(5) }, { kind: "run", since: at(5) }, { kind: "write", file: "notes.md", since: at(5) }]);
 });
 
 test("config: user files override per key, roles merge per agent type", async () => {

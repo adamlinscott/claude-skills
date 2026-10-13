@@ -5,6 +5,7 @@
 // Pure: no Node imports and no `$`. The mod and any later app share this file.
 
 import { relativeTo } from "./git.mjs";
+import { shellWrites } from "./shell-writes.mjs";
 
 /**
  * The file a call edited as the model names it: relative to the caller's checkout (its own
@@ -20,16 +21,31 @@ export function editedFile(model, { agent, session, path }) {
 }
 
 /**
+ * The absolute paths a finished tool call wrote: an edit tool's own path (touchedTools), or the
+ * files a shell tool's command writes (shellTools), its relative paths read against `cwd`.
+ * call: the tool.call event, { tool, file_path?, notebook_path?, command? }.
+ */
+export function writtenPaths(call, cwd, { touchedTools, shellTools }) {
+  if (touchedTools.includes(call.tool)) {
+    const path = call.tool === "NotebookEdit" ? call.notebook_path : call.file_path;
+    return typeof path === "string" ? [path] : [];
+  }
+  if (shellTools.includes(call.tool) && typeof call.command === "string") return shellWrites(call.command, cwd, { powershell: call.tool === "PowerShell" });
+  return [];
+}
+
+/**
  * The note for one finished edit, or null: one line per other agent, in any room, that edited the
  * file inside the touched window (newest first), then what to do about it. The caller's own edits
- * never count.
+ * never count. Files match case-insensitively; the note names the file as the caller spelled it.
  * window: touchedWindowMinutes. titles: session id → a title the host wrote for a branch stand-in.
  */
 export function conflictNote(model, call, { now, window, titles = {} }) {
   const file = editedFile(model, call);
   if (!file) return null;
   const since = now - window * 60000;
-  const others = model.edits.filter((e) => e.file === file && e.agent !== call.agent && Date.parse(e.at) >= since).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  const key = file.toLowerCase();
+  const others = model.edits.filter((e) => e.file.toLowerCase() === key && e.agent !== call.agent && Date.parse(e.at) >= since).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   if (!others.length) return null;
   const lines = others.map((e) => {
     const a = model.agents.find((x) => x.id === e.agent);

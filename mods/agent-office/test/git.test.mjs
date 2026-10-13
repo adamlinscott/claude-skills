@@ -16,8 +16,8 @@ test("normalize: Windows and POSIX shapes, dots folded, drive upper-cased", () =
   assert.notEqual(pathKey("/home/Adam"), pathKey("/home/adam"));
 });
 
-test("relativeTo: Windows paths fold case and slashes; outside paths are null", () => {
-  assert.equal(relativeTo("C:/Users/Adam/Repo", "c:\\users\\adam\\repo\\Lib\\Wizard.MJS"), "lib/wizard.mjs");
+test("relativeTo: Windows paths compare case-insensitively and keep the file's spelling; outside paths are null", () => {
+  assert.equal(relativeTo("C:/Users/Adam/Repo", "c:\\users\\adam\\repo\\Lib\\Wizard.MJS"), "Lib/Wizard.MJS");
   assert.equal(relativeTo("C:/Users/Adam/Repo", "C:\\Users\\Adam\\Repo-other\\x.js"), null);
   assert.equal(relativeTo("/home/adam/repo", "/home/adam/repo/Lib/X.mjs"), "Lib/X.mjs");
   assert.equal(relativeTo("/home/adam/repo", "/home/adam/elsewhere/x"), null);

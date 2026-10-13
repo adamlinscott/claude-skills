@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { conflictNote, editedFile } from "../flags.mjs";
+import { conflictNote, editedFile, writtenPaths } from "../flags.mjs";
 import { office, NOW } from "./office.mjs";
 
 const ago = (minutes) => new Date(NOW - minutes * 60000).toISOString();
@@ -46,9 +46,21 @@ test("a subagent in its own worktree: the file is relative to its worktree, not 
   assert.equal(editedFile(m, { agent: "new", session: "s-a", path: "C:/w/s-a/lib/x.mjs" }), "lib/x.mjs");
 });
 
-test("Windows paths: backslashes and any case name the same file as the model's", () => {
+test("a shell write is flagged like an edit: its files read against the cwd, a read-only command none", () => {
+  const m = twoRooms();
+  m.edits.push({ agent: "r", file: "README.md", at: ago(4) });
+  const tools = { touchedTools: ["Edit", "Write", "NotebookEdit"], shellTools: ["Bash", "PowerShell"] };
+  const paths = writtenPaths({ tool: "Bash", command: "printf 'joke\\n' >> README.md; tail -n 3 README.md" }, "C:\\w\\s-a", tools);
+  assert.deepEqual(paths, ["C:/w/s-a/README.md"]);
+  assert.match(conflictNote(m, { agent: "w", session: "s-a", path: paths[0] }, opts), /^Possible conflict: README\.md was also edited 4m ago by reviewer in "Room b"/);
+  assert.deepEqual(writtenPaths({ tool: "Bash", command: "tail -n 3 README.md" }, "C:\\w\\s-a", tools), []);
+  assert.deepEqual(writtenPaths({ tool: "Bash", command: "echo x > a.md" }, "C:\\w\\s-a", { ...tools, shellTools: [] }), []);
+  assert.deepEqual(writtenPaths({ tool: "Edit", file_path: "C:\\w\\s-a\\b.md" }, null, tools), ["C:\\w\\s-a\\b.md"]);
+});
+
+test("Windows paths: backslashes and any case name the same file as the model's, spelled as the caller spelled it", () => {
   const m = twoRooms();
   m.edits.push({ agent: "r", file: "lib/wizard.mjs", at: ago(2) });
-  assert.equal(editedFile(m, { agent: "s-a:lead", session: "s-a", path: "c:\\W\\S-A\\Lib\\Wizard.mjs" }), "lib/wizard.mjs");
-  assert.match(conflictNote(m, { agent: "s-a:lead", session: "s-a", path: "c:\\W\\S-A\\Lib\\Wizard.mjs" }, opts), /^Possible conflict: lib\/wizard\.mjs was also edited 2m ago by reviewer/);
+  assert.equal(editedFile(m, { agent: "s-a:lead", session: "s-a", path: "c:\\W\\S-A\\Lib\\Wizard.mjs" }), "Lib/Wizard.mjs");
+  assert.match(conflictNote(m, { agent: "s-a:lead", session: "s-a", path: "c:\\W\\S-A\\Lib\\Wizard.mjs" }, opts), /^Possible conflict: Lib\/Wizard\.mjs was also edited 2m ago by reviewer/);
 });

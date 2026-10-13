@@ -21,6 +21,7 @@
 // id>:lead, and a subagent claude-code:<agent id>.
 
 import { join, normalize, pathKey, relativeTo } from "../git.mjs";
+import { shellWrites } from "../shell-writes.mjs";
 
 const SOURCE = "claude-code";
 
@@ -29,7 +30,8 @@ const SOURCE = "claude-code";
 // far wider than the liveness one; a day keeps the listing cheap without missing a real case.
 const SUBAGENT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
-// What an agent is doing, read from the last tool it called. Any other tool shows as nothing.
+// What an agent is doing, read from the last tool it called. Any other tool shows as nothing, and a
+// shell tool (`shellTools`) whose command writes a file shows as "write".
 const DOING = {
   Edit: "write",
   Write: "write",
@@ -219,7 +221,7 @@ export function createClaudeCode(io) {
       status: leadWorking ? "working" : "idle",
       statusSince: iso(leadWorking ? main.turnAt : main.lastMessageAt, c.ownMtime),
       lastActive: iso(c.ownMtime),
-      doing: leadWorking ? await doingOf(main, resolve, c.ownMtime) : null,
+      doing: leadWorking ? await doingOf(main, resolve, c.ownMtime, config) : null,
     });
     await addEdits(facts, lead, main, now, config, resolve);
 
@@ -253,7 +255,7 @@ export function createClaudeCode(io) {
         status: s.status,
         statusSince: iso(s.since, a.mtimeMs),
         lastActive: iso(a.mtimeMs),
-        doing: live ? await doingOf(a.t, resolve, a.mtimeMs) : null,
+        doing: live ? await doingOf(a.t, resolve, a.mtimeMs, config) : null,
         ...(worktree ? { checkout: worktree, branch: agentBranch } : {}),
         extra: { description: a.meta.description ?? null, ...(s.endState ? { endState: s.endState } : {}) },
       });
@@ -267,11 +269,12 @@ export function createClaudeCode(io) {
     }
   }
 
-  // Edit/Write/NotebookEdit targets inside the window, each made relative to the worktree of the
-  // folder that made the call, newest time per file. Outside the worktree: dropped.
+  // Edit/Write/NotebookEdit targets, and the files a shell command wrote, inside the window, each
+  // made relative to the worktree of the folder that made the call, newest time per file. Outside
+  // the worktree: dropped.
   async function addEdits(facts, agent, st, now, config, resolve) {
     const since = now - config.touchedWindowMinutes * 60000;
-    const tools = new Set(config.touchedTools);
+    const tools = new Set([...config.touchedTools, ...config.shellTools]);
     st.touches = st.touches.filter((t) => t.at >= since);
     const newest = new Map();
     for (const t of st.touches) {
@@ -373,7 +376,7 @@ function newTranscriptState() {
     firstAt: NaN, // the first timestamp seen (the start of the tail on a long file)
     lastAt: NaN,
     lastMessageAt: NaN, // the newest user/assistant/attachment/system line's time
-    lastTool: null, // { name, file, cwd, at }
+    lastTool: null, // { name, file, cwd, at, wrote }: wrote when a shell command writes `file`
     lastText: null,
     lastTextAt: NaN,
     lastRole: null, // "user" | "assistant": the newest message line
@@ -429,11 +432,15 @@ function foldLine(st, line) {
       st.waiting = true;
       if (c.name === "Agent" && typeof c.id === "string") st.spawns.set(c.id, at);
       const input = c.input || {};
+      const cwd = ev.cwd || st.cwd;
+      // Any tool with a command is read as a shell: read time keeps only the `shellTools`.
+      const writes = typeof input.command === "string" ? shellWrites(input.command, cwd, { powershell: c.name === "PowerShell" }) : [];
       const file = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : typeof input.path === "string" ? input.path : null;
-      st.lastTool = { name: c.name, file, cwd: ev.cwd || st.cwd, at };
-      // Edit paths are absolute; they are resolved against this line's cwd at read time.
+      st.lastTool = writes.length ? { name: c.name, file: writes[writes.length - 1], cwd, at, wrote: true } : { name: c.name, file, cwd, at };
+      // Edit paths and shell writes are absolute; they are resolved against this line's cwd at read time.
       const target = input.file_path || input.notebook_path;
-      if (typeof target === "string" && Number.isFinite(at)) st.touches.push({ at, cwd: ev.cwd || st.cwd, name: c.name, path: target });
+      const targets = typeof target === "string" ? [target] : writes;
+      if (Number.isFinite(at)) for (const path of targets) st.touches.push({ at, cwd, name: c.name, path });
     }
     // Each content block is its own line, so a text or thinking line inside a turn that goes on to
     // call a tool carries stop_reason "tool_use" while the tool_use line itself is still to come.
@@ -525,10 +532,10 @@ function ended(state, at) {
 
 // The agent's last tool call as { kind, file?, since }, the file relative to the worktree it was
 // called from. Outside the worktree the file is dropped, as for edits. A tool with no kind in
-// DOING shows as nothing.
-async function doingOf(st, resolve, fallbackMs) {
+// DOING shows as nothing; a shell tool's write shows as "write".
+async function doingOf(st, resolve, fallbackMs, config) {
   const t = st.lastTool;
-  const kind = t && DOING[t.name];
+  const kind = t && (t.wrote && config.shellTools.includes(t.name) ? "write" : DOING[t.name]);
   if (!kind) return null;
   const doing = { kind };
   if (t.file && t.cwd) {
