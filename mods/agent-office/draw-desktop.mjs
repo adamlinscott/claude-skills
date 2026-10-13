@@ -137,7 +137,9 @@ export function renderSvg(scene, { now } = {}) {
       const by = (p.y - 1) * CELL.h - 1;
       out.push(`<path class="bub ${p.bubble.clash ? "c" : "w"}" d="M${px(bx + 3)} ${px(by)}h${px(bw - 6)}a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H${px(cx + 3)}l-3 3-3-3H${px(bx + 3)}a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3z"/><text class="bub-t" x="${px(bx + bw / 2)}" y="${px(by + 10.5)}" text-anchor="middle">${esc(t)}</text>`);
     }
-    out.push(`<text class="t lab${p.role === "you" ? " youc" : ""}" x="${cx}" y="${px((p.y + 1) * CELL.h + 13)}" text-anchor="middle">${esc(clip(p.label, 12))}</text>`);
+    // A name is drawn here only in a lights-off room: elsewhere the seat's button is the name, and
+    // drawing both put two names, in two fonts, over each other.
+    if (p.off) out.push(`<text class="t lab${p.role === "you" ? " youc" : ""}" x="${cx}" y="${px((p.y + 1) * CELL.h + 13)}" text-anchor="middle">${esc(clip(p.label, 12))}</text>`);
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><style>${STYLE}</style><defs>${SYMBOLS}<marker id="flow-head" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse" orient="auto"><path class="flow-head" d="M0 0L6 3L0 6z"/></marker></defs>${lit.join("")}${dark.length ? `<g class="off">${dark.join("")}</g>` : ""}</svg>`;
 }
