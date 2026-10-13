@@ -109,7 +109,7 @@ export function createEngine(io, { defaultsDir, project }) {
         now,
         project: { id: null, name: null },
         sources: sources.map((s) => failed({ id: s.id, errors: { count: 0, first: null } }, message)),
-        facts: { humans: [], sessions: [], agents: [], edits: [], waits: [], reports: [] },
+        facts: { humans: [], sessions: [], agents: [], edits: [], reads: [], waits: [], reports: [] },
         meaning: { roles: [], conflicts: [], findings: [] },
       });
     }
@@ -122,9 +122,9 @@ export function createEngine(io, { defaultsDir, project }) {
     const resolve = (dir) => git.resolve(dir, gitOpts);
     const home = await resolve(project);
 
-    const facts = { humans: [], sessions: [], agents: [], edits: [], waits: [], reports: [], meaning: { roles: [], conflicts: [], findings: [] } };
+    const facts = { humans: [], sessions: [], agents: [], edits: [], reads: [], waits: [], reports: [], meaning: { roles: [], conflicts: [], findings: [] } };
     const add = (f) => {
-      for (const key of ["humans", "sessions", "agents", "edits", "waits", "reports"]) facts[key].push(...f[key]);
+      for (const key of ["humans", "sessions", "agents", "edits", "reads", "waits", "reports"]) facts[key].push(...f[key]);
       for (const key of ["roles", "conflicts", "findings"]) facts.meaning[key].push(...(f.meaning[key] || []));
     };
     const states = [];

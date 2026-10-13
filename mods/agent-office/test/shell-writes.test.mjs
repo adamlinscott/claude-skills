@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shellWrites } from "../shell-writes.mjs";
+import { shellWrites, shellFiles } from "../shell-writes.mjs";
 
 const VERSION = "C:\\Users\\adamr\\Projects\\claude-skills\\.claude\\worktrees\\version-4a64c9";
 const TESTING = "C:\\Users\\adamr\\Projects\\claude-skills\\.claude\\worktrees\\session-detection-testing-f96742";
@@ -70,4 +70,14 @@ test("Git Bash: /c/… paths become C:/… under a Windows cwd; cd follows relat
   assert.deepEqual(shellWrites("echo x > /c/Users/adam/a.md", "C:\\Users\\adam"), ["C:/Users/adam/a.md"]);
   assert.deepEqual(shellWrites("cd /c/Users/adam/repo && cd lib && echo x >> b.md", "C:\\elsewhere"), ["C:/Users/adam/repo/lib/b.md"]);
   assert.deepEqual(shellWrites("echo x > /c/a.md", "/home/adam"), ["/c/a.md"]);
+});
+
+test("reads: cat, head, tail, less, more, sed without -i and Get-Content, file arguments only, skipped as writes are", () => {
+  const reads = (command, opts) => shellFiles(command, "/r", opts).reads;
+  assert.deepEqual(reads("wc -l README.md; tail -n 15 README.md; head -c 200 a.md | od -c; cat -n b.md -; less c.md; more d.md"), ["/r/README.md", "/r/a.md", "/r/b.md", "/r/c.md", "/r/d.md"]);
+  assert.deepEqual(reads("sed -n '1,20p' lib/x.mjs; sed -e 's/a/b/' y.txt; sed -i 's/a/b/' z.txt; sort < in.txt"), ["/r/lib/x.mjs", "/r/y.txt"]);
+  assert.deepEqual(reads('cat "$F" *.md ~/x.md; cd lib && tail -n 3 e.md'), ["/r/lib/e.md"]);
+  assert.deepEqual(reads("type f.md"), []);
+  assert.deepEqual(reads("Get-Content -Raw g.md; gc -Path h.md -TotalCount 5; type i.md; cat j.md", { powershell: true }), ["/r/g.md", "/r/h.md", "/r/i.md", "/r/j.md"]);
+  assert.deepEqual(shellFiles("cat a.md > b.md", "/r"), { writes: ["/r/b.md"], reads: ["/r/a.md"] });
 });

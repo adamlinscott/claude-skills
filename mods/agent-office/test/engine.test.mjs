@@ -135,6 +135,7 @@ test("model order: facts naming an agent or session the model doesn't hold sort 
     sessions: [{ id: "s", lastActive: "2026-10-09T12:00:00.000Z" }],
     agents: [{ id: "z", session: "gone", startedBy: "x" }, { id: "b", session: "s", startedBy: "a" }, { id: "y", session: "gone", startedBy: "x" }, { id: "a", session: "s", startedBy: null }],
     edits: [{ agent: "q", file: "f" }, { agent: "b", file: "f" }, { agent: "p", file: "f" }],
+    reads: [],
     waits: [],
     reports: [],
   };

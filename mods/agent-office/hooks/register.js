@@ -24,13 +24,15 @@ const PANE = "agent-office";
 const RESTARTS = 3; // streams in a row that end without a model before falling back to --json
 const FALLBACK_MS = 5000;
 const ANIMATE_MS = 450; // the terminal's waiting arrows step at this pace
-const REFRESH_MS = 30000; // idle times and cards are in whole minutes; re-lay the scene this often
+// Re-lay the scene this often: an amber write bubble goes bubbleSeconds after the write with no new
+// model to say so. The scene is compared, so a pane redraws only when something it draws changed.
+const REFRESH_MS = 2000;
 const UNDER_PLAN_ROWS = 6; // the terminal rows kept for the status line and the selected person
 
 let model = null;
 let engine = "stopped"; // starting | running | restarting | fallback | stopped
 let run = 0; // the current engine run; an older run's loop sees the change and stops
-let config = { touchedTools: ["Edit", "Write", "NotebookEdit"], shellTools: ["Bash", "PowerShell"], touchedWindowMinutes: 30 }; // until session start reads it
+let config = { touchedTools: ["Edit", "Write", "NotebookEdit"], shellTools: ["Bash", "PowerShell"], touchedWindowMinutes: 30, bubbleSeconds: 10 }; // until session start reads it
 let viewer = null; // the model's id for this session
 let order = []; // room ids in the order this pane first saw them
 let selected = null; // the person the terminal's focus ring is on
@@ -76,13 +78,15 @@ export function register(on) {
   // file someone else in the office edited lately. The tool's result is kept as it is (with its
   // ref); a failed or refused call gets none. Filtered here rather than by matcher so the person's
   // touchedTools and shellTools apply. The event carries no working folder, so a shell command's
-  // relative paths read against the session's.
+  // relative paths read against the caller's own worktree when the model holds one, else the
+  // session's folder.
   on("tool.call", async ($, e, next) => {
     const r = await next(e);
     if (r.deny || r.isError || !drawable(model) || !viewer) return r;
     if (!config.touchedTools.includes(e.tool) && !config.shellTools.includes(e.tool)) return r;
     const agent = e.agentId ? "claude-code:" + e.agentId : viewer + ":lead";
-    const cwd = config.shellTools.includes(e.tool) ? await $.session.cwd() : null;
+    const caller = model.agents.find((a) => a.id === agent);
+    const cwd = config.shellTools.includes(e.tool) ? (caller && caller.checkout) || (await $.session.cwd()) : null;
     const opts = { now: Date.now(), window: config.touchedWindowMinutes, titles: writtenTitles(titles) };
     const notes = writtenPaths(e, cwd, config).map((path) => conflictNote(model, { agent, session: viewer, path }, opts)).filter(Boolean);
     return notes.length ? { ...r, context: [...(r.context || []), ...notes] } : r;
@@ -126,7 +130,15 @@ export function register(on) {
 function frame(columns, rows) {
   const status = statusLine(model, engine);
   if (!drawable(model)) return { status, scene: null };
-  const scene = layout(model, viewerFor(model, viewer), { columns, rows, order, now: Date.now(), titles: writtenTitles(titles) });
+  const scene = layout(model, viewerFor(model, viewer), {
+    columns,
+    rows,
+    order,
+    now: Date.now(),
+    touchedWindowMinutes: config.touchedWindowMinutes,
+    bubbleSeconds: config.bubbleSeconds,
+    titles: writtenTitles(titles),
+  });
   order = scene.order;
   return { status, scene };
 }

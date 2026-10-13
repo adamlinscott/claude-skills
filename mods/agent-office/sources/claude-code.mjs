@@ -1,6 +1,6 @@
 // Agent Office's claude-code source: turns the transcripts Claude Code already writes into the
 // facts of the office model for one git project — its live sessions, each session's lead and
-// subagents, who started whom, their edits, waits and reports, and what each one is doing now.
+// subagents, who started whom, their edits, reads, waits and reports, and what each one is doing now.
 // Roles, conflicts and findings are not decided here: meaning.mjs works them out from these facts.
 //
 // The transcript format is internal and undocumented, so every assumption about it lives in this
@@ -21,7 +21,7 @@
 // id>:lead, and a subagent claude-code:<agent id>.
 
 import { join, normalize, pathKey, relativeTo } from "../git.mjs";
-import { shellWrites } from "../shell-writes.mjs";
+import { shellFiles } from "../shell-writes.mjs";
 
 const SOURCE = "claude-code";
 
@@ -47,6 +47,10 @@ const DOING = {
   SendMessage: "talk",
 };
 
+// The tools whose file path counts as a read. A shell tool (`shellTools`) counts the files its
+// command reads.
+const READ_TOOLS = ["Read"];
+
 // End states that mean someone ended the agent early. It never answers, so it leaves no report.
 const STOPPED = new Set(["killed", "stopped"]);
 
@@ -59,7 +63,7 @@ const encoder = new TextEncoder();
  * written since the last one, and caches each checkout's owner for `gitCacheSeconds`. A cache entry
  * the latest finished pass didn't use is dropped, so a long stream holds only what is in view.
  *
- * read → { status, errors, humans, sessions, agents, edits, waits, reports, meaning }, the fact
+ * read → { status, errors, humans, sessions, agents, edits, reads, waits, reports, meaning }, the fact
  * lists in the office model's shape. Agents carry no role: the meaning rules give it.
  */
 export function createClaudeCode(io) {
@@ -224,6 +228,7 @@ export function createClaudeCode(io) {
       doing: leadWorking ? await doingOf(main, resolve, c.ownMtime, config) : null,
     });
     await addEdits(facts, lead, main, now, config, resolve);
+    await addReads(facts, lead, main, now, config, resolve);
 
     for (const a of agentFiles) {
       const id = agentId(a.id);
@@ -266,6 +271,7 @@ export function createClaudeCode(io) {
         facts.reports.push({ agent: id, at: iso(a.t.lastTextAt, a.mtimeMs), text: a.t.lastText });
       }
       await addEdits(facts, id, a.t, now, config, resolve);
+      await addReads(facts, id, a.t, now, config, resolve);
     }
   }
 
@@ -273,17 +279,28 @@ export function createClaudeCode(io) {
   // made relative to the worktree of the folder that made the call, newest time per file. Outside
   // the worktree: dropped.
   async function addEdits(facts, agent, st, now, config, resolve) {
+    st.touches = await addFiles(facts.edits, agent, st.touches, [...config.touchedTools, ...config.shellTools], now, config, resolve);
+  }
+
+  // Read targets and the files a shell command read, the same way.
+  async function addReads(facts, agent, st, now, config, resolve) {
+    st.reads = await addFiles(facts.reads, agent, st.reads, [...READ_TOOLS, ...config.shellTools], now, config, resolve);
+  }
+
+  // Pushes { agent, file, at } to `list` for each file `touches` names by one of `tools`, and
+  // returns the touches still inside the window.
+  async function addFiles(list, agent, touches, tools, now, config, resolve) {
     const since = now - config.touchedWindowMinutes * 60000;
-    const tools = new Set([...config.touchedTools, ...config.shellTools]);
-    st.touches = st.touches.filter((t) => t.at >= since);
+    const kept = touches.filter((t) => t.at >= since);
     const newest = new Map();
-    for (const t of st.touches) {
-      if (!tools.has(t.name) || !t.cwd) continue;
+    for (const t of kept) {
+      if (!tools.includes(t.name) || !t.cwd) continue;
       const where = await resolve(t.cwd);
       const file = where && relativeTo(where.toplevel, t.path);
       if (file && !(newest.get(file) >= t.at)) newest.set(file, t.at);
     }
-    for (const [file, at] of newest) facts.edits.push({ agent, file, at: iso(at) });
+    for (const [file, at] of newest) list.push({ agent, file, at: iso(at) });
+    return kept;
   }
 
   // The human a session belongs to, from git's user.name in its checkout. The email stays here.
@@ -350,10 +367,10 @@ export function createClaudeCode(io) {
   return { id: SOURCE, read };
 }
 
-const FACT_LISTS = ["humans", "sessions", "agents", "edits", "waits", "reports"];
+const FACT_LISTS = ["humans", "sessions", "agents", "edits", "reads", "waits", "reports"];
 
 function newFacts() {
-  return { status: null, errors: null, humans: [], sessions: [], agents: [], edits: [], waits: [], reports: [], meaning: {} };
+  return { status: null, errors: null, humans: [], sessions: [], agents: [], edits: [], reads: [], waits: [], reports: [], meaning: {} };
 }
 
 const agentId = (id) => `${SOURCE}:${id}`;
@@ -387,6 +404,7 @@ function newTranscriptState() {
     spawns: new Map(), // id of each Agent tool_use this file made → its time
     notes: new Map(), // agent id → { status, at } from <task-notification>
     touches: [], // { at, cwd, name, path } for tool uses that name a file
+    reads: [], // the same, for the files a tool use read
   };
 }
 
@@ -434,13 +452,19 @@ function foldLine(st, line) {
       const input = c.input || {};
       const cwd = ev.cwd || st.cwd;
       // Any tool with a command is read as a shell: read time keeps only the `shellTools`.
-      const writes = typeof input.command === "string" ? shellWrites(input.command, cwd, { powershell: c.name === "PowerShell" }) : [];
+      const shell = typeof input.command === "string" ? shellFiles(input.command, cwd, { powershell: c.name === "PowerShell" }) : { writes: [], reads: [] };
+      const writes = shell.writes;
       const file = typeof input.file_path === "string" ? input.file_path : typeof input.notebook_path === "string" ? input.notebook_path : typeof input.path === "string" ? input.path : null;
       st.lastTool = writes.length ? { name: c.name, file: writes[writes.length - 1], cwd, at, wrote: true } : { name: c.name, file, cwd, at };
-      // Edit paths and shell writes are absolute; they are resolved against this line's cwd at read time.
+      // Edit and Read paths and shell writes and reads are absolute; they are resolved against this
+      // line's cwd at read time, which also keeps only the tools that count.
       const target = input.file_path || input.notebook_path;
       const targets = typeof target === "string" ? [target] : writes;
-      if (Number.isFinite(at)) for (const path of targets) st.touches.push({ at, cwd, name: c.name, path });
+      const reads = typeof target === "string" ? [target] : shell.reads;
+      if (Number.isFinite(at)) {
+        for (const path of targets) st.touches.push({ at, cwd, name: c.name, path });
+        for (const path of reads) st.reads.push({ at, cwd, name: c.name, path });
+      }
     }
     // Each content block is its own line, so a text or thinking line inside a turn that goes on to
     // call a tool carries stop_reason "tool_use" while the tool_use line itself is still to come.

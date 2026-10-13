@@ -1,8 +1,9 @@
 // Agent Office's shell reader: the files a shell command writes, so a write through Bash or
-// PowerShell counts as an edit just as an Edit does. It is a heuristic: it reads redirects and a
-// handful of commands that write (below), and skips anything it can't read rather than guess —
-// a path with a variable or a glob in it, a `cd` to somewhere it can't place, a script the command
-// runs. Writes by programs a command starts stay invisible.
+// PowerShell counts as an edit just as an Edit does, and the files it reads, so a read through
+// the shell counts as checking a file just as a Read does. It is a heuristic: it reads redirects
+// and a handful of commands (below), and skips anything it can't read rather than guess — a path
+// with a variable or a glob in it, a `cd` to somewhere it can't place, a script the command runs.
+// Files that programs a command starts write or read stay invisible.
 //
 // Pure: no Node imports and no `$`. The source and the mod's hook share this file.
 //
@@ -13,6 +14,10 @@
 //   touch f…
 //   Set-Content, Add-Content, Out-File    -Path / -FilePath / -LiteralPath, or the first positional
 //   New-Item -ItemType File               -Path (with -Name), or the first positional
+//
+// What counts as a read: only a command's file arguments (not input redirects):
+//   cat, head, tail, less, more   sed without -i (the files after the script)
+//   Get-Content (gc, cat, type in PowerShell)   -Path / -LiteralPath, or the first positional
 
 import { isAbsolute, isWindowsPath, join, normalize } from "./git.mjs";
 
@@ -22,16 +27,22 @@ import { isAbsolute, isWindowsPath, join, normalize } from "./git.mjs";
  * skipped. Git Bash's /c/… paths become C:/… when the cwd is a Windows path.
  * powershell: read the command as PowerShell (backtick escapes, backslashes literal).
  */
-export function shellWrites(command, cwd, { powershell = false } = {}) {
+export function shellWrites(command, cwd, opts) {
+  return shellFiles(command, cwd, opts).writes;
+}
+
+/** { writes, reads }: the absolute paths `command` writes and reads, each as shellWrites gives them. */
+export function shellFiles(command, cwd, { powershell = false } = {}) {
   const win = Boolean(cwd) && isWindowsPath(cwd);
   let dir = cwd ? normalize(cwd) : null;
-  const out = [];
-  const keep = (w) => {
+  const writes = [];
+  const reads = [];
+  const keep = (out, w) => {
     const p = place(w, dir, win);
     if (p && !out.includes(p)) out.push(p);
   };
   for (const s of segments(tokens(command, powershell))) {
-    for (const w of s.writes) keep(w);
+    for (const w of s.writes) keep(writes, w);
     let words = s.words;
     if (!powershell) while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0].text)) words = words.slice(1);
     if (!words.length || words[0].unsafe) continue;
@@ -44,16 +55,18 @@ export function shellWrites(command, cwd, { powershell = false } = {}) {
       continue;
     }
     const writer = WRITERS[name];
-    if (writer) for (const w of writer(args)) keep(w);
+    if (writer) for (const w of writer(args)) keep(writes, w);
+    const reader = (powershell && PS_READERS[name]) || READERS[name];
+    if (reader) for (const r of reader(args)) if (r.text !== "-") keep(reads, r);
   }
-  return out;
+  return { writes, reads };
 }
 
 const WRITERS = {
   tee: (args) => posix(args).positional,
   touch: (args) => posix(args, ["-d", "-t", "-r"]).positional,
-  sed: inPlace,
-  perl: inPlace,
+  sed: (args) => sedFiles(args).written,
+  perl: (args) => sedFiles(args).written,
   cp: (args) => copyTarget(args, ["-S"]),
   mv: (args) => copyTarget(args, ["-S"]),
   install: (args) => copyTarget(args, ["-m", "-o", "-g", "-S"]),
@@ -62,6 +75,19 @@ const WRITERS = {
   "out-file": (args) => one(psArgs(args), ["filepath", "literalpath", "path"]),
   "new-item": newItem,
 };
+
+const READERS = {
+  cat: (args) => posix(args).positional,
+  head: (args) => posix(args, ["-n", "-c"]).positional,
+  tail: (args) => posix(args, ["-n", "-c", "-s"]).positional,
+  less: (args) => posix(args).positional,
+  more: (args) => posix(args).positional,
+  sed: (args) => sedFiles(args).read,
+};
+
+// In PowerShell, cat and type are Get-Content (Bash's `type` names a command, not a file).
+const getContent = (args) => one(psArgs(args), ["path", "literalpath"]);
+const PS_READERS = { "get-content": getContent, gc: getContent, cat: getContent, type: getContent };
 
 // ── Commands ─────────────────────────────────────────────────────────────────────────────────
 
@@ -83,9 +109,9 @@ function posix(args, valued = []) {
   return { flags, positional };
 }
 
-// sed -i / perl -i: the files after the script, which is the first positional unless -e or -f
-// gave it.
-function inPlace(args) {
+// sed / perl: the files after the script, which is the first positional unless -e or -f gave it.
+// With -i they are written; sed without it reads them.
+function sedFiles(args) {
   let inplace = false;
   let script = false;
   const positional = [];
@@ -109,7 +135,8 @@ function inPlace(args) {
       }
     } else positional.push(args[i]);
   }
-  return inplace ? positional.slice(script ? 0 : 1) : [];
+  const files = positional.slice(script ? 0 : 1);
+  return inplace ? { written: files, read: [] } : { written: [], read: files };
 }
 
 // cp / mv / install: the last path. Two or more sources, or a target ending in a slash, is a
@@ -125,7 +152,7 @@ function copyTarget(args, valued) {
 }
 
 // PowerShell's switches that take no value; any other -Name takes the next word.
-const PS_SWITCHES = new Set(["force", "nonewline", "passthru", "append", "noclobber", "whatif", "confirm", "asbytestream", "verbose", "debug"]);
+const PS_SWITCHES = new Set(["force", "nonewline", "passthru", "append", "noclobber", "whatif", "confirm", "asbytestream", "verbose", "debug", "raw", "wait"]);
 
 function psArgs(args) {
   const named = {};

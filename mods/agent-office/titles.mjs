@@ -21,13 +21,19 @@ export function titleInputs(model, sessionId) {
   const agents = model.agents.filter((a) => a.session === sessionId);
   const ids = new Set(agents.map((a) => a.id));
   const subs = agents.filter((a) => a.startedBy !== null);
-  // The newest edits and tasks, when there are more than a prompt needs.
-  const files = new Map();
-  for (const e of model.edits) if (ids.has(e.agent) && !(files.get(e.file) >= e.at)) files.set(e.file, e.at);
+  // The newest edits and tasks, when there are more than a prompt needs. Files match
+  // case-insensitively, named by the first spelling seen.
+  const files = new Map(); // lower-cased file → { file, at }
+  for (const e of model.edits) {
+    if (!ids.has(e.agent)) continue;
+    const hit = files.get(e.file.toLowerCase());
+    if (!hit) files.set(e.file.toLowerCase(), { file: e.file, at: e.at });
+    else if (e.at > hit.at) hit.at = e.at;
+  }
   const tasks = subs.filter((a) => a.task).sort((a, b) => cmp(b.lastActive, a.lastActive));
   return {
     branch: (session && session.branch) || null,
-    files: [...files].sort((a, b) => cmp(b[1], a[1])).slice(0, MAX_FILES).map(([f]) => f).sort(),
+    files: [...files.values()].sort((a, b) => cmp(b.at, a.at)).slice(0, MAX_FILES).map((f) => f.file).sort(),
     types: [...new Set(subs.map((a) => a.agentType).filter(Boolean))].sort(),
     tasks: [...new Set(tasks.map((a) => a.task))].slice(0, MAX_TASKS).sort(),
   };

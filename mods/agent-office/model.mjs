@@ -36,6 +36,7 @@ export function assembleModel({ seq, now, project, sources, facts, meaning }) {
     rooms: sessions.map((s) => ({ id: `room:${s.id}`, sessions: [s.id], title: s.title })),
     agents,
     edits: [...facts.edits].sort((a, b) => byAgent("agent")(a, b) || cmp(a.file, b.file)),
+    reads: [...facts.reads].sort((a, b) => byAgent("agent")(a, b) || cmp(a.file, b.file)),
     waits: [...facts.waits].sort((a, b) => byAgent("waiter")(a, b) || byAgent("on")(a, b)),
     reports: [...facts.reports].sort(byAgent("agent")),
     meaning: {

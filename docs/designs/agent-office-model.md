@@ -32,6 +32,7 @@ OfficeModel
                      doing: { kind: "write" | "read" | "run" | "search" | "talk", file?, since } | null,
                      checkout?, branch? }]
   edits           [{ agent, file, at }]               file relative to the repo root, forward slashes
+  reads           [{ agent, file, at }]               the same, for files an agent read
   waits           [{ waiter: agent id, on: agent id, since }]
   reports         [{ agent, at, text }]               an agent's last message once it finished
 
@@ -44,6 +45,8 @@ OfficeModel
 `status` is one of `working`, `idle`, `done`, `stalled`, `stopped`, `failed`. `stalled` means gone quiet, and it may still answer; `stopped` means someone ended it early, and it never answers or leaves a report. Waiting is never a status: an agent with waits can be working or idle.
 
 A session's `title` is the tool's own when it has one (`titleFrom: "source"`), else its branch as a stand-in (`titleFrom: "branch"`). A host may have a title written for a branch stand-in and draw that instead. An agent's `task` is the short task name it was started with; a lead has none.
+
+`edits` and `reads` hold the newest time per agent and file inside `touchedWindowMinutes`. A read is a read tool on a file, or a shell command reading one where the source can tell. Views use reads to tell when an agent has checked a file it was warned about.
 
 A session's `lights` go `off` once it has been quiet for `idleMinutes`. The engine keeps it for up to `lightsOffHours` after its last activity, with the subagents that were in view when it went quiet; their statuses are still worked out at the model's time. Views draw a room whose sessions all have the lights off faded, and don't let anyone interact with it.
 

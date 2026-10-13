@@ -6,7 +6,8 @@ const ago = (minutes) => new Date(NOW - minutes * 60000).toISOString();
 /**
  * rooms: [{ id, sessions: [{ id, status?, idle?, lights?, titleFrom?, lead?, team?: [{ id, type, status, task?, waited?, writing?, report? }] }] }].
  * Sessions are listed newest first, as the model sorts them. A teammate with `waited` is owed an
- * answer by its lead; one `writing` a file is doing that; one with a `report` has it as a finding.
+ * answer by its lead; one `writing` a file is doing that, an edit made now; one with a `report` has
+ * it as a finding.
  */
 export function office(rooms) {
   const m = {
@@ -20,6 +21,7 @@ export function office(rooms) {
     rooms: [],
     agents: [],
     edits: [],
+    reads: [],
     waits: [],
     reports: [],
     meaning: { roles: [], conflicts: [], findings: [] },
@@ -33,6 +35,7 @@ export function office(rooms) {
       m.agents.push({ id: lead, source: "claude-code", session: s.id, startedBy: null, agentType: null, task: null, role: "lead", status: s.lead ?? "working", statusSince: ago(2), lastActive: ago(idle), doing: null });
       for (const a of s.team || []) {
         m.agents.push({ id: a.id, source: "claude-code", session: s.id, startedBy: lead, agentType: a.type ?? "worker", task: a.task ?? null, role: a.role ?? "worker", status: a.status ?? "working", statusSince: ago(5), lastActive: ago(1), doing: a.writing ? { kind: "write", file: a.writing, since: ago(1) } : null });
+        if (a.writing) m.edits.push({ agent: a.id, file: a.writing, at: ago(0) });
         if (a.report) {
           m.reports.push({ agent: a.id, at: ago(1), text: a.report });
           m.meaning.findings.push({ report: a.id, by: "rules" });

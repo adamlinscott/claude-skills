@@ -541,6 +541,24 @@ test("shell writes: a Bash append counts as an edit and shows as a write, its cd
   assert.deepEqual([a.w.doing, a.r.doing, a.p.doing], [{ kind: "write", file: "docs/README.md", since: at(5) }, { kind: "run", since: at(5) }, { kind: "write", file: "notes.md", since: at(5) }]);
 });
 
+test("reads: Read on a file and a shell command's reads, per agent with the newest time; edits are not reads", async () => {
+  const { home, main } = office();
+  session(home, "s", [
+    line.tool(main, "Read", { file_path: path.join(main, "Lib", "A.mjs") }, 90),
+    line.tool(main, "Read", { file_path: path.join(main, "Lib", "A.mjs") }, 60),
+    line.tool(main, "Edit", { file_path: path.join(main, "b.md") }, 60),
+    line.tool(main, "Bash", { command: "tail -n 3 README.md && echo x >> c.md" }, 50),
+    line.tool(main, "PowerShell", { command: "Get-Content -Raw d.md" }, 40),
+    line.tool(main, "Read", { file_path: path.join(main, "stale.md") }, 40 * 60),
+  ]);
+  const m = await modelOf(home, main);
+  assert.deepEqual(m.reads, [
+    { agent: cc("s:lead"), file: "Lib/A.mjs", at: at(60) },
+    { agent: cc("s:lead"), file: "README.md", at: at(50) },
+    { agent: cc("s:lead"), file: "d.md", at: at(40) },
+  ]);
+});
+
 test("config: user files override per key, roles merge per agent type", async () => {
   const { home, main } = office();
   fs.mkdirSync(path.join(home, ".claude", "agent-office"), { recursive: true });

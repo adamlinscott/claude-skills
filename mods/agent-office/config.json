@@ -5,6 +5,7 @@
   "quietSeconds": 60,
   "stalledMinutes": 5,
   "touchedWindowMinutes": 30,
+  "bubbleSeconds": 10,
   "touchedTools": ["Edit", "Write", "NotebookEdit"],
   "shellTools": ["Bash", "PowerShell"],
   "findingsFrom": ["reviewer"],

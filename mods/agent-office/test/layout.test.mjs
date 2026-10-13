@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { layout, viewerFor, statusLine, drawable } from "../layout.mjs";
-import { office } from "./office.mjs";
+import { office, NOW } from "./office.mjs";
 
 const viewer = (m, session) => viewerFor(m, session);
 const roomIds = (scene) => scene.rooms.map((r) => r.id);
@@ -155,6 +155,53 @@ test("write bubbles: red when someone in another room edited the file lately, an
   const scene = layout(m, viewer(m, "s-a"), { touchedWindowMinutes: 45 });
   assert.deepEqual(who(scene, "w1").bubble, { file: "lib/wizard.mjs", clash: true });
   assert.deepEqual(who(scene, "w1").card.lines.slice(2, 4), ["writing lib/wizard.mjs", "possible conflict: also edited in the last 45m by worker in Room b"]);
+});
+
+test("write bubbles: amber for bubbleSeconds after the agent's newest edit, then gone, whatever it is doing now", () => {
+  const m = office([{ id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", writing: "lib/a.mjs" }] }] }]);
+  m.agents.find((a) => a.id === "w1").doing = { kind: "read", file: "lib/b.mjs", since: m.generatedAt };
+  const at = (seconds, opts) => who(layout(m, viewer(m, "s-a"), { now: NOW + seconds * 1000, ...opts }), "w1").bubble;
+  assert.deepEqual(at(10), { file: "lib/a.mjs", clash: false });
+  assert.equal(at(11), null);
+  assert.deepEqual(at(25, { bubbleSeconds: 30 }), { file: "lib/a.mjs", clash: false });
+});
+
+test("write bubbles: red stays past the amber time, for a done agent too, the conflict's file matched case-insensitively", () => {
+  const m = office([
+    { id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", status: "done", writing: "lib/wizard.mjs" }] }] },
+    { id: "b", sessions: [{ id: "s-b", team: [{ id: "w9" }] }] },
+  ]);
+  m.edits.push({ agent: "w9", file: "Lib/Wizard.mjs", at: new Date(NOW - 60000).toISOString() });
+  m.meaning.conflicts = [{ file: "Lib/Wizard.mjs", agents: ["w1", "w9"], by: "rules" }];
+  const scene = layout(m, viewer(m, "s-a"), { now: NOW + 5 * 60000 });
+  assert.deepEqual(who(scene, "w1").bubble, { file: "lib/wizard.mjs", clash: true });
+  assert.deepEqual(who(scene, "w9").bubble, { file: "Lib/Wizard.mjs", clash: true });
+});
+
+test("write bubbles: red clears once the agent reads the file after its newest edit, or writes another file", () => {
+  const conflicted = () => {
+    const m = office([
+      { id: "a", sessions: [{ id: "s-a", team: [{ id: "w1", writing: "lib/wizard.mjs" }] }] },
+      { id: "b", sessions: [{ id: "s-b", team: [{ id: "w9", writing: "lib/wizard.mjs" }] }] },
+    ]);
+    m.meaning.conflicts = [{ file: "lib/wizard.mjs", agents: ["w1", "w9"], by: "rules" }];
+    return m;
+  };
+  const bubble = (m) => who(layout(m, viewer(m, "s-a"), { now: NOW + 60000 }), "w1").bubble;
+  const later = (seconds) => new Date(NOW + seconds * 1000).toISOString();
+
+  const readBefore = conflicted();
+  readBefore.reads.push({ agent: "w1", file: "lib/wizard.mjs", at: new Date(NOW - 5000).toISOString() });
+  assert.deepEqual(bubble(readBefore), { file: "lib/wizard.mjs", clash: true });
+
+  const readAfter = conflicted();
+  readAfter.reads.push({ agent: "w1", file: "Lib/Wizard.mjs", at: later(20) });
+  assert.equal(bubble(readAfter), null);
+  assert.equal(who(layout(readAfter, viewer(readAfter, "s-a"), { now: NOW + 60000 }), "w9").bubble.clash, true);
+
+  const movedOn = conflicted();
+  movedOn.edits.push({ agent: "w1", file: "README.md", at: later(55) });
+  assert.deepEqual(bubble(movedOn), { file: "README.md", clash: false });
 });
 
 test("info icon: an agent with findings shows it, and its card holds the report's first lines, cut with …", () => {

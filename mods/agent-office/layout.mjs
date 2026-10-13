@@ -44,10 +44,11 @@ export function viewerFor(model, sessionId) {
  * now:     ms since the epoch, for the idle times and the cards; the model's own time by default.
  * touchedWindowMinutes: the engine's window for a possible conflict, for the card's wording. The
  *          model doesn't carry it, so it is config.json's default unless the host passes it.
+ * bubbleSeconds: how long a write bubble stays amber after the write (config.json's default).
  * titles:  session id → a title the host had written for it, used in place of a branch stand-in.
  */
-export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30, titles = {} } = {}) {
-  const office = index(model, viewer, now, touchedWindowMinutes, titles);
+export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30, bubbleSeconds = 10, titles = {} } = {}) {
+  const office = index(model, viewer, now, touchedWindowMinutes, bubbleSeconds, titles);
   const seen = [...order, ...model.rooms.map((r) => r.id).filter((id) => !order.includes(id))];
   const rank = new Map(seen.map((id, i) => [id, i]));
   const rooms = [...model.rooms].sort((a, b) => rank.get(a.id) - rank.get(b.id));
@@ -100,7 +101,7 @@ function place(office, plan, width) {
 }
 
 // The model looked up by id once, for the room drawing.
-function index(model, viewer, now, window, titles) {
+function index(model, viewer, now, window, bubbleSeconds, titles) {
   const sessions = new Map(model.sessions.map((s) => [s.id, s]));
   const rooms = new Map(model.rooms.flatMap((r) => r.sessions.map((id) => [id, r]))); // session id → its room
   const agents = new Map(model.agents.map((a) => [a.id, a]));
@@ -110,12 +111,28 @@ function index(model, viewer, now, window, titles) {
     if (!team.has(a.session)) team.set(a.session, []);
     team.get(a.session).push(a);
   }
-  const conflicts = new Map(); // file → everyone who edited it inside the touched window
-  for (const c of model.meaning.conflicts) conflicts.set(c.file, [...(conflicts.get(c.file) || []), ...c.agents]);
+  // Files match case-insensitively, as in the meaning rules.
+  const conflicts = new Map(); // lower-cased file → everyone who edited it inside the touched window
+  for (const c of model.meaning.conflicts) {
+    const key = c.file.toLowerCase();
+    conflicts.set(key, [...(conflicts.get(key) || []), ...c.agents]);
+  }
+  const lastEdit = new Map(); // agent id → its newest edit
+  const edited = new Map(); // lower-cased file → its newest edit's time, by anyone
+  for (const e of model.edits) {
+    if (!lastEdit.has(e.agent) || e.at > lastEdit.get(e.agent).at) lastEdit.set(e.agent, e);
+    const key = e.file.toLowerCase();
+    if (!(edited.get(key) >= e.at)) edited.set(key, e.at);
+  }
+  const reads = new Map(); // agent id and lower-cased file → its newest read's time
+  for (const r of model.reads) {
+    const key = r.agent + "\n" + r.file.toLowerCase();
+    if (!(reads.get(key) >= r.at)) reads.set(key, r.at);
+  }
   const findings = new Set(model.meaning.findings.map((f) => f.report));
   const reports = new Map(); // agent id → its latest report
   for (const r of model.reports) if (!reports.has(r.agent) || r.at >= reports.get(r.agent).at) reports.set(r.agent, r);
-  return { sessions, rooms, agents, team, conflicts, findings, reports, viewer, now, window, titles };
+  return { sessions, rooms, agents, team, conflicts, lastEdit, edited, reads, findings, reports, viewer, now, window, bubbleMs: bubbleSeconds * 1000, titles };
 }
 
 // A room's lights are off once all its sessions have gone quiet past the engine's idle window. The
@@ -214,10 +231,7 @@ function labelOf(office, a) {
 function person(office, a, session, x, y, off) {
   const you = a.startedBy === null && a.session === office.viewer.session;
   const label = labelOf(office, a);
-  // A write bubble turns red when anyone else, in any room, edited the file lately: never for the
-  // agent's own edits.
-  const file = a.doing && a.doing.kind === "write" ? a.doing.file : null;
-  const others = file ? (office.conflicts.get(file) || []).filter((id) => id !== a.id) : [];
+  const { bubble, others } = writeBubble(office, a);
   return {
     id: a.id,
     x,
@@ -225,11 +239,26 @@ function person(office, a, session, x, y, off) {
     role: you ? "you" : a.role || "other",
     look: you ? "you" : LOOK[a.status] || "idle",
     label,
-    bubble: file ? { file, clash: others.length > 0 } : null,
+    bubble,
     info: office.findings.has(a.id),
     off,
     card: card(office, a, session, label, others),
   };
+}
+
+// The write bubble, from the agent's newest edit, and who else edited that file when it is red.
+// Amber for `bubbleSeconds` after the write. Red, whatever the agent's status, while anyone else
+// in any room edited the file lately (never for the agent's own edits), until the agent reads the
+// file at or after the file's newest edit; writing another file moves the bubble to that one.
+function writeBubble(office, a) {
+  const e = office.lastEdit.get(a.id);
+  if (!e) return { bubble: null, others: [] };
+  const key = e.file.toLowerCase();
+  const others = (office.conflicts.get(key) || []).filter((id) => id !== a.id);
+  const checked = office.reads.get(a.id + "\n" + key) >= office.edited.get(key);
+  if (others.length && !checked) return { bubble: { file: e.file, clash: true }, others };
+  if (office.now - Date.parse(e.at) <= office.bubbleMs) return { bubble: { file: e.file, clash: false }, others: [] };
+  return { bubble: null, others: [] };
 }
 
 // The hover card (the terminal's detail lines): role and agent type, status and for how long,
