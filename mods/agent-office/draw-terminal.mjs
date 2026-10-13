@@ -97,12 +97,13 @@ export function renderCells(scene, tick = 0) {
 /**
  * The pane's tree on the terminal: the plan as a Raster keyed "plan", a plain Button over each
  * person's label so the pane's focus ring (Tab and the arrows, once the pane has the keys) walks
- * between people, none in a lights-off room, then the selected person's detail under the plan.
+ * between people, none in a lights-off room, then the selected person's details (the scene's) under
+ * the plan.
  *
- * el: the surface's elements ({ Box, Text, Raster, Button }). selected: an agent id or null.
- * onSelect(id): what a press on a person runs. detailRows: the rows the detail is cut to.
+ * el: the surface's elements ({ Box, Text, Raster, Button }). onSelect(id): what a press on a
+ * person runs. detailRows: the rows the details are cut to.
  */
-export function drawTerminal(scene, el, { tick = 0, selected = null, onSelect = () => {}, detailRows = Infinity } = {}) {
+export function drawTerminal(scene, el, { tick = 0, onSelect = () => {}, detailRows = Infinity } = {}) {
   const { Box, Text, Raster, Button } = el;
   const plan = renderCells(scene, tick);
   const seats = scene.people.filter((p) => !p.off).map((p) =>
@@ -124,14 +125,13 @@ export function drawTerminal(scene, el, { tick = 0, selected = null, onSelect = 
     }),
   );
   const rows = [Box({ position: "relative", children: [Raster({ key: "plan", ...plan }), ...seats] })];
-  const who = scene.people.find((p) => p.id === selected);
-  if (who) rows.push(...detailLines(who).slice(0, detailRows).map((line, i) => Text({ bold: i === 0, wrap: "truncate-end", children: [line] })));
+  if (scene.details) rows.push(...detailLines(scene.details).slice(0, detailRows).map((line, i) => Text({ bold: i === 0, wrap: "truncate-end", children: [line] })));
   return Box({ flexDirection: "column", children: rows });
 }
 
-/** The selected person's detail, a line each: who, then the card's lines. */
-export function detailLines(p) {
-  return [`${p.card.title} · ${p.card.lines[0]}`, ...p.card.lines.slice(1)];
+/** The selected person's details, a line each: the Desktop panel's lines, then the card's others. */
+export function detailLines(details) {
+  return [...details.lines, ...details.more];
 }
 
 /** The Button key for a person, and back. */

@@ -226,6 +226,7 @@ export function createClaudeCode(io) {
       statusSince: iso(leadWorking ? main.turnAt : main.lastMessageAt, c.ownMtime),
       lastActive: iso(c.ownMtime),
       doing: leadWorking ? await doingOf(main, resolve, c.ownMtime, config) : null,
+      usage: usageOf(main, c.ownMtime),
     });
     await addEdits(facts, lead, main, now, config, resolve);
     await addReads(facts, lead, main, now, config, resolve);
@@ -261,6 +262,7 @@ export function createClaudeCode(io) {
         statusSince: iso(s.since, a.mtimeMs),
         lastActive: iso(a.mtimeMs),
         doing: live ? await doingOf(a.t, resolve, a.mtimeMs, config) : null,
+        usage: usageOf(a.t, a.mtimeMs),
         ...(worktree ? { checkout: worktree, branch: agentBranch } : {}),
         extra: { description: a.meta.description ?? null, ...(s.endState ? { endState: s.endState } : {}) },
       });
@@ -405,6 +407,10 @@ function newTranscriptState() {
     notes: new Map(), // agent id → { status, at } from <task-notification>
     touches: [], // { at, cwd, name, path } for tool uses that name a file
     reads: [], // the same, for the files a tool use read
+    usage: null, // { model, context, at } from the newest reply
+    output: 0, // output tokens over the replies read
+    replyId: null, // the newest reply's message id, and its output tokens as counted
+    replyOut: 0,
   };
 }
 
@@ -440,6 +446,7 @@ function foldLine(st, line) {
   if (ev.type === "assistant" && Array.isArray(content)) {
     st.lastRole = "assistant";
     st.waiting = false;
+    readUsage(st, ev.message, at);
     for (const c of content) {
       if (!c || typeof c !== "object") continue;
       if (c.type === "text" && typeof c.text === "string" && c.text.trim()) {
@@ -488,6 +495,26 @@ function foldLine(st, line) {
     // A prompt (not a tool result) starts a new turn: the last turn's tool is not what it is doing.
     if (turn === true && !toolResults) st.lastTool = null;
   }
+}
+
+// The newest reply's model and context size (its input plus both cache counts), and the output
+// summed over the replies read. Each content block of a reply is its own line carrying the same
+// usage, so a reply counts once. A line the client made up (model "<synthetic>") is no reply.
+function readUsage(st, message, at) {
+  const u = message.usage;
+  if (!u || typeof u !== "object" || typeof message.model !== "string" || !message.model || message.model.startsWith("<")) return;
+  const n = (key) => (Number.isFinite(u[key]) ? u[key] : 0);
+  const out = n("output_tokens");
+  const same = typeof message.id === "string" && message.id === st.replyId;
+  st.output += out - (same ? st.replyOut : 0);
+  st.replyId = typeof message.id === "string" ? message.id : null;
+  st.replyOut = out;
+  st.usage = { model: message.model, context: n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens"), at };
+}
+
+// An agent's usage for the model: null until a reply with usage has been read.
+function usageOf(st, fallbackMs) {
+  return st.usage && { model: st.usage.model, context: st.usage.context, output: st.output, at: iso(st.usage.at, fallbackMs) };
 }
 
 function setTurn(st, open, at) {

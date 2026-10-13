@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { layout, viewerFor, statusLine, drawable } from "../layout.mjs";
+import { layout, viewerFor, statusLine, drawable, contextWindow } from "../layout.mjs";
 import { office, NOW } from "./office.mjs";
 
 const viewer = (m, session) => viewerFor(m, session);
@@ -132,6 +132,50 @@ test("the card: role and agent type, status and for how long, what it is doing, 
     title: "worker-light",
     lines: ["role worker · type worker-light", "working for 5m", "writing lib/wizard.mjs", "Fix the wizard", "own worktree: x · C:/w/.claude/worktrees/x"],
   });
+});
+
+test("details: who, status spelled out, report, waits, tokens and context, last acted; only for someone drawn", () => {
+  const usage = (model, context, output) => ({ model, context, output, at: new Date(NOW).toISOString() });
+  const m = office([
+    {
+      id: "a",
+      sessions: [{ id: "s-a", usage: usage("opus", 100000, 2000), team: [{ id: "w1", waited: true, usage: usage("opus", 294000, 12345) }, { id: "v1", type: "reviewer", role: "reviewer", status: "done", report: "\nAll clear.\nMore.", usage: usage("haiku", 8400, 900) }] }],
+    },
+  ]);
+  const details = (selected, opts) => layout(m, viewer(m, "s-a"), { selected, ...opts }).details;
+  const windows = { opus: { window: 1000000, compactAt: 920000 } };
+  assert.deepEqual(details("w1", { contextWindows: windows }).lines, [
+    "worker · role worker · type worker",
+    "working for 5m",
+    "waited on by: you",
+    "tokens: 294k context now · 12k output so far",
+    "context: 294k of 1M (29%) · compacts at 92%",
+    "last acted 1m ago",
+  ]);
+  assert.deepEqual(details("v1", { contextWindows: windows }).lines, [
+    "reviewer · role reviewer · type reviewer",
+    "done 5m ago: it finished its task",
+    "report: All clear.",
+    "tokens: 8.4k context now · 900 output so far",
+    "context: 8.4k · window unknown for haiku",
+    "last acted 1m ago",
+  ]);
+  // The viewer's own lead: its context live from the session, the window from the session too.
+  const own = { model: "opus", window: 1000000, compactAt: null, tokens: 120000 };
+  assert.deepEqual(details("s-a:lead", { own }).lines.slice(2), ["waiting on: worker", "tokens: 120k context now · 2k output so far", "context: 120k of 1M (12%)", "last acted <1m ago"]);
+  assert.equal(details(null), null);
+  assert.equal(details("nobody"), null);
+});
+
+test("context window: config's entry for the model, then the viewer's own session on that model, then config's *", () => {
+  const own = { model: "opus", window: 200000, compactAt: 180000, tokens: 5000 };
+  assert.deepEqual(contextWindow("opus", { opus: { window: 1e6 }, "*": { window: 5e5 } }, own), { window: 1e6, compactAt: null });
+  assert.deepEqual(contextWindow("opus", { "*": { window: 5e5 } }, own), { window: 200000, compactAt: 180000 });
+  assert.deepEqual(contextWindow("haiku", { "*": { window: 5e5, compactAt: 4e5 } }, own), { window: 5e5, compactAt: 4e5 });
+  assert.equal(contextWindow("haiku", {}, own), null);
+  // A malformed entry or table is passed over, never shown.
+  assert.deepEqual(contextWindow("opus", { opus: { window: "big" } }, own), { window: 200000, compactAt: 180000 });
+  assert.equal(contextWindow("opus", [], null), null);
 });
 
 test("write bubbles: amber while writing a file, never red for the agent's own edits, none without a file", () => {

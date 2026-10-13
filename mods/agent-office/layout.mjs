@@ -36,7 +36,9 @@ export function viewerFor(model, sessionId) {
  *     rooms:  [{ id, x, y, w, h, title, sub, you, idle, folded, off }],
  *     tables: [{ x, y, w, off }],                  two rows tall
  *     people: [{ id, x, y, role, look, label, bubble: { file, clash } | null, info, off, card: { title, lines } }],
- *     lines:  [{ from: waiter id, to: agent id }]  only between people drawn }
+ *     lines:  [{ from: waiter id, to: agent id }]  only between people drawn
+ *     details: { id, lines, more } | null }        the selected person's, when drawn: the panel's
+ *                                                  lines, and the card's lines the panel doesn't say
  *
  * columns: the width to fill. rows: the height to fit (the terminal's pane); rooms past it fold,
  *          then drop, counted in `hidden`. order: the room ids in the order the host first saw
@@ -46,9 +48,12 @@ export function viewerFor(model, sessionId) {
  *          model doesn't carry it, so it is config.json's default unless the host passes it.
  * bubbleSeconds: how long a write bubble stays amber after the write (config.json's default).
  * titles:  session id → a title the host had written for it, used in place of a branch stand-in.
+ * selected: the agent id whose details to give, or null.
+ * contextWindows: config.json's table, model id → { window, compactAt } in tokens, "*" the default.
+ * own:     the viewer's own session's reading, { model, window, compactAt, tokens }, or null.
  */
-export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30, bubbleSeconds = 10, titles = {} } = {}) {
-  const office = index(model, viewer, now, touchedWindowMinutes, bubbleSeconds, titles);
+export function layout(model, viewer, { columns = 124, rows = Infinity, order = [], now = Date.parse(model.generatedAt), touchedWindowMinutes = 30, bubbleSeconds = 10, titles = {}, selected = null, contextWindows = {}, own = null } = {}) {
+  const office = { ...index(model, viewer, now, touchedWindowMinutes, bubbleSeconds, titles), contextWindows, own };
   const seen = [...order, ...model.rooms.map((r) => r.id).filter((id) => !order.includes(id))];
   const rank = new Map(seen.map((id, i) => [id, i]));
   const rooms = [...model.rooms].sort((a, b) => rank.get(a.id) - rank.get(b.id));
@@ -70,13 +75,14 @@ export function layout(model, viewer, { columns = 124, rows = Infinity, order = 
     hidden += 1;
   }
 
-  const scene = { w: width, h: 0, order: seen, hidden, rooms: [], tables: [], people: [], lines: [] };
+  const scene = { w: width, h: 0, order: seen, hidden, rooms: [], tables: [], people: [], lines: [], details: null };
   const placed = place(office, plan, width);
   for (const { p, x, y } of placed.at) drawRoom(scene, office, p.room, p.fold, x, y, width);
   scene.h = placed.h + (hidden ? 1 : 0);
   // A lights-off room is still: its waits draw no lines.
   const drawn = new Set(scene.people.filter((q) => !q.off).map((q) => q.id));
   scene.lines = model.waits.filter((w) => drawn.has(w.waiter) && drawn.has(w.on)).map((w) => ({ from: w.waiter, to: w.on }));
+  if (scene.people.some((p) => p.id === selected)) scene.details = details(office, office.agents.get(selected));
   return scene;
 }
 
@@ -132,7 +138,7 @@ function index(model, viewer, now, window, bubbleSeconds, titles) {
   const findings = new Set(model.meaning.findings.map((f) => f.report));
   const reports = new Map(); // agent id → its latest report
   for (const r of model.reports) if (!reports.has(r.agent) || r.at >= reports.get(r.agent).at) reports.set(r.agent, r);
-  return { sessions, rooms, agents, team, conflicts, lastEdit, edited, reads, findings, reports, viewer, now, window, bubbleMs: bubbleSeconds * 1000, titles };
+  return { sessions, rooms, agents, team, conflicts, lastEdit, edited, reads, findings, reports, waits: model.waits, viewer, now, window, bubbleMs: bubbleSeconds * 1000, titles };
 }
 
 // A room's lights are off once all its sessions have gone quiet past the engine's idle window. The
@@ -265,9 +271,17 @@ function writeBubble(office, a) {
 // what it is doing and who else edited that file lately, its task, its own worktree when
 // it has one, and the start of its report when that is a finding.
 function card(office, a, session, label, others) {
+  const lines = [roleLine(a), `${a.status} for ${duration(office.now - Date.parse(a.statusSince))}`, ...about(office, a, session, others)];
+  if (office.findings.has(a.id) && office.reports.has(a.id)) lines.push(...reportLines(office.reports.get(a.id).text));
+  return { title: label, lines };
+}
+
+const roleLine = (a) => `role ${a.role || "other"}${a.agentType ? ` · type ${a.agentType}` : ""}`;
+
+// The card's lines between its status and its report: what it is doing, who else edited that
+// file lately, its task and its own worktree.
+function about(office, a, session, others) {
   const lines = [];
-  lines.push(`role ${a.role || "other"}${a.agentType ? ` · type ${a.agentType}` : ""}`);
-  lines.push(`${a.status} for ${duration(office.now - Date.parse(a.statusSince))}`);
   if (a.doing) lines.push(`${DOING[a.doing.kind] || a.doing.kind}${a.doing.file ? " " + a.doing.file : ""}`);
   for (const id of others) {
     const b = office.agents.get(id);
@@ -276,8 +290,65 @@ function card(office, a, session, label, others) {
   }
   if (a.task) lines.push(a.task);
   if (a.checkout && a.checkout !== session.checkout) lines.push(`own worktree: ${[a.branch, a.checkout].filter(Boolean).join(" · ")}`);
-  if (office.findings.has(a.id) && office.reports.has(a.id)) lines.push(...reportLines(office.reports.get(a.id).text));
-  return { title: label, lines };
+  return lines;
+}
+
+// How an ended or stuck status reads in the details: whether the agent finished its task.
+const SPELLED = {
+  done: (d) => `done ${d} ago: it finished its task`,
+  stalled: (d) => `stalled for ${d}: gone quiet before finishing its task`,
+  stopped: (d) => `stopped ${d} ago: ended early, so it leaves no report`,
+  failed: (d) => `failed ${d} ago: it ended with an error`,
+};
+
+// The details panel (#58): who, its status, its report's first line, its waits, its tokens and
+// context, and when it last acted. `more` is the card's lines the panel doesn't say.
+function details(office, a) {
+  const since = duration(office.now - Date.parse(a.statusSince));
+  const lines = [`${labelOf(office, a)} · ${roleLine(a)}`, SPELLED[a.status] ? SPELLED[a.status](since) : `${a.status} for ${since}`];
+  const report = office.reports.get(a.id);
+  const first = report && String(report.text).split(/\r?\n/).find((l) => l.trim());
+  if (first) lines.push(`report: ${first.trim()}`);
+  const names = (ids) => ids.map((id) => (office.agents.has(id) ? labelOf(office, office.agents.get(id)) : id)).join(", ");
+  const on = office.waits.filter((w) => w.waiter === a.id).map((w) => w.on);
+  const by = office.waits.filter((w) => w.on === a.id).map((w) => w.waiter);
+  if (on.length) lines.push(`waiting on: ${names(on)}`);
+  if (by.length) lines.push(`waited on by: ${names(by)}`);
+  if (a.usage) {
+    // The viewer's own lead reads its context live from the session when the host has it.
+    const mine = a.startedBy === null && a.session === office.viewer.session && office.own && positive(office.own.tokens);
+    const used = mine ? office.own.tokens : a.usage.context;
+    lines.push(`tokens: ${tokens(used)} context now · ${tokens(a.usage.output)} output so far`);
+    const w = contextWindow(a.usage.model, office.contextWindows, office.own);
+    if (!w) lines.push(`context: ${tokens(used)} · window unknown for ${a.usage.model}`);
+    else lines.push(`context: ${tokens(used)} of ${tokens(w.window)} (${percent(used, w.window)}%)${w.compactAt ? ` · compacts at ${percent(w.compactAt, w.window)}%` : ""}`);
+  }
+  lines.push(`last acted ${duration(office.now - Date.parse(a.lastActive))} ago`);
+  return { id: a.id, lines, more: about(office, a, office.sessions.get(a.session), writeBubble(office, a).others) };
+}
+
+/**
+ * A model's context window, { window, compactAt } in tokens (compactAt null when unknown), or null
+ * when nothing says. First match wins: config's entry for the model, the viewer's own session's
+ * reading when it runs that model, then config's "*".
+ */
+export function contextWindow(model, contextWindows, own) {
+  const table = contextWindows && typeof contextWindows === "object" ? contextWindows : {};
+  const entry = (key) => (Object.hasOwn(table, key) ? fit(table[key]) : null);
+  return (model && entry(model)) || (model && own && own.model === model && fit(own)) || entry("*");
+}
+
+const positive = (n) => typeof n === "number" && Number.isFinite(n) && n > 0;
+const fit = (w) => (w && typeof w === "object" && positive(w.window) ? { window: w.window, compactAt: positive(w.compactAt) ? w.compactAt : null } : null);
+const percent = (part, whole) => Math.round((part / whole) * 100);
+
+// Token counts as the status line writes them: 812, 8.4k, 294k, 1M, 1.2M.
+function tokens(n) {
+  const one = (x) => String(Math.round(x * 10) / 10);
+  if (n < 1000) return String(n);
+  if (n < 9950) return one(n / 1000) + "k";
+  if (n < 999500) return Math.round(n / 1000) + "k";
+  return one(n / 1e6) + "M";
 }
 
 // A report's first lines, wrapped to the card's text width at spaces, its blank lines left out,

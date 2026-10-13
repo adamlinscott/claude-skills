@@ -28,14 +28,21 @@ const ANIMATE_MS = 450; // the terminal's waiting arrows step at this pace
 // model to say so. The scene is compared, so a pane redraws only when something it draws changed.
 const REFRESH_MS = 2000;
 const UNDER_PLAN_ROWS = 6; // the terminal rows kept for the status line and the selected person
+const MEASURE_MS = 5000; // read this session's own context window at most this often
 
 let model = null;
 let engine = "stopped"; // starting | running | restarting | fallback | stopped
 let run = 0; // the current engine run; an older run's loop sees the change and stops
-let config = { touchedTools: ["Edit", "Write", "NotebookEdit"], shellTools: ["Bash", "PowerShell"], touchedWindowMinutes: 30, bubbleSeconds: 10 }; // until session start reads it
+let config = { touchedTools: ["Edit", "Write", "NotebookEdit"], shellTools: ["Bash", "PowerShell"], touchedWindowMinutes: 30, bubbleSeconds: 10, contextWindows: {} }; // until session start reads it
 let viewer = null; // the model's id for this session
 let order = []; // room ids in the order this pane first saw them
 let selected = null; // the person the terminal's focus ring is on
+let picked = null; // the person whose details the Claude app's panel shows: a press picks, a second lets go
+// This session's own context window, for its lead's model: { model, window, compactAt, tokens,
+// counted: whether the breakdown came back }. Read in the background, never on a render.
+let own = null;
+let measuring = false;
+let measuredAt = 0;
 let tick = 0;
 const shown = {}; // surface → what it last drew: { columns, rows, key, scene }
 // Titles written for rooms named only by their branch: session id → { key, title, at }. Kept for
@@ -70,6 +77,7 @@ export function register(on) {
     if (e.id === PANE) {
       for (const k of Object.keys(shown)) delete shown[k];
       selected = null;
+      picked = null;
     }
     return next(e);
   });
@@ -113,21 +121,21 @@ export function register(on) {
     const terminal = e.surface === "terminal";
     const columns = e.props.bodyColumns || (e.viewport && e.viewport.columns) || 100;
     const rows = terminal && e.props.scroll ? Math.max(4, e.props.scroll.bodyRows - UNDER_PLAN_ROWS) : Infinity;
-    const view = frame(columns, rows);
+    const view = frame(columns, rows, e.surface);
     shown[e.surface] = { columns, rows, key: JSON.stringify(view), scene: view.scene };
 
     const out = [];
     if (view.status) out.push(el.Text({ dimColor: true, wrap: "truncate-end", children: [view.status] }));
-    if (view.scene && terminal) out.push(drawTerminal(view.scene, el, { tick, selected, onSelect: (id) => select($, id), detailRows: UNDER_PLAN_ROWS - (view.status ? 1 : 0) }));
-    else if (view.scene) out.push(drawDesktop(view.scene, el, { now: Date.now() }));
+    if (view.scene && terminal) out.push(drawTerminal(view.scene, el, { tick, onSelect: (id) => select($, id), detailRows: UNDER_PLAN_ROWS - (view.status ? 1 : 0) }));
+    else if (view.scene) out.push(drawDesktop(view.scene, el, { now: Date.now(), onSelect: (id) => pick($, id) }));
     else if (!view.status) out.push(el.Text({ dimColor: true, children: ["Waiting for the office…"] }));
     return el.Box({ flexDirection: "column", children: out });
   });
 }
 
 // What a surface of this size draws now: the status line and the scene (none for a model this
-// pane can't read). Keeps the room order the scene settled on.
-function frame(columns, rows) {
+// pane can't read), with that surface's selection's details. Keeps the room order the scene settled on.
+function frame(columns, rows, surface) {
   const status = statusLine(model, engine);
   if (!drawable(model)) return { status, scene: null };
   const scene = layout(model, viewerFor(model, viewer), {
@@ -138,6 +146,9 @@ function frame(columns, rows) {
     touchedWindowMinutes: config.touchedWindowMinutes,
     bubbleSeconds: config.bubbleSeconds,
     titles: writtenTitles(titles),
+    selected: surface === "terminal" ? selected : picked,
+    contextWindows: config.contextWindows,
+    own,
   });
   order = scene.order;
   return { status, scene };
@@ -146,14 +157,55 @@ function frame(columns, rows) {
 // Redraw only when something a surface draws has changed. No surface drawn is a closed pane (or
 // one about to draw for the first time, which needs no nudge).
 function changed($) {
-  const surfaces = Object.values(shown);
-  if (surfaces.some((s) => JSON.stringify(frame(s.columns, s.rows)) !== s.key)) $.ui.invalidate("ui.render");
+  const surfaces = Object.entries(shown);
+  if (surfaces.some(([surface, s]) => JSON.stringify(frame(s.columns, s.rows, surface)) !== s.key)) $.ui.invalidate("ui.render");
 }
 
 function select($, id) {
   selected = id;
   $.ui.invalidate("ui.render");
 }
+
+function pick($, id) {
+  picked = picked === id ? null : id;
+  $.ui.invalidate("ui.render");
+}
+
+// Reads this session's own context window in the background while the pane is drawn, for the
+// model its lead's newest reply used: the plain call (free) at most every MEASURE_MS, and the
+// breakdown, estimated locally, until one has come back for that model. Whatever comes back is
+// read defensively: only positive numbers count.
+function measure($) {
+  if (measuring || !drawable(model) || !Object.keys(shown).length) return;
+  const lead = model.agents.find((a) => a.id === viewer + ":lead");
+  const id = lead && lead.usage && lead.usage.model;
+  const now = Date.now();
+  // A new model is read at once; the same one at most every MEASURE_MS.
+  if (!id || (own && own.model === id && now - measuredAt < MEASURE_MS)) return;
+  const before = own && own.model === id ? own : null;
+  measuring = true;
+  measuredAt = now;
+  $.session
+    .usage(before && before.counted ? undefined : { breakdown: "summary" })
+    .then((u) => {
+      const context = (u && u.context) || {};
+      const b = context.breakdown && typeof context.breakdown === "object" ? context.breakdown : null;
+      own = {
+        model: id,
+        window: (b && positive(b.rawMaxTokens)) || (before && before.window) || positive(context.window),
+        compactAt: b ? positive(b.autoCompactThreshold) : before && before.compactAt,
+        tokens: positive(context.tokens),
+        counted: !!b || !!(before && before.counted),
+      };
+      changed($);
+    })
+    .catch((err) => $.ui.log("agent-office: could not read the context window: " + message(err), { to: "debug" }))
+    .finally(() => {
+      measuring = false;
+    });
+}
+
+const positive = (n) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null);
 
 async function start($) {
   if (engine !== "stopped") return;
@@ -167,6 +219,7 @@ async function start($) {
   $.clock.every(REFRESH_MS, () => {
     changed($);
     askTitle($);
+    measure($);
   });
   // The terminal's arrows move by repainting the plan's cells: no pane redraw.
   $.clock.every(ANIMATE_MS, () => {

@@ -322,6 +322,27 @@ test("doing: the last tool call's kind, shown while working or stalled; a file o
   assert.deepEqual(a.r.doing, { kind: "read", since: at(5) });
 });
 
+test("usage: the newest reply's model and context, output summed once per reply; a made-up line is no reply", async () => {
+  const { home, main } = office();
+  const u = (input, read, written, output) => ({ input_tokens: input, cache_read_input_tokens: read, cache_creation_input_tokens: written, output_tokens: output });
+  const p = session(home, "s", [
+    line.user(main, "go", 60),
+    line.reply(main, "m1", u(2, 1000, 500, 300), 50),
+    line.reply(main, "m1", u(2, 1000, 500, 300), 50), // the same reply's next block
+    line.reply(main, "m2", u(3, 1500, 200, 40), 40),
+    line.reply(main, "x", u(0, 0, 0, 0), 30, "<synthetic>"),
+  ]);
+  agent(home, "s", "w", { agentType: "worker" }, [line.tool(main, "Read", { file_path: "x" }, 5)], { age: 5 });
+  const engine = engineIn(home, main);
+  const a = byId((await engine.model()).agents);
+  assert.deepEqual(a["s:lead"].usage, { model: "claude-opus-5-5", context: 1703, output: 340, at: at(40) });
+  assert.equal(a.w.usage, null);
+  // An appended reply adds its output; after a compaction the context drops.
+  fs.appendFileSync(p, JSON.stringify(line.reply(main, "m3", u(1, 0, 20000, 60), 5, "claude-sonnet-5-5")) + "\n");
+  touch(p, 5);
+  assert.deepEqual(byId((await engine.model()).agents)["s:lead"].usage, { model: "claude-sonnet-5-5", context: 20001, output: 400, at: at(5) });
+});
+
 test("owner: git user.name names the human; without a git runner the owner is unknown", async () => {
   const { home, main } = office();
   session(home, "s", [line.user(main, "x")]);

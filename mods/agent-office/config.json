@@ -13,5 +13,6 @@
   "tailBytes": 1048576,
   "gitCacheSeconds": 60,
   "decisionModel": "none",
-  "autoOpen": false
+  "autoOpen": false,
+  "contextWindows": {}
 }

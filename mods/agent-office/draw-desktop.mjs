@@ -1,7 +1,8 @@
 // Agent Office's Desktop drawing: a laid-out scene (layout.mjs) as one SVG for an image-mode `Svg`,
 // ported from the agreed prototype's renderSvg (#46), plus a keyed `Box` over each seat holding a
 // hover card with that person's detail (#43: interactive Svg reloads on every redraw, Box hover
-// cards survive them).
+// cards survive them) and a plain Button that picks the person for the details panel under the
+// plan (#58).
 //
 // The SVG is drawn on the scene's cell grid at the Desktop's rough cell size, so a Box placed in
 // cells lands over the figure it belongs to. Motion is CSS inside the SVG: the dots on a waiting
@@ -140,10 +141,12 @@ export function renderSvg(scene, { now } = {}) {
 
 /**
  * The pane's plan on the Desktop: the Svg, with a keyed Box over each seat whose card appears
- * while the pointer is over it; none in a lights-off room. el: the surface's elements ({ Box, Text, Svg }).
+ * while the pointer is over it and a Button that presses onSelect(id); none in a lights-off room.
+ * Under the plan, the scene's details in a bordered panel.
+ * el: the surface's elements ({ Box, Text, Svg, Button }).
  */
-export function drawDesktop(scene, el, { now } = {}) {
-  const { Box, Text, Svg } = el;
+export function drawDesktop(scene, el, { now, onSelect = () => {} } = {}) {
+  const { Box, Text, Svg, Button } = el;
   const svg = Svg({ source: renderSvg(scene, { now }), alt: describe(scene), width: px(scene.w * CELL.w), height: px(Math.max(1, scene.h) * CELL.h) });
   const seats = scene.people.filter((p) => !p.off).map((p) => {
     // A whole seat (the room above the figure, the figure, its label) is the hover spot: the cell
@@ -172,7 +175,7 @@ export function drawDesktop(scene, el, { now } = {}) {
       width: seat.w,
       height: seat.h,
       children: [
-        Text({ children: [" ".repeat(seat.w)] }),
+        Button({ key: pickKey(p.id), label: " ".repeat(seat.w), plain: true, onPress: () => onSelect(p.id) }),
         Box({
           position: "absolute",
           top,
@@ -192,7 +195,26 @@ export function drawDesktop(scene, el, { now } = {}) {
       ],
     });
   });
-  return Box({ position: "relative", children: [svg, ...seats] });
+  const plan = Box({ key: "plan", position: "relative", children: [svg, ...seats] });
+  return Box({ flexDirection: "column", children: scene.details ? [plan, panel(scene, el)] : [plan] });
+}
+
+/** The Button key for a person's seat on the Desktop; apart from the terminal's, so a focus there never moves the terminal's selection. */
+export const pickKey = (id) => "pick:" + id;
+
+// The selected person's details, in a bordered box as wide as its longest line, inside the plan's
+// width; a longer line wraps.
+function panel(scene, el) {
+  const { Box, Text } = el;
+  const { lines } = scene.details;
+  return Box({
+    key: "details",
+    width: Math.min(Math.max(12, ...lines.map((l) => l.length + 4)), Math.max(12, scene.w)),
+    flexDirection: "column",
+    borderStyle: "round",
+    paddingX: 1,
+    children: lines.map((line, i) => Text({ bold: i === 0, children: [line] })),
+  });
 }
 
 // What the plan says for a reader that cannot see it: each room and who is in it.

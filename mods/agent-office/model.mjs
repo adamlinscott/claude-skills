@@ -20,7 +20,7 @@ export function assembleModel({ seq, now, project, sources, facts, meaning }) {
   const sessionOrder = new Map(sessions.map((s, i) => [s.id, i]));
   const role = new Map(meaning.roles.map((r) => [r.agent, r.role]));
   const agents = facts.agents
-    .map(({ id, source, session, startedBy, agentType, ...rest }) => ({ id, source, session, startedBy, agentType, role: role.get(id) ?? null, ...rest }))
+    .map(({ id, source, session, startedBy, agentType, usage = null, ...rest }) => ({ id, source, session, startedBy, agentType, role: role.get(id) ?? null, ...rest, usage }))
     .sort((a, b) => rank(sessionOrder, a.session) - rank(sessionOrder, b.session) || (a.startedBy !== null) - (b.startedBy !== null) || cmp(a.id, b.id));
   const agentOrder = new Map(agents.map((a, i) => [a.id, i]));
   const byAgent = (key) => (a, b) => rank(agentOrder, a[key]) - rank(agentOrder, b[key]) || cmp(a[key], b[key]);

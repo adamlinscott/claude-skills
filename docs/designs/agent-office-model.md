@@ -30,6 +30,7 @@ OfficeModel
   agents          [{ id, source, session, startedBy: agent id | null (a lead),
                      agentType, role, task: short task name | null, status, statusSince, lastActive,
                      doing: { kind: "write" | "read" | "run" | "search" | "talk", file?, since } | null,
+                     usage: { model, context, output, at } | null,
                      checkout?, branch? }]
   edits           [{ agent, file, at }]               file relative to the repo root, forward slashes
   reads           [{ agent, file, at }]               the same, for files an agent read
@@ -45,6 +46,8 @@ OfficeModel
 `status` is one of `working`, `idle`, `done`, `stalled`, `stopped`, `failed`. `stalled` means gone quiet, and it may still answer; `stopped` means someone ended it early, and it never answers or leaves a report. Waiting is never a status: an agent with waits can be working or idle.
 
 A session's `title` is the tool's own when it has one (`titleFrom: "source"`), else its branch as a stand-in (`titleFrom: "branch"`). A host may have a title written for a branch stand-in and draw that instead. An agent's `task` is the short task name it was started with; a lead has none.
+
+An agent's `usage` comes from its newest reply: the `model` id it ran on, its `context` size in tokens (the reply's input plus cache-read and cache-written tokens, so a compaction shows as a drop) and that reply's time `at`. `output` is the output tokens summed over the part of the transcript the engine has read. It is null until a reply with usage is read. The model carries no context window: a view looks one up by model id in config.json's `contextWindows` (`{ "<model id>": { window, compactAt } }` in tokens, `"*"` as a default), or takes it from its own session for the model that session runs.
 
 `edits` and `reads` hold the newest time per agent and file inside `touchedWindowMinutes`. A read is a read tool on a file, or a shell command reading one where the source can tell. Views use reads to tell when an agent has checked a file it was warned about.
 

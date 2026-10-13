@@ -59,6 +59,8 @@ export const line = {
   tool: (cwd, name, input, age = 30, extra = {}) => ({ type: "assistant", cwd, timestamp: at(age), message: { role: "assistant", content: [{ type: "tool_use", id: "t" + Math.random(), name, input }] }, ...extra }),
   spawn: (cwd, toolUseId, input = {}, age = 30) => ({ type: "assistant", cwd, timestamp: at(age), message: { role: "assistant", content: [{ type: "tool_use", id: toolUseId, name: "Agent", input }] } }),
   result: (cwd, toolUseId, toolUseResult, age = 30, isError = false) => ({ type: "user", cwd, timestamp: at(age), message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content: "…", is_error: isError }] }, toolUseResult }),
+  // One content block of a reply: each block is its own line, carrying the reply's id and usage.
+  reply: (cwd, id, usage, age = 30, model = "claude-opus-5-5") => ({ type: "assistant", cwd, timestamp: at(age), message: { id, model, role: "assistant", content: [{ type: "text", text: "ok" }], usage } }),
   title: (aiTitle) => ({ type: "ai-title", aiTitle }),
   notify: (agentId, status, age = 10) => ({
     type: "queue-operation",
