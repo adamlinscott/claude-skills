@@ -178,7 +178,9 @@ export function drawDesktop(scene, el, { now, source, onSelect = () => {} } = {}
       width: seat.w,
       height: seat.h,
       children: [
-        Button({ key: pickKey(p.id), label: " ".repeat(seat.w), plain: true, onPress: () => onSelect(p.id) }),
+        // The name under the figure is the button that opens the details: a blank label drew nothing
+        // to click in the Claude app, so the name itself is the visible, pressable control.
+        Box({ position: "absolute", top: 2, left: 0, width: seat.w, justifyContent: "center", children: [Button({ key: pickKey(p.id), label: clip(p.label, seat.w), plain: true, dimColor: true, onPress: () => onSelect(p.id) })] }),
         Box({
           position: "absolute",
           top,

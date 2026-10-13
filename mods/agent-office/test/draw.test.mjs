@@ -23,6 +23,8 @@ const busyScene = layout(busy, viewerFor(busy, "s-a"), { columns: 90 });
 const el = new Proxy({}, { get: (_, type) => (props) => ({ type, props }) });
 // The Desktop's seats: the plan Box's children after the Svg.
 const seatsOf = (tree) => tree.props.children[0].props.children.slice(1);
+// The seat's details Button: the person's name, under the figure.
+const pickOf = (seat) => seat.props.children[0].props.children[0];
 
 // The cells back as text rows.
 function text({ columns, rows, cells }) {
@@ -58,9 +60,9 @@ test("desktop: a plain Button over every seat picks that person; the picked pers
   const picks = [];
   const tree = drawDesktop(scene, el, { onSelect: (id) => picks.push(id) });
   assert.equal(tree.props.children.length, 1);
-  const buttons = seatsOf(tree).map((s) => s.props.children.find((c) => c.type === "Button"));
+  const buttons = seatsOf(tree).map(pickOf);
   assert.deepEqual(buttons.map((b) => b.props.key), scene.people.map((p) => pickKey(p.id)));
-  assert.ok(buttons.every((b) => b.props.plain));
+  assert.ok(buttons.every((b) => b.props.plain && b.props.label.trim()), "a visible name to click, not a blank");
   buttons[1].props.onPress();
   assert.deepEqual(picks, [scene.people[1].id]);
 
@@ -161,7 +163,7 @@ test("lights off: faded in the SVG and dim in the cells, with no hover box or se
   const faded = svg.slice(svg.indexOf('<g class="off">'));
   assert.ok(faded.includes("Room z") && faded.includes('class="info-c"') && !faded.includes("Room a"));
   assert.deepEqual(seatsOf(drawDesktop(s, el)).map((b) => b.props.key), ["seat:s-a:lead"]);
-  assert.equal(seatsOf(drawDesktop(s, el))[0].props.children[0].props.key, pickKey("s-a:lead"));
+  assert.equal(pickOf(seatsOf(drawDesktop(s, el))[0]).props.key, pickKey("s-a:lead"));
   const [, ...seats] = drawTerminal(s, el).props.children[0].props.children;
   assert.deepEqual(seats.map((b) => seatOf(b.props.children[0].props.key)), ["s-a:lead"]);
   assert.equal(seats[0].props.children[0].props.autoFocus, true);
