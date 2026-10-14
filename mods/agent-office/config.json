@@ -8,6 +8,7 @@
   "bubbleSeconds": 10,
   "touchedTools": ["Edit", "Write", "NotebookEdit"],
   "shellTools": ["Bash", "PowerShell"],
+  "helperPrompts": ["Generate a short git branch name"],
   "findingsFrom": ["reviewer"],
   "streamSeconds": 1,
   "tailBytes": 1048576,

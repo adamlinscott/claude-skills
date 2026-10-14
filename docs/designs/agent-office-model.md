@@ -54,6 +54,8 @@ An agent's `usage` comes from its newest reply: the `model` id it ran on, its `c
 
 A session's `lights` go `off` once it has been quiet for `idleMinutes`. The engine keeps it for up to `lightsOffHours` after its last activity, with the subagents that were in view when it went quiet; their statuses are still worked out at the model's time. Views draw a room whose sessions all have the lights off faded, and don't let anyone interact with it.
 
+A source leaves two kinds of session out of the model altogether: a tool's helper session (for `claude-code`, one read from its start with a single prompt opening with one of config.json's `helperPrompts`, no tool calls and no subagents), and a session whose lights are off that never got a real reply. A helper that goes on to a second prompt or a tool call shows; a session with no reply yet shows while its lights are on, as a new desk.
+
 `role` comes from the role catalogue, an open list (worker, scout, researcher, reviewer, lead, and any added later, such as accountant). An agent type with no catalogue entry gets `other`.
 
 ## Layers

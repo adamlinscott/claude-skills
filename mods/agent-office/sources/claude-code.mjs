@@ -90,6 +90,7 @@ export function createClaudeCode(io) {
     for (const c of candidates) {
       try {
         const main = await readTranscript(c.path, c.size, config.tailBytes);
+        if (leftOut(main, c, config)) continue;
         linesSeen += main.seen;
         linesParsed += main.parsed;
         messagesParsed += main.messages;
@@ -159,7 +160,7 @@ export function createClaudeCode(io) {
         const lit = now - lastActive <= idleMs;
         const from = lit ? now : lastActive;
         const agents = all.filter((a) => from - a.mtimeMs <= agentWindowMs);
-        out.push({ id, path, size: st.size, ownMtime: st.mtimeMs, lastActive, lights: lit ? "on" : "off", agents });
+        out.push({ id, path, size: st.size, ownMtime: st.mtimeMs, lastActive, lights: lit ? "on" : "off", agents, subagents: all.length });
       }
     }
     return out;
@@ -349,6 +350,7 @@ export function createClaudeCode(io) {
       st = newTranscriptState();
       st.offset = Math.max(0, size - tailBytes);
       st.skipPartial = st.offset > 0;
+      st.fromStart = st.offset === 0;
       transcripts.set(path, st);
     }
     if (size <= st.offset) return st;
@@ -411,6 +413,10 @@ function newTranscriptState() {
     totals: tally(), // token counts summed over the replies read
     over100k: tally(), // the part of them from replies whose prompt was over 100k tokens
     reply: null, // the newest reply: { id, over100k, counts } as counted
+    fromStart: true, // false when the first read was a tail read
+    prompts: 0, // user lines that opened a turn, tool results and interruptions aside
+    tools: 0, // tool_use blocks
+    firstPrompt: null, // the first prompt's opening, for leftOut only: it never goes in the model
   };
 }
 
@@ -454,6 +460,7 @@ function foldLine(st, line) {
         st.lastTextAt = at;
       }
       if (c.type !== "tool_use") continue;
+      st.tools++;
       st.waiting = true;
       if (c.name === "Agent" && typeof c.id === "string") st.spawns.set(c.id, at);
       const input = c.input || {};
@@ -493,7 +500,11 @@ function foldLine(st, line) {
     const turn = userTurn(ev, content);
     if (turn !== null) setTurn(st, turn, at);
     // A prompt (not a tool result) starts a new turn: the last turn's tool is not what it is doing.
-    if (turn === true && !toolResults) st.lastTool = null;
+    if (turn === true && !toolResults) {
+      st.lastTool = null;
+      st.prompts++;
+      if (st.firstPrompt === null) st.firstPrompt = promptText(content).slice(0, PROMPT_CHARS);
+    }
   }
 }
 
@@ -548,6 +559,26 @@ function userTurn(ev, content) {
   if (texts.some((t) => t.startsWith("[Request interrupted by user"))) return false;
   if (texts.length && texts.every((t) => /^\s*<(command-|local-command-)/.test(t))) return null;
   return true;
+}
+
+// The first prompt's opening is kept only to match it against `helperPrompts`.
+const PROMPT_CHARS = 200;
+
+function promptText(content) {
+  if (typeof content === "string") return content;
+  const text = Array.isArray(content) && content.find((c) => c && c.type === "text" && typeof c.text === "string");
+  return text ? text.text : "";
+}
+
+// Sessions the office leaves out. A tool's helper session: read from its start, one prompt that
+// opens with one of `helperPrompts` (case aside), and no tool calls or subagents; it goes back in
+// once it takes a second prompt or calls a tool. And a session gone lights-off that never got a
+// real reply (one with usage): a terminal opened and closed, or a lone slash command.
+function leftOut(st, c, config) {
+  if (c.lights === "off" && !st.usage) return true;
+  if (!st.fromStart || st.prompts !== 1 || st.tools || c.subagents) return false;
+  const opening = st.firstPrompt.trimStart().toLowerCase();
+  return config.helperPrompts.some((p) => typeof p === "string" && p && opening.startsWith(p.toLowerCase()));
 }
 
 // A background Agent call answers at once with a launch acknowledgement. That is not "done".

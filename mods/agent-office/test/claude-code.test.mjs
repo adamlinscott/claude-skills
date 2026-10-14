@@ -59,7 +59,8 @@ test("liveness: active, idle, lights off — and a busy subagent keeps a quiet s
   const { home, main } = office();
   session(home, "active", [line.user(main, "x")], { age: 30 });
   session(home, "idle", [line.user(main, "x")], { age: 10 * 60 });
-  session(home, "gone", [line.user(main, "x")], { age: 40 * 60 });
+  // A lights-off session stays only once it got a reply.
+  session(home, "gone", [line.user(main, "x"), line.reply(main, "r1", { output_tokens: 1 })], { age: 40 * 60 });
   session(home, "waiting", [line.user(main, "x")], { age: 50 * 60 });
   agent(home, "waiting", "a1", { agentType: "scout" }, [line.tool(main, "Grep", { pattern: "x" })], { age: 20 });
 
@@ -77,7 +78,7 @@ test("lights off: kept until lightsOffHours, with the subagents in view when the
   const hours = (h) => h * 3600;
   fs.mkdirSync(path.join(home, ".claude", "agent-office"), { recursive: true });
   fs.writeFileSync(path.join(home, ".claude", "agent-office", "config.json"), JSON.stringify({ lightsOffHours: 5 }));
-  session(home, "last-night", [line.user(main, "x", hours(3))], { age: hours(3) });
+  session(home, "last-night", [line.user(main, "x", hours(3)), line.reply(main, "r1", { output_tokens: 1 }, hours(3))], { age: hours(3) });
   // Ten minutes before the lead's last line, inside the window back from it; an hour before, not.
   agent(home, "last-night", "late", { agentType: "reviewer" }, [line.text(main, "Looks fine.", hours(3) + 600)], { age: hours(3) + 600 });
   agent(home, "last-night", "early", { agentType: "worker" }, [line.text(main, "Done.", hours(4))], { age: hours(4) });
@@ -403,6 +404,55 @@ test("format drift: a session that has written only bookkeeping lines is skipped
   const m = await modelOf(home, main);
   assert.equal(m.sources[0].status, null);
   assert.deepEqual(m.sessions, []);
+});
+
+// Orca's branch-name helper: one prompt, one reply, nothing else.
+const helperPrompt = (cwd, text = "Generate a short git branch name that summarizes the coding task below.") => line.user(cwd, text, 30);
+const answer = (cwd, age = 25) => line.reply(cwd, "r1", { input_tokens: 10, output_tokens: 5 }, age);
+
+test("left out: a helper session never shows, lights on or off, and is counted nowhere", async () => {
+  const { home, main } = office();
+  session(home, "helper", [helperPrompt(main), answer(main)]);
+  session(home, "helper-asking", [helperPrompt(main, "  GENERATE a short Git branch name for this")]);
+  session(home, "helper-old", [helperPrompt(main), answer(main)], { age: 40 * 60 });
+  const m = await modelOf(home, main);
+  assert.deepEqual(m.sessions, []);
+  assert.equal(m.sources[0].status, null);
+});
+
+test("left out: a helper-opening session shows once it takes a second prompt or calls a tool", async () => {
+  const { home, main } = office();
+  session(home, "two-prompts", [helperPrompt(main), answer(main, 20), line.user(main, "and another", 15)]);
+  session(home, "tool", [helperPrompt(main), line.tool(main, "Read", { file_path: path.join(main, "a.md") }, 20)]);
+  assert.deepEqual(Object.keys(await sessionsOf(home, main)).sort(), ["tool", "two-prompts"]);
+});
+
+test("left out: a one-prompt, no-tool session not on helperPrompts shows", async () => {
+  const { home, main } = office();
+  session(home, "question", [line.user(main, "What does this repo do?", 30), answer(main)]);
+  assert.deepEqual(Object.keys(await sessionsOf(home, main)), ["question"]);
+});
+
+test("left out: a session that never got a real reply shows with its lights on, and is left out once they go off", async () => {
+  const { home, main } = office();
+  session(home, "new-desk", [line.user(main, "<command-name>/model</command-name>")]);
+  session(home, "closed", [line.user(main, "<command-name>/model</command-name>")], { age: 40 * 60 });
+  session(home, "api-error", [line.user(main, "hi"), line.reply(main, "e1", { output_tokens: 0 }, 25, "<synthetic>")], { age: 40 * 60 });
+  session(home, "answered", [line.user(main, "hi"), answer(main)], { age: 40 * 60 });
+  const s = await sessionsOf(home, main);
+  assert.deepEqual(Object.keys(s).sort(), ["answered", "new-desk"]);
+  assert.equal(s["new-desk"].lights, "on");
+});
+
+test("left out: a tail-read session is never taken for a helper", async () => {
+  const { home, main } = office();
+  const helper = [helperPrompt(main), answer(main)];
+  const tail = helper.map((l) => JSON.stringify(l) + "\n").join("").length + 10;
+  fs.mkdirSync(path.join(home, ".claude", "agent-office"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".claude", "agent-office", "config.json"), JSON.stringify({ tailBytes: tail }));
+  // The earlier part of the transcript is out of reach, so there may have been more prompts.
+  session(home, "long", [line.title("x".repeat(1000)), ...helper]);
+  assert.deepEqual(Object.keys(await sessionsOf(home, main)), ["long"]);
 });
 
 test("config: a missing, null or wrong-typed user value falls back to the repo default, roles per entry", async () => {
