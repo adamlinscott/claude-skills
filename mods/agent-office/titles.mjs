@@ -3,7 +3,8 @@
 // host makes the call; this file decides what to ask, when, and what to keep from the reply.
 //
 // The prompt is built only from the office model: the branch, the session's edited files, and its
-// subagents' types and task names. Never anything a person typed.
+// subagents' types and task names. Never a user message, though the branch and task names can carry
+// a person's words.
 //
 // Pure: no Node imports and no `$`. The mod and any later app share this file.
 

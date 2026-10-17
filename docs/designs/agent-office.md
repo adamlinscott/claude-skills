@@ -114,7 +114,7 @@ Pixel Agents source read.
 One **discover module** builds an **office snapshot**. Three things consume it.
 
 ```
-transcripts (~/.claude/projects)        zones.json
+transcripts (~/.claude/projects)        roles.json
           │                                 │
           ▼                                 ▼
    discover module ──► office snapshot (JSON) ◄── git --git-common-dir cache
@@ -159,9 +159,9 @@ transcripts (~/.claude/projects)        zones.json
 └────────────────────────────────────────────────────────┘
 ```
 Your room is always first. Other rooms are ordered by relevance: a shared-file link first,
-then most recently active. Zones come from `zones.json`, for example
-`{"scout":"archive","researcher":"library","worker":"workshop","worker-light":"workshop","reviewer":"review room","*":"open floor"}`.
-An agent whose type can't be read sits in the `*` zone, labelled `?`.
+then most recently active. Each agent type's role comes from `roles.json`, for example
+`{"scout":"scout","researcher":"researcher","worker":"worker","worker-light":"worker","reviewer":"reviewer","*":"other"}`.
+An agent whose type can't be read takes the `*` role, labelled `?`.
 
 ### Discover module rules
 
@@ -187,7 +187,7 @@ An agent whose type can't be read sits in the `*` zone, labelled `?`.
   call, with forward slashes, and lower-cased on Windows. Paths outside the worktree are
   ignored. Collisions are the intersection of these relative paths.
 - **Board.** Each card is the final assistant message from a subagent JSONL whose type is in
-  the config's `boardAgents` list (default `["reviewer"]`; /fresh-eyes runs the reviewer
+  the config's `findingsFrom` list (default `["reviewer"]`; /fresh-eyes runs the reviewer
   agent), read by the discover module for every session, not through hooks. Cards come only
   from sessions currently shown, newest first, capped at a tunable count (default 5), and drop
   when their session is hidden. Collisions get their own COLLISIONS section and do not appear
@@ -200,7 +200,7 @@ An agent whose type can't be read sits in the `*` zone, labelled `?`.
 
 ### LLM budget: deterministic first, cheap model only for meaning
 
-> **Revised after the session:** room summaries come from the session's own data, else the cheapest Claude model via `$.model.complete` on the person's billing (no key). Decision models (JEV, Perplexity Decisions) are only for categorising and fuzzy relatedness with confidence, never for writing text; the beta installer offers JEV, Perplexity Decisions or None, with keys in user environment variables. Which checks they run is open on map #41.
+> **Revised after the session:** room summaries come from the session's own data, else the cheapest Claude model via `$.model.complete` on the person's billing (no key). Decision models (JEV, Perplexity Decisions) are only for categorising and fuzzy relatedness with confidence, never for writing text. If they are enabled it will be server-side (V2, [#59](https://github.com/adamlinscott/claude-skills/issues/59)), not part of the local install, so the installer asks for no model and no key. Which checks they run is open on map #41.
 
 Most of the snapshot comes straight from the transcripts with no model involved: sessions,
 branches, agent types, tool names, file paths, timestamps, collisions and statuses. An LLM is
@@ -215,16 +215,16 @@ meaning:
 | "What is this room working on" (a one-line label per session) | Cheap model, from branch, touched file paths and agent types |
 | Condensing a long finding into a card title | Cheap model, only when the verbatim text exceeds the card width |
 
-Rules: use JEV (TypeSafe AI's "System One" model), the cheap model chosen for this kind of data-filling, with a Haiku-class model as the fallback. Cache every result
+Rules: the plan was JEV (TypeSafe AI's "System One" model) with a Haiku-class fallback; as built, titles use Haiku, and JEV would come back only as a server-side decision model (V2, #59). Cache every result
 by session id plus transcript byte offset, so a room is relabelled only after it changes
 materially, never once per refresh. If no model is available, the pane still works and falls
 back to branch names and truncated text. The pane never needs the LLM in order to draw.
 
-This is **post-v1 (milestone 3.5)**. Milestones 1-3 ship with no model calls at all. The
-mechanism is still open: JEV through its API, with the key read from the user's existing JEV setup, never stored in this repo. The fallback is a mods API for model calls, if one exists, or `claude -p
---model haiku` through `$.process` on the user's existing Claude login. Either way there is no
-new key and no server. Data handling: a label prompt contains only the branch, touched file
-paths and agent types, never user-turn text, so pasted secrets don't flow into labels. Board
+As built, the one model call is the room title: Haiku through the mods API's `$.model.complete`,
+on the user's existing Claude login, for a room named only by its branch. There is no new key
+and no server. Data handling: a title prompt contains only the branch, edited file paths and
+subagent types and task names, never a user message, so pasted secrets don't flow into titles
+(the branch and task names can still carry a person's words). Board
 text is shown locally, to the same user, from their own transcripts.
 
 ### Milestones
@@ -245,8 +245,8 @@ text is shown locally, to the same user, from their own transcripts.
    and `Raster` cells in the terminal, refreshed every few seconds. Rooms, desks by zone, status
    by colour, started-by lines, and "you are here". Add mod support to `install.mjs` and a manifest
    entry, linking to the documented mods install location (confirm it from the plugin-authoring
-   docs). `zones.json` and the config ship as repo defaults. Users override them in
-   `~/.claude/agent-office/zones.json` and `config.json`, merged per key on top of the repo
+   docs). `roles.json` and the config ship as repo defaults. Users override them in
+   `~/.claude/agent-office/roles.json` and `config.json`, merged per key on top of the repo
    default, so new defaults (such as a new Role agent type) still apply after `git pull`.
 3. **Collisions and board.** Add file-overlap links between sessions to the snapshot and pane,
    and add board cards (see Discover module rules).
@@ -272,8 +272,9 @@ text is shown locally, to the same user, from their own transcripts.
   agents sit on the open floor as `?`, and the zone success criterion applies only to this
   session (through `$.agent.list()`).
 - What can the mod sandbox do (`$.fs`, `$.process`)? This is resolved by milestone 1's probe.
-- Which model-call mechanism should labels use (milestone 3.5)?
-- Should `boardAgents` grow beyond `reviewer`? Decide after living with v1.
+- Which model-call mechanism should labels use (milestone 3.5)? Resolved: `$.model.complete`
+  with Haiku.
+- Should `findingsFrom` grow beyond `reviewer`? Decide after living with v1.
 - Does Pixel Agents already parse transcripts? Read its source before writing the parser.
 - Does the non-technical setup get the pane? It defaults to off. Revisit after v1.
 
@@ -290,13 +291,14 @@ text is shown locally, to the same user, from their own transcripts.
 - Editing the same file from two worktrees produces a collision line within one refresh.
 - A Claude Code update that changes the transcript format breaks only the discover module, and
   the pane shows a one-line status rather than crashing.
-- Milestones 1-3 make no model calls.
+- The only model call is the room title, and the pane draws without it (the branch shows
+  until a title comes back).
 
 ## Distribution Plan
 
-The mod lives in this repo next to `skills/` and `agents/`. `install.mjs` currently has no mod
-support, so milestone 2 adds it: a manifest entry, and linking into the mods install location.
-It is on by default for developers and off for the non-technical setup. `zones.json` and the
+The mod lives in this repo next to `skills/` and `agents/`. Milestone 2 added mod support to
+`install.mjs`: a `mods.txt` entry, and linking into the mods install location. It is a beta
+feature, off on both setups until ticked on the beta checklist. `roles.json` and the
 config ship as repo defaults, with per-key user overrides in `~/.claude/agent-office/`. There is
 no CI beyond the existing flow, and teammates get updates with `git pull`.
 

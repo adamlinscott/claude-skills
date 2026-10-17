@@ -68,7 +68,7 @@ A source leaves two kinds of session out of the model altogether: a tool's helpe
 | Renderers (Desktop drawing, terminal cells) | The host | A laid-out scene |
 | Host (the Claude mod today) | Claude Code | Refresh, input, later actions |
 
-The engine runs for the life of the pane and writes one model per line to its output whenever something changes. The shared modules (model, meaning rules, layout) sit inside the mod's folder so the mod can import them; the engine and any future app import the same files.
+The engine runs for the life of the session, whether or not the pane is open (it also feeds the conflict notes), and writes one model per line to its output whenever something changes. The shared modules (model, meaning rules, layout) sit inside the mod's folder so the mod can import them; the engine and any future app import the same files.
 
 ## From today's discover snapshot
 
