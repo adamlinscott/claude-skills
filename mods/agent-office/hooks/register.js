@@ -32,6 +32,7 @@ const MEASURE_MS = 5000; // read this session's own context window at most this 
 
 let model = null;
 let engine = "stopped"; // starting | running | restarting | fallback | stopped
+let cause = null; // why the engine couldn't run, in plain words, until it gives a model
 let run = 0; // the current engine run; an older run's loop sees the change and stops
 let config = { touchedTools: ["Edit", "Write", "NotebookEdit"], shellTools: ["Bash", "PowerShell"], touchedWindowMinutes: 30, bubbleSeconds: 10, contextWindows: {} }; // until session start reads it
 let viewer = null; // the model's id for this session
@@ -152,7 +153,8 @@ function planSource(scene) {
 // What a surface of this size draws now: the status line and the scene (none for a model this
 // pane can't read), with that surface's selection's details. Keeps the room order the scene settled on.
 function frame(columns, rows, surface) {
-  const status = statusLine(model, engine);
+  // A known cause takes the place of the engine's own line, which would only say it isn't running.
+  const status = cause ? [cause, statusLine(model, "running")].filter(Boolean).join(" · ") : statusLine(model, engine);
   if (!drawable(model)) return { status, scene: null };
   const scene = layout(model, viewerFor(model, viewer), {
     columns,
@@ -248,25 +250,31 @@ async function start($) {
   if (engine !== "stopped") return;
   const me = ++run;
   engine = "starting";
-  viewer = "claude-code:" + (await $.session.id());
-  const cwd = await $.session.cwd();
-  const cli = $.plugin.root.replace(/\\/g, "/") + "/cli.mjs";
+  try {
+    viewer = "claude-code:" + (await $.session.id());
+    const cwd = await $.session.cwd();
+    const cli = $.plugin.root.replace(/\\/g, "/") + "/cli.mjs";
 
-  // The engine runs for the session, so these do too; with the pane closed they find nothing drawn.
-  $.clock.every(REFRESH_MS, () => {
-    changed($);
-    askTitle($);
-    measure($);
-  });
-  // The terminal's arrows move by repainting the plan's cells: no pane redraw.
-  $.clock.every(ANIMATE_MS, () => {
-    const t = shown.terminal;
-    if (!t || !t.scene || !t.scene.lines.length) return;
-    tick += 1;
-    const { columns, rows, cells } = renderCells(t.scene, tick);
-    $.ui.blit({ requestId: PANE, key: "plan", columns, rows, cells }).catch(() => {});
-  });
-  stream($, me, cli, cwd).catch((err) => $.ui.log("agent-office: the engine loop failed: " + message(err), { to: "debug" }));
+    // The engine runs for the session, so these do too; with the pane closed they find nothing drawn.
+    $.clock.every(REFRESH_MS, () => {
+      changed($);
+      askTitle($);
+      measure($);
+    });
+    // The terminal's arrows move by repainting the plan's cells: no pane redraw.
+    $.clock.every(ANIMATE_MS, () => {
+      const t = shown.terminal;
+      if (!t || !t.scene || !t.scene.lines.length) return;
+      tick += 1;
+      const { columns, rows, cells } = renderCells(t.scene, tick);
+      $.ui.blit({ requestId: PANE, key: "plan", columns, rows, cells }).catch(() => {});
+    });
+    stream($, me, cli, cwd).catch((err) => $.ui.log("agent-office: the engine loop failed: " + message(err), { to: "debug" }));
+  } catch (err) {
+    // Back to stopped, so the next render or /agent-office tries again.
+    engine = "stopped";
+    $.ui.log("agent-office: could not start the engine: " + message(err), { to: "debug" });
+  }
 }
 
 function accept($, me, text) {
@@ -278,6 +286,7 @@ function accept($, me, text) {
     return false;
   }
   model = next;
+  cause = null;
   if (engine !== "fallback") engine = "running";
   changed($);
   askTitle($);
@@ -318,11 +327,14 @@ async function stream($, me, cli, cwd) {
   let failures = 0;
   while (me === run && failures < RESTARTS) {
     let got = false;
+    let began = false; // the first pull came back, so `node` did start
     const it = $.process.spawn({ argv: ["node", cli, "--stream", "--project", cwd], cwd })[Symbol.asyncIterator]();
     try {
       let buffer = "";
       for (;;) {
         const { value, done } = await it.next();
+        began = true;
+        if (done && !got) cause = exitedCause(value && value.code);
         if (done || me !== run) break;
         if (value.stream !== "stdout") continue;
         buffer += value.text;
@@ -334,6 +346,7 @@ async function stream($, me, cli, cwd) {
         }
       }
     } catch (err) {
+      if (!began) cause = NO_NODE; // the first pull rejects when the command can't start
       $.ui.log("agent-office: the engine stream failed: " + message(err), { to: "debug" });
     }
     if (me !== run) return;
@@ -357,6 +370,10 @@ async function stream($, me, cli, cwd) {
     await $.clock.sleep(FALLBACK_MS);
   }
 }
+
+// What the status line says when the engine can't run, in place of "isn't running".
+const NO_NODE = "Agent Office needs Node.js on PATH (couldn't start `node`).";
+const exitedCause = (code) => "Agent Office's engine stopped as soon as it started" + (typeof code === "number" ? ` (node exited with code ${code})` : "") + ".";
 
 // The person's Claude folder, with forward slashes.
 async function claudeDir($) {
