@@ -48,7 +48,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
-import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, readKey, readSecret, style, wrap } from "./lib/wizard.mjs";
+import { multiSelect, chooseAction, clearScreen, canPrompt, closeInput, readKey, style, wrap } from "./lib/wizard.mjs";
 import { blockPattern, applyBlocks, detectEol } from "./lib/claude-md.mjs";
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -119,35 +119,6 @@ const BETA_TOOLS = {
   debrief: { command: "debrief", serveArgs: ["serve"], mcpName: "debrief" },
 };
 
-// Agent Office is the one mod with a setup step of its own: which decision model it uses to
-// categorise work and judge whether two pieces of it are related, and that model's API key.
-//
-// The mod itself never reads the key. Its decision-model calls go through a script it runs, and
-// that script takes the key from its own environment — so the installer's whole job is to put the
-// key where that environment gets it (the Windows user environment, or a private env.sh that the
-// shell profile sources), and to save which model was chosen in the mod's config.json.
-//
-// The key is never accepted as a flag (it would land in shell history), never echoed, never
-// printed in the summary, and never written anywhere in this repo. Each variable the installer
-// set is recorded by NAME in AGENT_OFFICE_RECORD, with whether it already existed before, so
-// --uninstall removes only what the installer created.
-const AGENT_OFFICE = "agent-office";
-const DECISION_MODELS = {
-  jev: { label: "JEV (TypeSafe AI)", variable: "TYPESAFE_API_KEY", keyName: "TypeSafe API key" },
-  perplexity: { label: "Perplexity Decisions", variable: "PERPLEXITY_API_KEY", keyName: "Perplexity API key" },
-  none: { label: "None", variable: null, keyName: null },
-};
-const AGENT_OFFICE_DIR = path.join(homedir(), ".claude", "agent-office");
-const AGENT_OFFICE_RECORD = path.join(AGENT_OFFICE_DIR, "installed.json");
-// The mod's user overrides. The installer only ever sets `decisionModel` in it.
-const AGENT_OFFICE_CONFIG = path.join(AGENT_OFFICE_DIR, "config.json");
-// macOS/Linux: the keys live here, readable only by the user, never in the profile itself.
-const AGENT_OFFICE_ENV = path.join(AGENT_OFFICE_DIR, "env.sh");
-// The marked block in a zsh/bash profile. Everything between the two lines is ours, and all it
-// holds is SOURCE_ENV_LINE.
-const PROFILE_BEGIN = "# >>> claude-skills: Agent Office keys (managed by install.mjs) >>>";
-const PROFILE_END = "# <<< claude-skills: Agent Office keys <<<";
-const SOURCE_ENV_LINE = 'if [ -f "$HOME/.claude/agent-office/env.sh" ]; then . "$HOME/.claude/agent-office/env.sh"; fi';
 // The first terminal release that loads mods. Older ones skip the plugin's hooks module.
 const MIN_CLAUDE_FOR_MODS = "2.1.287";
 
@@ -186,7 +157,6 @@ const KNOWN_FLAGS = [
   "--no-allow-pr-merge",
   "--refresh",
   "--extras",
-  "--decision-model",
   "--accept-defaults",
   "--yes",
   "-y",
@@ -215,8 +185,6 @@ const refresh = has("--refresh");
 const addInstructions = flagValue("--add-instructions");
 const removeInstructions = flagValue("--remove-instructions");
 const extrasArg = flagValue("--extras");
-// Answers Agent Office's decision-model question. Never carries the key itself.
-const decisionModelArg = flagValue("--decision-model");
 const acceptDefaults = has("--accept-defaults") || has("--yes") || has("-y");
 const wantSimple = has("--simple");
 const wantAdvanced = has("--advanced");
@@ -255,7 +223,6 @@ if (unknownFlags.length) {
     applyAgentLinks(plan);
     applyModLinks(plan);
     applyBetaTools(plan);
-    applyAgentOffice(plan);
     if (plan.instructions) applyInstructionBlocks(plan.instructions, plan.mayRemoveInstructions);
     applyPrMergePermission(plan.prMerge);
     await runExtras(plan.extras, plan.guided);
@@ -324,14 +291,6 @@ function printHelp() {
   console.log("                                you ask for it, on every setup.");
   console.log("  --no-allow-pr-merge           Take that rule away again.");
   console.log("");
-  console.log("  --decision-model=<name>       Which decision model Agent Office uses to categorise");
-  console.log("                                work and judge what is related: jev, perplexity or");
-  console.log("                                none. Only used when Agent Office is installed. The");
-  console.log("                                API key is never taken as a flag: in a terminal you");
-  console.log("                                are asked for it, and without one the key must");
-  console.log("                                already be set (TYPESAFE_API_KEY or");
-  console.log("                                PERPLEXITY_API_KEY).");
-  console.log("");
   console.log("  --refresh                     Re-link the skills, agents and mods you already have,");
   console.log("                                rewrite the instruction blocks you already use,");
   console.log("                                then stop. Adds nothing, removes nothing, asks");
@@ -365,16 +324,6 @@ function printFarewell(plan = {}) {
     return;
   }
   console.log("\n  Done. Start a new Claude session to pick them up.");
-  // A variable set just now reaches only processes started after it, and a terminal that is
-  // already open was started before it.
-  if (plan.keySaved) {
-    console.log(`  Open a new terminal first, so Claude sees ${plan.decisionModel.variable}. Restart Claude Desktop too.`);
-  }
-  // Set by applyAgentOffice when the key is saved but no profile could load it.
-  if (plan.profileInstruction) {
-    console.log("");
-    for (const line of plan.profileInstruction) console.log(`  ${style.yellow(line)}`);
-  }
 
   if (!plan.guided) {
     console.log("");
@@ -752,24 +701,6 @@ async function buildPlan() {
   };
   const modSummary = () => ({ stable: stableMods, linked: linkedMods, selected: selectedMods, linking: modsToLink(), clashes: modClashes() });
 
-  // Agent Office's decision model, decided before the Ready screen like everything else. Asked
-  // only when Agent Office is ARRIVING on this machine — kept as it is, it is not asked again
-  // unless --decision-model says to — and only when it will really be linked.
-  const agentOfficeLinking = () => modsToLink().has(AGENT_OFFICE) && !modClashes().has(AGENT_OFFICE);
-  const agentOfficeArriving = () => agentOfficeLinking() && !isGroupLinked(modNamed(AGENT_OFFICE), MODS);
-  // --uninstall undoes what Agent Office's setup wrote unless the mod is staying: linked, and left
-  // unticked on the removal checklist. Unlinked already (an earlier untick) still counts as going.
-  const agentOfficeCleanup = () =>
-    uninstall &&
-    (selectedBeta.has(AGENT_OFFICE) || selectedMods.has(AGENT_OFFICE) || !modNamed(AGENT_OFFICE) || !isGroupLinked(modNamed(AGENT_OFFICE), MODS));
-  if (decisionModelArg !== undefined && !DECISION_MODELS[decisionModelArg]) {
-    warnConfig(`--decision-model: "${decisionModelArg}" is not jev, perplexity or none — ignored`);
-  }
-  const modelFromFlag = DECISION_MODELS[decisionModelArg] ? decisionModelArg : undefined;
-  // { model, variable, action } — action is "set" (key in hand), "keep" (already set), "missing"
-  // (no key and no way to ask for one), or "none". The key itself rides in `key`, in memory only.
-  let decisionModel = null;
-
   if (interactive) {
     try {
       // — Retired skills —
@@ -888,31 +819,6 @@ async function buildPlan() {
         selectedAgents = picked;
       }
 
-      // — Agent Office's decision model —
-      // Not a numbered step: whether it exists depends on the beta answer, which comes after the
-      // counter was fixed — the same reason the retirement question is not counted.
-      if (!uninstall && (agentOfficeArriving() || (modelFromFlag && agentOfficeLinking()))) {
-        let model = modelFromFlag;
-        if (!model) {
-          screen();
-          model = await chooseAction({
-            heading: "Agent Office: decision model",
-            body: wrap(
-              "Agent Office can hand two jobs to a decision model: sorting what your sessions are working on into categories, and judging whether two pieces of work are related. Pick the one you have a key for, or None to go without.",
-              84,
-            ).map((l) => style.dim(l)),
-            items: [
-              { value: "jev", label: DECISION_MODELS.jev.label, hint: `needs a ${DECISION_MODELS.jev.keyName}` },
-              { value: "perplexity", label: DECISION_MODELS.perplexity.label, hint: `needs a ${DECISION_MODELS.perplexity.keyName}` },
-              { value: "none", label: DECISION_MODELS.none.label, hint: "no key needed" },
-            ],
-          });
-          if (!model) return null;
-        }
-        decisionModel = await askForKey(model, screen);
-        if (!decisionModel) return null;
-      }
-
       // — Optional (non-beta) features —
       const fromBeta = [...selectedBeta].filter((name) => betaBlockNames.has(name));
       if (skipInstructions || blocks.length === 0) {
@@ -998,7 +904,7 @@ Runs: ${e.command}`,
       screen();
       const go = await chooseAction({
         heading: `Ready${stepLabel()}`,
-        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary(), mods: modSummary(), decisionModel, agentOfficeCleanup: agentOfficeCleanup() }),
+        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary(), mods: modSummary() }),
         items: [
           { value: "go", label: uninstall ? "Remove them" : "Install", hint: "apply the changes above" },
           { value: "cancel", label: "Cancel", hint: "change nothing" },
@@ -1029,20 +935,7 @@ Runs: ${e.command}`,
       wantInstructions = unionFloor([...installedBlocks], [...trackBlocks.filter((n) => !betaBlockNames.has(n)), ...fromBeta]);
     } else wantInstructions = new Set([...installedBlocks, ...fromBeta]);
 
-    // No key can be asked for here, and none is ever taken as a flag. --decision-model can only
-    // confirm a key that is already set, or say plainly that there is none.
-    if (!uninstall && agentOfficeLinking()) {
-      if (modelFromFlag) {
-        const { variable } = DECISION_MODELS[modelFromFlag];
-        decisionModel = { model: modelFromFlag, variable, action: !variable ? "none" : userVariableIsSet(variable) ? "keep" : "missing" };
-      } else if (agentOfficeArriving()) {
-        warnConfig("Agent Office has no decision model: pass --decision-model=jev|perplexity|none, or run this in a terminal");
-      }
-    } else if (modelFromFlag && !uninstall) {
-      warnConfig("--decision-model: Agent Office is not being installed, so it was ignored");
-    }
-
-    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary(), mods: modSummary(), decisionModel, agentOfficeCleanup: agentOfficeCleanup() })) {
+    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary(), mods: modSummary() })) {
       console.log(`  ${line}`);
     }
     console.log("");
@@ -1079,8 +972,6 @@ Runs: ${e.command}`,
     modGroups,
     selectedModGroups,
     betaMods,
-    decisionModel,
-    agentOfficeCleanup: agentOfficeCleanup(),
     selectedBeta,
     newlyEnabledBeta,
     // Removals the user agreed to by name, rather than by clearing a checkbox. applySkillLinks
@@ -1106,7 +997,7 @@ Runs: ${e.command}`,
  * with two rows can never report on only one of them. The optional lines cover only the non-beta
  * blocks, which keeps each feature in exactly one place.
  */
-function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set(), agents = null, mods = null, decisionModel = null, agentOfficeCleanup = false }) {
+function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set(), agents = null, mods = null }) {
   const verb = uninstall ? "remove" : "install";
   const lines = [];
   const names = (items) => items.map((i) => i.label).join(", ");
@@ -1195,9 +1086,6 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
       if (kept.length) lines.push(`keep beta: ${names(kept)}`);
       if (dropped.length) lines.push(`remove beta: ${names(dropped)}`);
       if (skipped.length) lines.push(`skip beta: ${names(skipped)}`);
-      // Unticking only unlinks the mod. The key is outside ~/.claude/skills and stays put.
-      const savedKeys = dropped.some((i) => i.name === AGENT_OFFICE) ? readAgentOfficeRecord().variables.map((v) => v.name) : [];
-      if (savedKeys.length) lines.push(`  Agent Office's saved ${savedKeys.join(", ")} stays until: node install.mjs --uninstall`);
     }
     // "beta" is jargon, and the guided reader has no checklist hint to read it against. Sits
     // directly under the beta lines it explains.
@@ -1221,44 +1109,6 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
         lines.push(style.yellow(`  ${file}. Move or delete it, then run this again.`));
       }
       if (mods.linking.size > mods.clashes.size) for (const line of claudeVersionWarnings()) lines.push(style.yellow(line));
-    }
-  }
-
-  // Named, because it reaches outside ~/.claude: a user environment variable or a shell profile.
-  // Whatever installed.json records, whether or not the mod is still linked.
-  if (agentOfficeCleanup) {
-    const { variables, profile } = readAgentOfficeRecord();
-    if (process.platform === "win32") {
-      for (const { name, preexisting } of variables) {
-        if (!preexisting) lines.push(`remove ${name} from your Windows user environment (Agent Office's setup created it)`);
-        else {
-          lines.push(`leave ${name}: it existed before Agent Office's setup, so it is not removed. That setup`);
-          lines.push(`  replaced your old value with the key you pasted, and the old value cannot be restored.`);
-        }
-      }
-    } else if (variables.length || profile) {
-      lines.push(`remove ${AGENT_OFFICE_ENV}${variables.length ? ` (holds ${variables.map((v) => v.name).join(", ")})` : ""}`);
-      if (profile) lines.push(`  and the marked block in ${profile} that loads it`);
-    }
-  }
-
-  // The key is never on this screen — only the variable's name and what will happen to it.
-  if (decisionModel) {
-    const { model, variable, action } = decisionModel;
-    const label = DECISION_MODELS[model].label;
-    if (action === "none") lines.push(`Agent Office decision model: none`);
-    else if (action === "set") {
-      lines.push(`Agent Office decision model: ${label} — saves your key as ${variable}`);
-      if (process.platform === "win32") lines.push("  in your Windows user environment");
-      else {
-        const profile = profileFile();
-        lines.push(`  in ${AGENT_OFFICE_ENV}, which only you can read,`);
-        lines.push(profile ? `  loaded by a marked block in ${profile}` : "  loaded by one line you add to your shell's startup file (printed at the end)");
-      }
-    } else if (action === "keep") lines.push(`Agent Office decision model: ${label} — keeps the ${variable} already set`);
-    else {
-      lines.push(style.yellow(`note: ${label} needs ${variable}, which is not set, and a key is never taken as a flag.`));
-      lines.push(style.yellow(`  Agent Office runs without a decision model until you set it, or re-run this in a terminal.`));
     }
   }
 
@@ -2066,357 +1916,7 @@ function printManualMcpInstructions(name, cfg, distCli, linked) {
   );
 }
 
-// ── Agent Office ────────────────────────────────────────────────────────────────────────────────
-// The decision model's API key, put where the script Agent Office runs for decision-model calls
-// gets its environment: on Windows the user environment, on macOS and Linux a private env.sh that
-// a marked block in the shell profile sources. The key travels to PowerShell on stdin, never on a
-// command line, is never written into a profile, and is never printed. Each variable set is
-// recorded in AGENT_OFFICE_RECORD by name, with whether it existed before, so --uninstall can take
-// away exactly what the installer created.
-
-/**
- * Ask for the chosen model's key. A key already set is offered as keep-or-replace and never
- * shown. Returns the decision for the plan, or null if the user cancelled.
- */
-async function askForKey(model, screen) {
-  const { variable, keyName } = DECISION_MODELS[model];
-  if (!variable) return { model, variable: null, action: "none" };
-  if (userVariableIsSet(variable)) {
-    screen();
-    const answer = await chooseAction({
-      heading: `Agent Office: ${keyName}`,
-      body: [style.dim(`${variable} is already set on this machine. Its value is not shown.`)],
-      items: [
-        { value: "keep", label: "Keep it", hint: "use the key that is already set" },
-        { value: "replace", label: "Replace it", hint: "paste a new key" },
-      ],
-      initial: "keep",
-    });
-    if (!answer) return null;
-    if (answer === "keep") return { model, variable, action: "keep" };
-  }
-  screen();
-  const where = process.platform === "win32" ? "your Windows user environment" : `${AGENT_OFFICE_ENV}, a file only you can read,`;
-  const key = await readSecret({
-    heading: `Agent Office: ${keyName}`,
-    body: wrap(
-      `Paste your ${keyName}. It is saved as ${variable} in ${where} once you confirm the install. It is never shown, and never written to this repo.`,
-      84,
-    ).map((l) => style.dim(l)),
-    label: keyName,
-  });
-  if (!key) return null;
-  return { model, variable, action: "set", key };
-}
-
-/** Runs one line of PowerShell with `name` in $env:CLAUDE_SKILLS_VARIABLE, and `input` on stdin. */
-function runPowerShell(script, name, input = "") {
-  return spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    input,
-    encoding: "utf8",
-    env: { ...process.env, CLAUDE_SKILLS_VARIABLE: name },
-  });
-}
-
-/** Is the variable set for this user? Answers yes or no only; the value never leaves the child. */
-function userVariableIsSet(name) {
-  return Boolean(process.env[name]) || storedUserVariable(name);
-}
-
-/**
- * Is the variable in the store the installer writes to — the Windows user environment, or
- * env.sh — as opposed to only in this shell?
- */
-function storedUserVariable(name) {
-  if (process.platform === "win32") {
-    const res = runPowerShell("if ([Environment]::GetEnvironmentVariable($env:CLAUDE_SKILLS_VARIABLE, 'User')) { 'set' }", name);
-    return !res.error && res.stdout.trim() === "set";
-  }
-  return envFileLines().some((l) => l.startsWith(`export ${name}=`));
-}
-
-/**
- * Did the variable exist in the user's environment before the installer touched it? On Windows
- * that is the user environment itself. Elsewhere env.sh is ours, so it is the variable arriving
- * from somewhere else: set in this shell, and not by our file.
- */
-function variableExistedBefore(name) {
-  if (process.platform === "win32") return storedUserVariable(name);
-  return Boolean(process.env[name]) && !storedUserVariable(name);
-}
-
-/** The lines of env.sh, or [] when there is none. */
-function envFileLines() {
-  try {
-    return fs.readFileSync(AGENT_OFFICE_ENV, "utf8").split("\n").map((l) => l.trim()).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Store the key. Returns { ok: false, why } when it could not be stored at all, otherwise
- * { ok: true, where, profile, manual }: `profile` is the file that now loads env.sh, and `manual`
- * the lines to show the user when no profile could be written and they must add one themselves.
- */
-function setUserVariable(name, value) {
-  if (process.platform === "win32") {
-    const res = runPowerShell("[Environment]::SetEnvironmentVariable($env:CLAUDE_SKILLS_VARIABLE, [Console]::In.ReadToEnd(), 'User')", name, value);
-    if (res.error || res.status !== 0) return { ok: false, why: res.error ? res.error.message : `PowerShell exited with code ${res.status}` };
-    return { ok: true, where: "your Windows user environment", profile: null, manual: null };
-  }
-
-  // A symlinked env.sh is the user's own arrangement: never written or chmodded through.
-  if (isSymlink(AGENT_OFFICE_ENV)) {
-    return {
-      ok: false,
-      why: `${AGENT_OFFICE_ENV} is a symlink, so it was not written`,
-      manual: [
-        `${AGENT_OFFICE_ENV} is a symlink, so the key was not saved.`,
-        `To use it, add this line to that file yourself, with your key in place of <key>:`,
-        `  export ${name}='<key>'`,
-      ],
-    };
-  }
-  const exports = envFileLines().filter((l) => l.startsWith("export ") && !l.startsWith(`export ${name}=`));
-  exports.push(`export ${name}='${value.replace(/'/g, `'\\''`)}'`);
-  const text = ["# Agent Office's API keys, written by claude-skills install.mjs. Private: keep it 0600.", ...exports, ""].join("\n");
-  try {
-    fs.mkdirSync(AGENT_OFFICE_DIR, { recursive: true });
-    // Tightened before the key goes in, not after: an existing file keeps its old mode on write.
-    if (fs.existsSync(AGENT_OFFICE_ENV)) fs.chmodSync(AGENT_OFFICE_ENV, 0o600);
-    fs.writeFileSync(AGENT_OFFICE_ENV, text, { mode: 0o600 });
-    fs.chmodSync(AGENT_OFFICE_ENV, 0o600);
-  } catch (err) {
-    return { ok: false, why: err.message };
-  }
-
-  const profile = profileFile();
-  const written = profile ? writeProfileBlock(profile, [SOURCE_ENV_LINE]) : { ok: false };
-  if (written.ok) return { ok: true, where: AGENT_OFFICE_ENV, profile, manual: null };
-  return { ok: true, where: AGENT_OFFICE_ENV, profile: null, manual: manualProfileLines(profile, written.why) };
-}
-
-function isSymlink(file) {
-  try {
-    return fs.lstatSync(file).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
-/** What to print when the profile was not written: the one line the user adds themselves. */
-function manualProfileLines(profile, why) {
-  if (path.basename(process.env.SHELL || "") === "fish") {
-    return [
-      "Your shell is fish, so no profile was changed. To load the key in new terminals, add",
-      "this line to ~/.config/fish/config.fish:",
-      '  if test -f "$HOME/.claude/agent-office/env.sh"; source "$HOME/.claude/agent-office/env.sh"; end',
-    ];
-  }
-  if (profile) {
-    return [`${profile} was not changed (${why}).`, "To load the key in new terminals, add this line to it yourself:", `  ${SOURCE_ENV_LINE}`];
-  }
-  return ["No profile was changed for your shell. To load the key in new terminals, add this", "line to its startup file:", `  ${SOURCE_ENV_LINE}`];
-}
-
-function removeUserVariable(name) {
-  const res = runPowerShell("[Environment]::SetEnvironmentVariable($env:CLAUDE_SKILLS_VARIABLE, $null, 'User')", name);
-  return !res.error && res.status === 0;
-}
-
-/**
- * The profile a zsh or bash user's terminals read, or null for any other shell, which gets an
- * instruction instead of an edit. For bash it depends on the platform: Linux terminals open
- * interactive shells, which read ~/.bashrc, while macOS terminals open login shells, which read
- * only the FIRST of ~/.bash_profile, ~/.bash_login and ~/.profile that exists — so the block goes
- * in that one, and ~/.bash_profile is created only when none exists, never to shadow ~/.profile.
- */
-function profileFile() {
-  const shell = path.basename(process.env.SHELL || "");
-  if (shell === "zsh") return path.join(homedir(), ".zshrc");
-  if (shell !== "bash") return null;
-  if (process.platform !== "darwin") return path.join(homedir(), ".bashrc");
-  const login = [".bash_profile", ".bash_login", ".profile"].map((f) => path.join(homedir(), f));
-  return login.find((f) => fs.existsSync(f)) ?? login[0];
-}
-
-/**
- * Set our marked block in `file` to `lines`, or take it out when `lines` is empty. A symlinked
- * profile is not written through — it usually points into a dotfiles repo the user manages — and
- * any read or write error is returned, not thrown. Returns { ok } or { ok: false, why }.
- */
-function writeProfileBlock(file, lines) {
-  try {
-    let stat = null;
-    try {
-      stat = fs.lstatSync(file);
-    } catch (err) {
-      if (err.code !== "ENOENT") throw err;
-    }
-    if (stat?.isSymbolicLink()) return { ok: false, why: "it is a symlink" };
-    const text = stat ? fs.readFileSync(file, "utf8") : "";
-    const next = editProfileBlock(text, lines);
-    if (next !== text) fs.writeFileSync(file, next);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, why: err.code === "EACCES" || err.code === "EPERM" ? "it is not writable" : err.message };
-  }
-}
-
-/**
- * The profile text with our block holding `lines`, or with the block removed entirely when
- * `lines` is empty. Nothing outside the two marker lines is read or rewritten, and a removed
- * block takes the blank line that was added before it along with it.
- */
-function editProfileBlock(text, lines) {
-  const block = lines.length ? [PROFILE_BEGIN, ...lines, PROFILE_END].join("\n") : "";
-  const start = text.indexOf(PROFILE_BEGIN);
-  const end = start === -1 ? -1 : text.indexOf(PROFILE_END, start);
-  if (end === -1) {
-    if (!block) return text;
-    const lead = !text ? "" : text.endsWith("\n") ? "\n" : "\n\n";
-    return `${text}${lead}${block}\n`;
-  }
-  const before = text.slice(0, start);
-  const after = text.slice(end + PROFILE_END.length);
-  if (block) return `${before}${block}${after}`;
-  return `${before.replace(/\n\n$/, "\n")}${after.replace(/^\n/, "")}`;
-}
-
-/** What an earlier run wrote: each variable by name with `preexisting`, and the profile. Unreadable counts as nothing. */
-function readAgentOfficeRecord() {
-  try {
-    const record = JSON.parse(fs.readFileSync(AGENT_OFFICE_RECORD, "utf8"));
-    return {
-      variables: Array.isArray(record.variables)
-        ? record.variables.filter((v) => typeof v?.name === "string").map((v) => ({ name: v.name, preexisting: v.preexisting === true }))
-        : [],
-      profile: typeof record.profile === "string" ? record.profile : null,
-    };
-  } catch {
-    return { variables: [], profile: null };
-  }
-}
-
-/** Returns true when written. */
-function writeAgentOfficeRecord(record) {
-  try {
-    fs.mkdirSync(AGENT_OFFICE_DIR, { recursive: true });
-    fs.writeFileSync(AGENT_OFFICE_RECORD, `${JSON.stringify(record, null, 2)}\n`);
-    return true;
-  } catch (err) {
-    console.log(`  ${style.yellow("WARNING  ")} could not write ${AGENT_OFFICE_RECORD} — ${err.message}`);
-    return false;
-  }
-}
-
-/**
- * Set `decisionModel` in the mod's config.json, leaving every other key as it is. A file that is
- * not a JSON object is left alone rather than rewritten, since that would lose the user's settings.
- */
-function saveDecisionModel(model) {
-  let config = {};
-  try {
-    config = JSON.parse(fs.readFileSync(AGENT_OFFICE_CONFIG, "utf8"));
-  } catch (err) {
-    if (err.code !== "ENOENT") config = null;
-  }
-  if (!config || typeof config !== "object" || Array.isArray(config)) {
-    console.log(`  ${style.yellow("WARNING  ")} ${AGENT_OFFICE_CONFIG} is not valid JSON, so the decision model was not saved.`);
-    console.log(`            Fix it, or add "decisionModel": "${model}" yourself.`);
-    return;
-  }
-  config.decisionModel = model;
-  try {
-    fs.mkdirSync(AGENT_OFFICE_DIR, { recursive: true });
-    fs.writeFileSync(AGENT_OFFICE_CONFIG, `${JSON.stringify(config, null, 2)}\n`);
-    console.log(`  ${style.green("saved    ")} decision model: ${model} ${style.dim(`(${AGENT_OFFICE_CONFIG})`)}`);
-  } catch (err) {
-    console.log(`  ${style.yellow("WARNING  ")} could not save the decision model — ${err.message}`);
-  }
-}
-
-function applyAgentOffice(plan) {
-  if (uninstall) {
-    if (plan.agentOfficeCleanup) removeAgentOfficeSettings();
-    return;
-  }
-  const decision = plan.decisionModel;
-  if (!decision) return;
-  saveDecisionModel(decision.model);
-  if (decision.action !== "set") return;
-
-  // Ownership is recorded BEFORE the variable is touched, and only the first time: once the
-  // installer has set it, a later run must not mistake its own value for the user's.
-  const record = readAgentOfficeRecord();
-  const isNew = !record.variables.some((v) => v.name === decision.variable);
-  if (isNew) {
-    record.variables.push({ name: decision.variable, preexisting: variableExistedBefore(decision.variable) });
-    if (!writeAgentOfficeRecord(record)) {
-      console.log(`            ${decision.variable} was not saved, so --uninstall cannot get it wrong. Set it yourself.`);
-      return;
-    }
-  }
-  const result = setUserVariable(decision.variable, decision.key);
-  if (!result.ok) {
-    if (isNew) {
-      record.variables = record.variables.filter((v) => v.name !== decision.variable);
-      writeAgentOfficeRecord(record);
-    }
-    console.log(`  ${style.yellow("WARNING  ")} could not save ${decision.variable} — ${result.why}`);
-    if (result.manual) plan.profileInstruction = result.manual;
-    else console.log(`            Set it yourself as a user environment variable, then restart Claude.`);
-    return;
-  }
-  if (result.profile) {
-    record.profile = result.profile;
-    writeAgentOfficeRecord(record);
-  }
-  plan.profileInstruction = result.manual;
-  plan.keySaved = true;
-  console.log(`  ${style.green("saved    ")} ${decision.variable} ${style.dim(`(${result.where})`)}`);
-}
-
-/** Undo exactly what AGENT_OFFICE_RECORD says was written, then remove the record. */
-function removeAgentOfficeSettings() {
-  if (!fs.existsSync(AGENT_OFFICE_RECORD)) return;
-  const { variables, profile } = readAgentOfficeRecord();
-  if (process.platform === "win32") {
-    for (const { name, preexisting } of variables) {
-      if (preexisting) {
-        console.log(`  ${style.dim("kept     ")} ${name} ${style.dim("(it existed before Agent Office's setup, which replaced your old value with the key you pasted)")}`);
-      } else if (removeUserVariable(name)) {
-        console.log(`  ${style.green("removed  ")} ${name} ${style.dim("(your Windows user environment)")}`);
-      } else {
-        console.log(`  ${style.yellow("WARNING  ")} could not remove ${name} from your user environment — remove it yourself.`);
-      }
-    }
-  } else {
-    try {
-      if (isSymlink(AGENT_OFFICE_ENV)) {
-        console.log(`  ${style.dim("kept     ")} ${AGENT_OFFICE_ENV} ${style.dim("(a symlink this installer did not make)")}`);
-      } else if (fs.existsSync(AGENT_OFFICE_ENV)) {
-        fs.rmSync(AGENT_OFFICE_ENV);
-        console.log(`  ${style.green("removed  ")} ${variables.map((v) => v.name).join(", ") || "the Agent Office keys"} ${style.dim(`(${AGENT_OFFICE_ENV})`)}`);
-      }
-    } catch (err) {
-      console.log(`  ${style.yellow("WARNING  ")} could not remove ${AGENT_OFFICE_ENV} — ${err.message}. Delete it yourself.`);
-    }
-    if (profile && fs.existsSync(profile)) {
-      const result = writeProfileBlock(profile, []);
-      if (result.ok) console.log(`  ${style.green("removed  ")} the block that loaded it ${style.dim(`(${profile})`)}`);
-      else console.log(`  ${style.yellow("WARNING  ")} ${profile} was not changed (${result.why}). Remove the Agent Office block from it yourself.`);
-    }
-  }
-  try {
-    fs.rmSync(AGENT_OFFICE_RECORD, { force: true });
-    // The folder may also hold the mod's own data; it goes only if nothing else is in it.
-    fs.rmdirSync(AGENT_OFFICE_DIR);
-  } catch {
-    // not empty
-  }
-}
+// ── Mods ────────────────────────────────────────────────────────────────────────────────────────
 
 /**
  * The Ready-summary note when the terminal's Claude Code cannot load mods: not found, or older
