@@ -1,0 +1,28 @@
+# How the installer lists the mods.
+#
+# A mod is a Claude Code plugin that changes Claude's own interface or behaviour: a pane, a status
+# line, a hook on tool calls. Each lives in ./mods/<name>/ and is linked into ~/.claude/skills/<name>,
+# where Claude Code loads it every session as <name>@skills-dir. A `git pull` updates it in place.
+#
+# A mod's folder needs .claude-plugin/plugin.json before Claude Code will load it. Until it has
+# one, the installer lists it, says why in the Ready summary, and does not link it.
+#
+# One line per checkbox, the same format as agents.txt:
+#
+#   <name> | <folders> | <what it does> | <dev>,<nontech>
+#
+#   name         what the installer shows, and what beta-features.txt refers to.
+#   folders      the folder under ./mods this entry installs (normally the same as the name).
+#   description  written for the PERSON INSTALLING.
+#   defaults     on/off for each of the two setups, exactly as in skills.txt. Unparseable is OFF.
+#
+# A folder under ./mods with no line here is OFF on both setups (unlike a skill), and the installer
+# warns about it.
+#
+# Mark one as in development with a `mod <name>` line in beta-features.txt. A mod that is not beta
+# has no checklist: it follows its defaults, and is only ever added, never removed, except by
+# --uninstall.
+#
+# Blank lines and lines starting with # are ignored. The installer reads this at run time.
+
+agent-office | agent-office | A pane inside Claude Code that shows your other sessions of the same project, what their agents are doing, and where two pieces of work touch the same files. | off,off

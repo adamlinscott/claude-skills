@@ -17,14 +17,16 @@
 #
 #   skill        <name from skills.txt>
 #   agent        <name from agents.txt>
+#   mod          <name from mods.txt>
 #   instruction  <file name in ./instructions, without the .md>
 #
-# Move something out of beta by deleting its line — a skill or agent then installs by default, and an
+# Move something out of beta by deleting its line — a skill, agent or mod then installs by default, and an
 # instruction moves to the installer's "Other features" question. Blank lines and lines
 # starting with # are ignored. The installer reads this at run time; it never needs editing.
 
 skill        check-skill-updates
 skill        debrief
 skill        seatbelt
+mod          agent-office
 instruction  clear-responses
 instruction  model-calibration

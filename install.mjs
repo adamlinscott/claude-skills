@@ -29,7 +29,10 @@
 //   • ./skills.txt        — one checkbox per skill, its folders, a description for a person,
 //                           whether each setup defaults it on, and the agents it needs.
 //   • ./agents.txt        — the same, for the agents in ./agents, linked into ~/.claude/agents.
-//   • ./beta-features.txt — which skills and instructions are still in development
+//   • ./mods.txt          — the same, for the mods in ./mods, linked into ~/.claude/skills. A mod
+//                           is a Claude Code plugin; Claude Code loads one from that folder as
+//                           <name>@skills-dir. Only linked once it has .claude-plugin/plugin.json.
+//   • ./beta-features.txt — which skills, agents, mods and instructions are still in development
 //   • ./instructions/*.md — the optional blocks offered for the global CLAUDE.md, each carrying
 //                           its own dev:/nontech: defaults
 //   • ./extras/*.md       — other people's collections, and the command that installs each. Never
@@ -56,6 +59,8 @@ const betaListFile = path.join(repoRoot, "beta-features.txt");
 const skillsListFile = path.join(repoRoot, "skills.txt");
 const repoAgentsDir = path.join(repoRoot, "agents");
 const agentsListFile = path.join(repoRoot, "agents.txt");
+const repoModsDir = path.join(repoRoot, "mods");
+const modsListFile = path.join(repoRoot, "mods.txt");
 const deprecatedListFile = path.join(repoRoot, "deprecated.txt");
 const repoExtrasDir = path.join(repoRoot, "extras");
 
@@ -72,11 +77,12 @@ const warnConfig = (message) => {
 };
 
 // How each kind of beta feature is described in the installer's list.
-const KIND_LABELS = { skill: "skill", instruction: "global instruction", agent: "agent" };
+const KIND_LABELS = { skill: "skill", instruction: "global instruction", agent: "agent", mod: "mod" };
 // Shown in the details panel for a skill folder with no line in skills.txt. Declared up here
 // because buildPlan() runs before the rest of the file is evaluated.
 const NO_DESCRIPTION = "No description yet — add a line for it in skills.txt.";
 const NO_AGENT_DESCRIPTION = "No description yet — add a line for it in agents.txt.";
+const NO_MOD_DESCRIPTION = "No description yet — add a line for it in mods.txt.";
 const globalSkillsDir = path.join(homedir(), ".claude", "skills");
 const globalAgentsDir = path.join(homedir(), ".claude", "agents");
 // Skills and agents are linked the same way — one folder each, from the repo into ~/.claude — so
@@ -84,6 +90,9 @@ const globalAgentsDir = path.join(homedir(), ".claude", "agents");
 // same reason as NO_DESCRIPTION: buildPlan() runs before the rest of the file is evaluated.
 const SKILLS = { kind: "skill", listFile: skillsListFile, sourceDir: repoSkillsDir, targetDir: globalSkillsDir };
 const AGENTS = { kind: "agent", listFile: agentsListFile, sourceDir: repoAgentsDir, targetDir: globalAgentsDir };
+// Mods land in the same folder as skills: it is also where Claude Code looks for a plugin that
+// loads in place every session, so a `git pull` updates a mod exactly as it does a skill.
+const MODS = { kind: "mod", listFile: modsListFile, sourceDir: repoModsDir, targetDir: globalSkillsDir };
 const globalClaudeMd = path.join(homedir(), ".claude", "CLAUDE.md");
 const globalSettings = path.join(homedir(), ".claude", "settings.json");
 
@@ -109,6 +118,9 @@ const linkType = process.platform === "win32" ? "junction" : "dir";
 const BETA_TOOLS = {
   debrief: { command: "debrief", serveArgs: ["serve"], mcpName: "debrief" },
 };
+
+// The first terminal release that loads mods. Older ones skip the plugin's hooks module.
+const MIN_CLAUDE_FOR_MODS = "2.1.287";
 
 // ── Options ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -209,6 +221,7 @@ if (unknownFlags.length) {
   } else {
     applySkillLinks(plan);
     applyAgentLinks(plan);
+    applyModLinks(plan);
     applyBetaTools(plan);
     if (plan.instructions) applyInstructionBlocks(plan.instructions, plan.mayRemoveInstructions);
     applyPrMergePermission(plan.prMerge);
@@ -278,11 +291,11 @@ function printHelp() {
   console.log("                                you ask for it, on every setup.");
   console.log("  --no-allow-pr-merge           Take that rule away again.");
   console.log("");
-  console.log("  --refresh                     Re-link the skills and agents you already have,");
+  console.log("  --refresh                     Re-link the skills, agents and mods you already have,");
   console.log("                                rewrite the instruction blocks you already use,");
   console.log("                                then stop. Adds nothing, removes nothing, asks");
-  console.log("                                nothing. Run it after a git pull. Skills and agents");
-  console.log("                                are links, so their content is already up to date.");
+  console.log("                                nothing. Run it after a git pull. Skills, agents and");
+  console.log("                                mods are links, so their content is already current.");
   console.log("");
   console.log("  --extras=<names>              Also run these other people's installers, once this");
   console.log("                                repo's own skills are in. Comma-separated, 'all', or");
@@ -409,22 +422,36 @@ async function offerStar() {
 async function buildPlan() {
   const skillGroups = loadSkillGroups();
   const agentGroups = loadAgentGroups();
+  const modGroups = loadModGroups();
   const blocks = loadInstructionBlocks();
   const installedBlocks = readInstalledBlockNames(blocks);
   const interactive = canPrompt() && !acceptDefaults;
   const groupNamed = (name) => skillGroups.find((g) => g.name === name);
   const agentNamed = (name) => agentGroups.find((g) => g.name === name);
+  const modNamed = (name) => modGroups.find((g) => g.name === name);
 
   // Beta covers more than skills, so split the list by kind. Anything named but missing from the
   // repo is dropped, which keeps a stale line in beta-features.txt from breaking the run.
   const betaFeatures = loadBetaFeatures().filter((f) =>
-    f.kind === "skill" ? Boolean(groupNamed(f.name)) : f.kind === "agent" ? Boolean(agentNamed(f.name)) : blocks.some((b) => b.name === f.name),
+    f.kind === "skill"
+      ? Boolean(groupNamed(f.name))
+      : f.kind === "agent"
+        ? Boolean(agentNamed(f.name))
+        : f.kind === "mod"
+          ? Boolean(modNamed(f.name))
+          : blocks.some((b) => b.name === f.name),
   );
   const betaSkills = betaFeatures.filter((f) => f.kind === "skill").map((f) => f.name);
   const betaAgents = betaFeatures.filter((f) => f.kind === "agent").map((f) => f.name);
   const stableAgentGroups = agentGroups.filter((g) => !betaAgents.includes(g.name));
   const stableAgents = stableAgentGroups.map((g) => g.name);
   const linkedAgents = stableAgentGroups.filter((g) => isGroupLinked(g, AGENTS)).map((g) => g.name);
+  // Mods have no checklist of their own: today every mod is beta, and a stable one simply follows
+  // the track's defaults, added to whatever is already linked (the union floor below).
+  const betaMods = betaFeatures.filter((f) => f.kind === "mod").map((f) => f.name);
+  const stableModGroups = modGroups.filter((g) => !betaMods.includes(g.name));
+  const stableMods = stableModGroups.map((g) => g.name);
+  const linkedMods = stableModGroups.filter((g) => isGroupLinked(g, MODS)).map((g) => g.name);
   const betaBlockNames = new Set(betaFeatures.filter((f) => f.kind === "instruction").map((f) => f.name));
   // Everything that is NOT beta is offered in the second question. When nothing is left, that
   // question does not exist and the wizard is one step shorter.
@@ -434,6 +461,8 @@ async function buildPlan() {
   const betaItems = betaFeatures.map((f) => ({
     name: f.name,
     label: f.kind === "instruction" ? blocks.find((b) => b.name === f.name).title : f.name,
+    // A mod with no plugin.json is never linked, ticked or not, so the summary must not promise it.
+    blocked: f.kind === "mod" && !modNamed(f.name).ready && !isGroupLinked(modNamed(f.name), MODS),
   }));
   const extras = uninstall ? [] : loadExtras();
   const stableGroups = skillGroups.filter((g) => !betaSkills.includes(g.name));
@@ -442,7 +471,13 @@ async function buildPlan() {
   // What is already in place, so the checkboxes open showing the current state.
   const activeBeta = betaFeatures
     .filter((f) =>
-      f.kind === "skill" ? isGroupLinked(groupNamed(f.name)) : f.kind === "agent" ? isGroupLinked(agentNamed(f.name), AGENTS) : installedBlocks.has(f.name),
+      f.kind === "skill"
+        ? isGroupLinked(groupNamed(f.name))
+        : f.kind === "agent"
+          ? isGroupLinked(agentNamed(f.name), AGENTS)
+          : f.kind === "mod"
+            ? isGroupLinked(modNamed(f.name), MODS)
+            : installedBlocks.has(f.name),
     )
     .map((f) => f.name);
   const linkedStable = stableGroups.filter((g) => isGroupLinked(g)).map((g) => g.name);
@@ -597,6 +632,7 @@ async function buildPlan() {
   // deprecated.txt rather than a line there plus a defaults edit that is easy to forget.
   const trackSkills = stableGroups.filter((g) => g.defaults[track] && !isDeprecated(g.name)).map((g) => g.name);
   const trackAgents = stableAgentGroups.filter((g) => g.defaults[track] && !deprecatedAgentNames.has(g.name)).map((g) => g.name);
+  const trackMods = stableModGroups.filter((g) => g.defaults[track]).map((g) => g.name);
   const trackBlocks = blocks.filter((b) => b.defaults[track]).map((b) => b.name);
   // Beta stays off on a flag-driven run whatever the track says — an unattended run never
   // enables something still in development. Interactively it is named and labelled in the
@@ -611,6 +647,9 @@ async function buildPlan() {
   let selectedSkills = new Set(uninstall || linkedStable.length ? linkedStable : trackSkills);
   // Agents open the same way. The ones the chosen skills need are added once the skills are known.
   let selectedAgents = new Set(uninstall || linkedAgents.length ? linkedAgents : trackAgents);
+  // Stable mods are never asked about, so they can only be added to, and an uninstall takes away
+  // every one that is linked.
+  const selectedMods = new Set(uninstall ? linkedMods : unionFloor(linkedMods, trackMods));
   // Every skill that will be linked, stable or beta: the set whose needs decide which agents to tick.
   const skillsToLink = () => new Set([...selectedSkills, ...[...selectedBeta].filter((n) => betaSkills.includes(n))]);
   const neededAgents = () => agentsNeededBy(skillsToLink(), skillGroups, agentGroups);
@@ -646,6 +685,21 @@ async function buildPlan() {
     return clashes;
   };
   const agentSummary = () => ({ stable: stableAgents, linked: linkedAgents, selected: selectedAgents, needed: uninstall ? new Map() : neededAgents(), retire: retireAgents, clashes: agentClashes() });
+
+  // Every mod that this run would link, stable or beta. A mod with no plugin.json is left out: it
+  // is listed, and a config note says why, but Claude Code could not load it if it were linked.
+  const modsToLink = () =>
+    uninstall ? new Set() : new Set([...selectedMods, ...[...selectedBeta].filter((n) => betaMods.includes(n))].filter((n) => modNamed(n)?.ready));
+  // The same check linkFolder makes, run before the Ready screen, as for agents.
+  const modClashes = () => {
+    const clashes = new Map();
+    for (const name of modsToLink()) {
+      const file = findModClash(modNamed(name));
+      if (file) clashes.set(name, file);
+    }
+    return clashes;
+  };
+  const modSummary = () => ({ stable: stableMods, linked: linkedMods, selected: selectedMods, linking: modsToLink(), clashes: modClashes() });
 
   if (interactive) {
     try {
@@ -724,7 +778,10 @@ async function buildPlan() {
                 ? blocks.find((b) => b.name === f.name).summary
                 : f.kind === "agent"
                   ? agentNamed(f.name).description || NO_AGENT_DESCRIPTION
-                  : groupNamed(f.name).description || NO_DESCRIPTION,
+                  : f.kind === "mod"
+                    ? (modNamed(f.name).description || NO_MOD_DESCRIPTION) +
+                      (modNamed(f.name).ready ? "" : "\n\nNot ready to install yet: it has no .claude-plugin/plugin.json.")
+                    : groupNamed(f.name).description || NO_DESCRIPTION,
           })),
           selected: activeBeta,
         });
@@ -847,7 +904,7 @@ Runs: ${e.command}`,
       screen();
       const go = await chooseAction({
         heading: `Ready${stepLabel()}`,
-        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary() }),
+        body: summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary(), mods: modSummary() }),
         items: [
           { value: "go", label: uninstall ? "Remove them" : "Install", hint: "apply the changes above" },
           { value: "cancel", label: "Cancel", hint: "change nothing" },
@@ -878,7 +935,7 @@ Runs: ${e.command}`,
       wantInstructions = unionFloor([...installedBlocks], [...trackBlocks.filter((n) => !betaBlockNames.has(n)), ...fromBeta]);
     } else wantInstructions = new Set([...installedBlocks, ...fromBeta]);
 
-    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary() })) {
+    for (const line of summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge: wantPrMerge, extras, selectedExtras, blocks, guided, retire, agents: agentSummary(), mods: modSummary() })) {
       console.log(`  ${line}`);
     }
     console.log("");
@@ -902,6 +959,8 @@ Runs: ${e.command}`,
     ...[...selectedAgents].filter((name) => agentNamed(name)),
     ...[...selectedBeta].filter((name) => betaAgents.includes(name)),
   ]);
+  // Mods likewise. A mod that is not ready stays in the set so applyLinks can say it was skipped.
+  const selectedModGroups = new Set([...selectedMods, ...[...selectedBeta].filter((name) => betaMods.includes(name))]);
   return {
     skillGroups,
     selectedGroups,
@@ -910,6 +969,9 @@ Runs: ${e.command}`,
     selectedAgentGroups,
     betaAgents,
     retireAgents,
+    modGroups,
+    selectedModGroups,
+    betaMods,
     selectedBeta,
     newlyEnabledBeta,
     // Removals the user agreed to by name, rather than by clearing a checkbox. applySkillLinks
@@ -935,7 +997,7 @@ Runs: ${e.command}`,
  * with two rows can never report on only one of them. The optional lines cover only the non-beta
  * blocks, which keeps each feature in exactly one place.
  */
-function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set(), agents = null }) {
+function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, activeBeta, selectedBeta, prune, optionalBlocks, installedBlocks, wantInstructions, prMerge = null, extras, selectedExtras, blocks = [], guided = false, retire = new Set(), agents = null, mods = null }) {
   const verb = uninstall ? "remove" : "install";
   const lines = [];
   const names = (items) => items.map((i) => i.label).join(", ");
@@ -1016,10 +1078,10 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
       if (picked.length) lines.push(`remove beta: ${names(picked)}`);
       if (left.length) lines.push(`leave beta: ${names(left)}`);
     } else {
-      const added = betaItems.filter((i) => selectedBeta.has(i.name) && !activeBeta.includes(i.name));
+      const added = betaItems.filter((i) => selectedBeta.has(i.name) && !activeBeta.includes(i.name) && !i.blocked);
       const kept = betaItems.filter((i) => selectedBeta.has(i.name) && activeBeta.includes(i.name));
       const dropped = betaItems.filter((i) => !selectedBeta.has(i.name) && activeBeta.includes(i.name) && prune.beta);
-      const skipped = betaItems.filter((i) => !selectedBeta.has(i.name) && !(activeBeta.includes(i.name) && prune.beta));
+      const skipped = betaItems.filter((i) => i.blocked || (!selectedBeta.has(i.name) && !(activeBeta.includes(i.name) && prune.beta)));
       if (added.length) lines.push(`install beta: ${names(added)}`);
       if (kept.length) lines.push(`keep beta: ${names(kept)}`);
       if (dropped.length) lines.push(`remove beta: ${names(dropped)}`);
@@ -1029,6 +1091,24 @@ function summaryLines({ stableSkills, linkedStable, selectedSkills, betaItems, a
     // directly under the beta lines it explains.
     if (guided && betaItems.some((i) => selectedBeta.has(i.name))) {
       lines.push(`  beta means still being worked on — it may change or be rough at the edges`);
+    }
+  }
+
+  if (mods) {
+    // Stable mods only; a beta mod is already on the beta lines above.
+    if (uninstall) {
+      const removing = mods.stable.filter((n) => mods.selected.has(n));
+      if (removing.length) lines.push(`remove ${plural(removing.length, "mod")}: ${removing.join(", ")}`);
+    } else {
+      const added = mods.stable.filter((n) => mods.linking.has(n) && !mods.linked.includes(n) && !mods.clashes.has(n));
+      const kept = mods.stable.filter((n) => mods.linking.has(n) && mods.linked.includes(n));
+      if (added.length) lines.push(`install ${plural(added.length, "mod")}: ${added.join(", ")}`);
+      if (kept.length) lines.push(`keep ${plural(kept.length, "mod")}`);
+      for (const [name, file] of mods.clashes) {
+        lines.push(style.yellow(`skip ${name}: something else already lives at`));
+        lines.push(style.yellow(`  ${file}. Move or delete it, then run this again.`));
+      }
+      if (mods.linking.size > mods.clashes.size) for (const line of claudeVersionWarnings()) lines.push(style.yellow(line));
     }
   }
 
@@ -1170,8 +1250,13 @@ function loadGroups(where) {
     }
   }
   for (const folder of folders) {
-    // A folder with no line still installs on the developer track, exactly as before.
-    if (!claimed.has(folder)) groups.push({ kind: where.kind, name: folder, folders: [folder], description: "", defaults: { dev: true, nontech: false }, needs: [] });
+    if (claimed.has(folder)) continue;
+    // A skill or agent folder with no line still installs on the developer track, exactly as
+    // before. A mod's does not: it changes Claude's own interface, and stable mods get no
+    // checklist, so it would arrive on every developer machine unannounced.
+    const isMod = where === MODS;
+    if (isMod) warnConfig(`${listName}: ./${dirName}/${folder} has no line here, so it is off on every setup — add one to offer it`);
+    groups.push({ kind: where.kind, name: folder, folders: [folder], description: "", defaults: { dev: !isMod, nontech: false }, needs: [] });
   }
   return groups.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -1190,6 +1275,19 @@ function loadAgentGroups() {
     const meta = fs.existsSync(file) ? parseFrontmatter(fs.readFileSync(file, "utf8")).meta : {};
     const tuning = [meta.model, meta.effort].filter(Boolean).join(" · ");
     return { ...group, agentName: meta.name || group.name, tuning };
+  });
+}
+
+/**
+ * The mods, each marked `ready` when every folder has the .claude-plugin/plugin.json that makes
+ * Claude Code load it. One that is not ready is still listed, so it does not vanish from the
+ * checklist, but it is not linked: a plugin folder without its manifest is not a plugin.
+ */
+function loadModGroups() {
+  return loadGroups(MODS).map((group) => {
+    const ready = group.folders.every((f) => fs.existsSync(path.join(repoModsDir, f, ".claude-plugin", "plugin.json")));
+    if (!ready) warnConfig(`mods.txt: ${group.name} has no .claude-plugin/plugin.json yet, so Claude Code could not load it — listed, not linked`);
+    return { ...group, ready };
   });
 }
 
@@ -1484,6 +1582,12 @@ function applyAgentLinks(plan) {
   applyLinks({ where: AGENTS, groups: plan.agentGroups, betaNames: plan.betaAgents, selected: plan.selectedAgentGroups, prune: { stable: plan.prune.agents, beta: plan.prune.beta }, retire: plan.retireAgents });
 }
 
+function applyModLinks(plan) {
+  if (!plan.modGroups.length) return;
+  // No checklist runs for stable mods, so none of them may be pruned; a beta one may, as usual.
+  applyLinks({ where: MODS, groups: plan.modGroups, betaNames: plan.betaMods, selected: plan.selectedModGroups, prune: { stable: false, beta: plan.prune.beta }, retire: new Set() });
+}
+
 /**
  * Link, keep, or unlink every group of one kind. `prune.stable` / `prune.beta` say whether the
  * checklist for that kind ran, which is the only thing that lets an unticked box mean "remove".
@@ -1542,6 +1646,12 @@ function applyLinks({ where, groups, betaNames, selected, prune, retire }) {
         continue;
       }
     }
+    // Linking a mod without its manifest would put a folder in ~/.claude/skills that Claude Code
+    // can neither load as a plugin nor as a skill. The Ready summary already said why.
+    if (!uninstall && where === MODS && !group.ready) {
+      report(group, "skipped", "(no .claude-plugin/plugin.json yet)");
+      continue;
+    }
 
     // A group can cover several folders — an alias like /seatbelts is the same choice, so it is
     // reported once, under the worst thing that happened to any of its folders.
@@ -1561,7 +1671,7 @@ function applyLinks({ where, groups, betaNames, selected, prune, retire }) {
 function report(group, state, note) {
   const colour = state === "PROBLEM" ? style.yellow : state === "skipped" || state === "kept" ? style.dim : style.green;
   const alias = group.folders.length > 1 ? style.dim(` +${group.folders.length - 1} alias`) : "";
-  const kind = group.kind === "agent" ? style.dim(" (agent)") : "";
+  const kind = group.kind === "agent" || group.kind === "mod" ? style.dim(` (${group.kind})`) : "";
   console.log(`  ${colour(state.padEnd(9))} ${group.name}${kind}${alias}${note ? ` ${style.dim(note)}` : ""}`);
 }
 
@@ -1576,7 +1686,7 @@ function report(group, state, note) {
 function refreshInstalled() {
   console.log("  Refreshing what is already installed. Nothing is added or removed.\n");
   let touched = 0;
-  for (const [where, groups] of [[SKILLS, loadSkillGroups()], [AGENTS, loadAgentGroups()]]) {
+  for (const [where, groups] of [[SKILLS, loadSkillGroups()], [AGENTS, loadAgentGroups()], [MODS, loadModGroups()]]) {
     for (const group of groups) {
       if (!isGroupLinked(group, where)) continue;
       touched++;
@@ -1585,7 +1695,7 @@ function refreshInstalled() {
       report(group, outcomes.includes("repaired") ? "repaired" : "ready", "");
     }
   }
-  if (!touched) console.log(`  ${style.dim("No skills or agents from this repo are linked. Run the installer without --refresh first.")}`);
+  if (!touched) console.log(`  ${style.dim("No skills, agents or mods from this repo are linked. Run the installer without --refresh first.")}`);
   const blocks = loadInstructionBlocks();
   if (blocks.length) applyInstructionBlocks(readInstalledBlockNames(blocks), false);
   console.log("");
@@ -1668,6 +1778,20 @@ function findAgentClash(group) {
     return null;
   };
   return walk(globalAgentsDir, 0);
+}
+
+/**
+ * Something that is not a link already sitting where this mod would be linked, or null. That is
+ * someone else's skill or plugin of the same name; it is never touched, and only this mod is
+ * skipped. linkFolder refuses the same case; this lets the Ready summary say so first.
+ */
+function findModClash(group) {
+  for (const folder of group.folders) {
+    const linkPath = path.join(MODS.targetDir, folder);
+    const { existing, existingIsLink } = inspectLink(linkPath, path.join(MODS.sourceDir, folder));
+    if (existing && !existingIsLink) return linkPath;
+  }
+  return null;
 }
 
 /**
@@ -1790,6 +1914,26 @@ function printManualMcpInstructions(name, cfg, distCli, linked) {
       2,
     ),
   );
+}
+
+// ── Mods ────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The Ready-summary note when the terminal's Claude Code cannot load mods: not found, or older
+ * than MIN_CLAUDE_FOR_MODS. One fixed command string, so the shell is given nothing to parse but
+ * our own text.
+ */
+function claudeVersionWarnings() {
+  const res = spawnSync("claude --version", { shell: true, encoding: "utf8" });
+  const found = !res.error && res.status === 0 && /(\d+)\.(\d+)\.(\d+)/.exec(res.stdout);
+  if (!found) {
+    return [`note: the claude command was not found. Mods need Claude Code ${MIN_CLAUDE_FOR_MODS} or newer;`, "  check it before relying on them."];
+  }
+  const have = found.slice(1).map(Number);
+  const need = MIN_CLAUDE_FOR_MODS.split(".").map(Number);
+  const older = have[0] - need[0] || have[1] - need[1] || have[2] - need[2];
+  if (older >= 0) return [];
+  return [`note: Claude Code ${have.join(".")} is installed, and mods need ${MIN_CLAUDE_FOR_MODS} or newer.`, "  Update it (claude update) or the mod will not load."];
 }
 
 // ── The ship-it merge permission ────────────────────────────────────────────────────────────────

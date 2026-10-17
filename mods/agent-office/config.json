@@ -1,0 +1,18 @@
+{
+  "activeMinutes": 2,
+  "idleMinutes": 30,
+  "lightsOffHours": 24,
+  "quietSeconds": 60,
+  "stalledMinutes": 5,
+  "touchedWindowMinutes": 30,
+  "bubbleSeconds": 10,
+  "touchedTools": ["Edit", "Write", "NotebookEdit"],
+  "shellTools": ["Bash", "PowerShell"],
+  "helperPrompts": ["Generate a short git branch name"],
+  "findingsFrom": ["reviewer"],
+  "streamSeconds": 1,
+  "tailBytes": 1048576,
+  "gitCacheSeconds": 60,
+  "autoOpen": false,
+  "contextWindows": {}
+}
