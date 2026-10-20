@@ -1,4 +1,0 @@
-{
-  "description": "Agent Office floor-plan pane",
-  "modules": ["./register.js"]
-}

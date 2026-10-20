@@ -27,6 +27,5 @@
 skill        check-skill-updates
 skill        debrief
 skill        seatbelt
-mod          agent-office
 instruction  clear-responses
 instruction  model-calibration

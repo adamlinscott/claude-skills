@@ -1,8 +1,0 @@
-{
-  "scout": "scout",
-  "researcher": "researcher",
-  "worker": "worker",
-  "worker-light": "worker",
-  "reviewer": "reviewer",
-  "*": "other"
-}

@@ -1,5 +1,0 @@
-# Agent Office runs a long-lived engine and lays out in the host
-
-Agent Office's data work (reading each agent tool's records, building the office model, working out meaning) runs in one long-lived node process the pane starts with `$.process.spawn`, which streams a new office model whenever something changes. Layout and drawing run in the host from shared pure modules. We chose this over a one-shot CLI run on a timer, an engine that also lays out, and doing everything inside the mod, because it keeps the incremental read cache alive (a one-shot run re-reads every transcript tail, about 0.5 s), makes keyboard and hover changes instant, and makes the stream itself the feed a multiplayer office or standalone app would consume. If a spawned process can't live for the session in a host, the same engine runs one-shot on a timer; only the transport changes.
-
-Considered: one-shot engine with layout in the host (the fallback), engine does layout too (every interaction waits on a process round trip, and multiplayer would send one viewer's layout), everything in the mod (ties meaning and layout to Claude mods).

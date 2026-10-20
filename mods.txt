@@ -25,4 +25,3 @@
 #
 # Blank lines and lines starting with # are ignored. The installer reads this at run time.
 
-agent-office | agent-office | A pane inside Claude Code that shows your other sessions of the same project, what their agents are doing, and where two pieces of work touch the same files. | off,off
