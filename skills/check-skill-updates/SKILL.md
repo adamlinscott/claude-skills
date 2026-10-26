@@ -59,7 +59,7 @@ dilutes both, and this is the one thing here that can always wait.
 
 ## Who calls this
 
-`/are-we-done` on a clean close, `/ship-it` once the release is out and verified, `/brief-me` when
-re-entering a session. All of them skip this silently if it is not installed; none of them treat it
+`/are-we-done` on a clean close, `/ship-it` once the release is out and verified, `/where-are-we`
+when the user has been away. All of them skip this silently if it is not installed; none of them treat it
 as a prerequisite. The rule they share is that the work has to be finished first — this is a
 footnote to a natural close, never an interruption of one.

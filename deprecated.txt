@@ -34,3 +34,4 @@
 
 skill        goal-workflow
 skill        assumption-inventory
+skill        brief-me

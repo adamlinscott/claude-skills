@@ -107,7 +107,7 @@ as questions only, never also as bullets in the list.
 `/fresh-eyes` asks *is the work correct?* — a blind read of the diff against the intent.
 `are-we-done` asks *is the conversation closed?* — a sweep for undecided points. Run
 `/fresh-eyes` first if you want the diff audited; findings it leaves open show up here as
-`AMBIGUOUS` or `BLOCKER`. `/brief-me` is the mirror image at the other end: it reopens a session,
+`AMBIGUOUS` or `BLOCKER`. `/where-are-we` is the mirror image at the other end: it reopens a session,
 this one closes it. `/ship-it` is the next step when the answer is yes and the work is meant to
 go out — this gate says the session can close, not that anything has shipped. `/ship-it` calls this
 sweep at the end, once the release is out and verified — never before landing, because shipping

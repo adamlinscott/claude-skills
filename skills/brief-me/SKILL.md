@@ -1,11 +1,21 @@
 ---
 name: brief-me
-description: '[Adam''s Skills] Print a plain-English re-entry briefing for a user who has lost the thread of a long-running session — after a distraction, overnight, or over a weekend. Re-explains what the session is, where it got to, what state the work is in right now, what Claude is waiting on from the user, and the single next step. Grounds every claim in git and files on disk before narrating, so it re-explains the session rather than inventing a tidy story of it. Report only: it writes nothing and never resumes work. Invoke with /brief-me.'
+description: '[Adam''s Skills] DEPRECATED — superseded by /where-are-we. Do not use for new work. Printed a plain-English re-entry briefing for a user who has lost the thread of a long-running session — after a distraction, overnight, or over a weekend. Re-explains what the session is, where it got to, what state the work is in right now, what Claude is waiting on from the user, and the single next step. Grounds every claim in git and files on disk before narrating, so it re-explains the session rather than inventing a tidy story of it. Report only: it writes nothing and never resumes work. Invoke with /brief-me.'
 disable-model-invocation: true
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
-# Brief Me
+# Brief Me — DEPRECATED
+
+> **This skill is deprecated. Use [`/where-are-we`](../where-are-we/SKILL.md) instead.**
+>
+> If someone has invoked this, tell them in one line that it is retired, then run
+> `/where-are-we` for them. Run the brief below only if they explicitly ask for this one anyway.
+>
+> **Why it was retired.** `/where-are-we` covers the same re-entry case and scales to the gap:
+> it checks how long the user has been away, gives just *done* and *left* to someone who is still
+> active, and adds a paragraph on what the task is for someone who has been gone. Six fixed
+> headings were more than most re-entries needed.
 
 The user has come back to this session with weak or no memory of it. Reading the last message
 will not fix that: the last message was written for someone who was here five minutes ago. It

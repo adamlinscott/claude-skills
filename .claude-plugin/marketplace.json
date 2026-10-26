@@ -9,7 +9,7 @@
     {
       "name": "claude-skills",
       "source": "./",
-      "description": "Skills that add lifecycle gates around planning, building and shipping with Claude Code: build-it, fresh-eyes, are-we-done, ship-it, reground, brief-me, ttp, context-audit, memory-audit, check-skill-updates, debrief, seatbelt, and raise-issue.",
+      "description": "Skills that add lifecycle gates around planning, building and shipping with Claude Code: build-it, fresh-eyes, are-we-done, ship-it, reground, where-are-we, ttp, context-audit, memory-audit, check-skill-updates, debrief, seatbelt, and raise-issue.",
       "author": {
         "name": "Adam Linscott"
       },
@@ -27,7 +27,6 @@
       ],
       "skills": [
         "./skills/are-we-done",
-        "./skills/brief-me",
         "./skills/build-it",
         "./skills/check-skill-updates",
         "./skills/context-audit",
@@ -42,7 +41,8 @@
         "./skills/ship-it",
         "./skills/ship-it-now",
         "./skills/to-the-point",
-        "./skills/ttp"
+        "./skills/ttp",
+        "./skills/where-are-we"
       ]
     }
   ]
