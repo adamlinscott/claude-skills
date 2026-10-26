@@ -83,7 +83,7 @@ order — though most are useful on their own, too.
 | `/are-we-done` | **Close the loop.** Before you call it a session, confirm nothing is still undecided — no half-decided suggestion, no unanswered question, no marker the diff left behind. A clean sweep answers in one line; otherwise it names the blockers or asks you about the open calls. |
 | `/ship-it` | **Ship.** Get the verified work all the way out — merged, released, and confirmed running in every environment, production last. If the release would also carry unreleased work by other people, it names whose and asks before production. |
 | `/reground` | **Recover (as needed).** On longer follow-on sessions, if you start drifting from the main task, halt and re-anchor to codebase evidence before continuing. |
-| `/brief-me` | **Re-enter (as needed).** You came back on Monday to a session you left on Friday. Get a plain-English briefing on what it is, where it got to, and what it is waiting on from you, before you touch anything. |
+| `/where-are-we` | **Re-enter (as needed).** Mid-session or back on Monday, ask "where are we?" and get what is done and what is left. If you have been away, it first reminds you what the task is. |
 
 > [!TIP]
 > Most of these skills are useful standalone — you don't have to run the whole chain. Reach for `/build-it` whenever a ticket is ready, or `/fresh-eyes` after any finished diff.
@@ -263,21 +263,17 @@ compaction.
 
 **When to use:** the agent has gone off course, hallucinated files or APIs, or overbuilt.
 
-### `/brief-me`
+### `/where-are-we`
 
-You left the session on Friday and came back on Monday. Reading the last message does not help:
-it was written for someone who was here five minutes ago, and leans on pronouns, on shorthand
-coined mid-session, and on file names introduced hours back. It continues the thread; it does
-not introduce it.
+What is done and what is left in this session. Typing "where are we" anywhere
+in a message triggers it, no slash needed. It checks how long ago the last message was. Within
+the last half hour, you get the two lists and nothing else. Longer than that, or if it cannot
+tell, it first reminds you in a few sentences what the task is, and mentions anything that changed
+in the repo while you were gone. It checks git and the files before it says anything is done.
+Report only. Replaces `/brief-me`, which is deprecated.
 
-Prints one short briefing that puts you back in the chair — what the session is, where it got
-to, what is on disk right now, what it needs from you split into *decide* / *tell me* / *do*,
-and the single next step if you just say go. It checks git and the files before it narrates, so
-a half-applied edit or a branch that moved under you gets named rather than smoothed over, and
-anything it is only recalling gets marked as recalled. Report only; it writes nothing and does
-not resume the work.
-
-**When to use:** you have come back to a long-running session and have no idea where you were.
+**When to use:** mid-session to see how far along the work is, or on coming back to a session
+you have lost the thread of.
 
 ### `/check-skill-updates` — beta
 
@@ -289,7 +285,7 @@ Deliberately quiet. It speaks only when there is actually an update: up to date,
 clone that is dirty or on a branch all produce silence rather than a status line nobody asked for.
 It checks at most once a day, and once you have said no to a version it never raises that version
 again. Other skills call it at a natural close — `/are-we-done` on a clean answer, `/ship-it` once
-the release is verified, `/brief-me` on re-entry — and never next to a blocker or a failed ship.
+the release is verified, `/where-are-we` after time away — and never next to a blocker or a failed ship.
 
 Beta while it is being lived with: left out of a normal install unless you tick it, and applied on
 the guided setup only after being named and labelled beta in the summary.
@@ -417,7 +413,7 @@ machine pick Advanced because it says it is for them, and everyone else takes Si
 | Install | Who it is for |
 |---|---|
 | **Advanced install** | Developers. Every skill, and you pick which ones from a checklist. This is the default answer. |
-| **Simple install** | People who do not write code. A small set for describing problems, writing them up, and finding your place again — `/raise-issue`, `/ttp`, `/brief-me`, `/memory-audit` — plus the agents, and plain-English replies in every project on the machine. Nothing to choose. |
+| **Simple install** | People who do not write code. A small set for describing problems, writing them up, and finding your place again — `/raise-issue`, `/ttp`, `/where-are-we`, `/memory-audit` — plus the agents, and plain-English replies in every project on the machine. Nothing to choose. |
 
 > [!WARNING]
 > **Simple is not a smaller Advanced, and if you write code you do not want it.** It is a
