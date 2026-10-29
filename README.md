@@ -144,10 +144,11 @@ A close-out gate, not a review. It asks one question — *can this session close
 means **nothing is still undecided**, not that everything is finished. An item parked with a
 reason is closed; an item nobody ruled on is not, however small.
 
-It sweeps the same six sources every run: the todo list, the promises the session made to itself
+It sweeps the same seven sources every run: the todo list, the promises the session made to itself
 ("leaving that for now", questions you never answered), the state of the work tree, `TODO`
-markers the diff itself introduced, whether tests actually ran *after* the last edit, and every
-issue or PR number mentioned — each resolved to its real title, never left as a bare `#123`.
+markers the diff itself introduced, whether tests actually ran *after* the last edit, every
+issue or PR number mentioned — each resolved to its real title, never left as a bare `#123` — and
+the background shells and processes the session (or its subagents) left running.
 Then each hit lands in exactly one bucket: done, won't do, deferred, blocker, or undecided.
 
 It is strict by default — a dirty tree and a suite not re-run since the last edit are open points
@@ -160,7 +161,7 @@ can only half-read as clean.
 A clean sweep gets two lines and no more, plus a paste-ready `Parked:` block if anything was
 deferred, so the parking outlives the session that decided it (`/raise-issue` files whatever
 deserves a tracked issue). Blockers get a flat list — what broke, where, what it blocks. Genuinely open calls come back as questions with real options — do it
-now, defer, won't do — so the decision is yours to make rather than to approve. Read-only: it fixes nothing and decides nothing for you.
+now, defer, won't do — so the decision is yours to make rather than to approve. It fixes nothing and decides nothing for you, with one exception: when the answer is yes, or only open questions remain, it stops the leftover processes without asking, so the work tree folder can be deleted once the session closes. Anything kept, or held open by something outside the session, is named with its PID.
 
 **When to use:** the work looks finished and you are about to end the session, ship, or hand off.
 

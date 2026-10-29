@@ -1,7 +1,7 @@
 ---
 name: are-we-done
-description: '[Adam''s Skills] Deterministic close-out gate for a session or work tree. Sweeps a fixed set of sources — the todo list, this session''s own promises, git state, TODO/FIXME markers the diff introduced, test and build state, and any issue or ticket referenced — and checks that every open point has been explicitly decided: done, won''t do, deferred, or handed to another session. Strict by default, with a severity floor that lifts only on evidence of how the project actually works (CI on every push, a user who commits last). A clean sweep returns one line and one sentence, nothing more. An unclean one either asks about the genuinely ambiguous points or names the blockers to fix now, with every issue number carrying its title. Read-only: it decides nothing and fixes nothing. Use when work looks finished and you want to confirm the session can actually close — "are we done?", before ending a session, before shipping, or before handing off.'
-allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion
+description: '[Adam''s Skills] Deterministic close-out gate for a session or work tree. Sweeps a fixed set of sources — the todo list, this session''s own promises, git state, TODO/FIXME markers the diff introduced, test and build state, and any issue or ticket referenced — and checks that every open point has been explicitly decided: done, won''t do, deferred, or handed to another session. Strict by default, with a severity floor that lifts only on evidence of how the project actually works (CI on every push, a user who commits last). A clean sweep returns one line and one sentence, nothing more. An unclean one either asks about the genuinely ambiguous points or names the blockers to fix now, with every issue number carrying its title. It decides nothing for the user and fixes nothing, with one exception: when the answer is yes, or no only because of open questions, it stops the background shells and processes this session left running, so the work tree folder can be deleted. Use when work looks finished and you want to confirm the session can actually close — "are we done?", before ending a session, before shipping, or before handing off.'
+allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, TaskStop
 ---
 
 # are-we-done
@@ -12,9 +12,11 @@ Done does **not** mean everything is finished. It means **nothing is still undec
 open point has been settled as done, won't do, deferred, or another session's work. An item
 parked with a reason is closed. An item nobody ruled on is not, however small.
 
-Read-only. This skill never edits, commits, or fixes, and never decides on the user's behalf.
+This skill never edits, commits, or fixes, and never decides on the user's behalf. The one thing
+it changes is process state: on a close (section 3b) it stops the background shells and processes
+this session left behind, without asking.
 
-## 1. Sweep (all six, in order, every run)
+## 1. Sweep (all seven, in order, every run)
 
 Run the full sweep before judging anything — see [REFERENCE.md](REFERENCE.md) for the exact
 commands and what counts as a hit.
@@ -36,6 +38,10 @@ commands and what counts as a hit.
    its **title** (`gh issue view <n> --json title`, or the tracker's equivalent). A bare number
    never appears in the output. Unresolvable → use the title as stated this session, marked
    `(unverified)`; a missing `gh` is an environment gap, not an undecided point.
+7. **Background processes** — this session's background tasks, plus every process its tool shells
+   (subagents' included) started that is still running, plus orphans whose command line or working
+   directory is inside the work tree. These are what stop the folder being deleted later. Not open
+   points in themselves; they feed section 3b.
 
 ## 2. Classify
 
@@ -64,6 +70,18 @@ locally, and asking every session is how the gate gets ignored. Lift the floor f
 state at a time, on evidence only, never on assumption ([REFERENCE.md](REFERENCE.md) lists what
 counts). A lifted state is still named in the output; it just stops forcing a no.
 
+## 3b. Clean up — automatic on a close
+
+When the verdict is yes (shape A), or no only because of `AMBIGUOUS` items (shape B), stop every
+process from leg 7 that nothing still needs. Do not ask; the user wants the folder deletable the
+moment the session ends. Never on shape C — work continues and its servers may be in use.
+
+Keep a process only when the session record shows it is still wanted: the user asked for it to stay
+up, or the session is still waiting on its result (that wait is itself `AMBIGUOUS`). Everything else
+— finished test runs, dev servers started to check something, idle shells, watchers — is transient
+and goes. MCP servers and the user's own terminals and editors are never touched. Commands in
+[REFERENCE.md](REFERENCE.md).
+
 ## 4. Output — one of exactly three shapes
 
 Templates in [REFERENCE.md](REFERENCE.md). Never invent a fourth shape and never add a section
@@ -72,7 +90,9 @@ to one. Only one pairing is allowed, and it is spelled out in C below.
 **A — Yes.** Two lines of text: a verdict line, a blank line, then one sentence naming what was
 completed *and anything parked*. Say "nothing undecided", never "nothing outstanding" — deferred
 work is outstanding; the point is that someone ruled on it. Those two lines are the entire output;
-brevity is the deliverable here.
+brevity is the deliverable here. If 3b stopped or kept anything, or found a process it may not
+touch holding the folder, one `Stopped:` / `Still running:` line follows; when there was nothing,
+say nothing.
 
 One exception, only when something was deferred: a paste-ready `Parked:` block may follow, so the
 parking outlives the session that decided it. Still read-only — you print it, the user places it,
@@ -85,7 +105,8 @@ offer beside an unanswered question or a blocker dilutes both.
 **B — Ambiguous items exist (no blockers).** Ask, via the **AskUserQuestion** tool — one question
 per ambiguous item, max four, each offering the real options (do it now / defer / won't do).
 Open with the tool call; do not narrate the questions in prose first. Then stop and wait; the
-answers are the user's, and carrying them out is a separate ask.
+answers are the user's, and carrying them out is a separate ask. Report what 3b stopped after the
+answers, beneath the dispositions.
 
 **C — Blockers exist.** A short, flat list — blockers first, then anything ambiguous underneath.
 One line each: what is broken, where (`file:line`), and what it blocks. Every referenced item as
@@ -97,6 +118,7 @@ as questions only, never also as bullets in the list.
 ## Guardrails
 
 - **Do not fix anything.** Naming a blocker is the whole job; the user decides what happens next.
+  Stopping leftover processes in 3b is the one action taken, and only on a close.
 - **Do not invent closure.** If the sweep cannot establish something (a test that never ran, an
   issue title that will not resolve), that is an open point, not an assumption.
 - **A single unresolved point makes the answer no.** This gate exists to be strict; a
