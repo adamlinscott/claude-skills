@@ -4,7 +4,7 @@ The sweep in detail, and the three output templates verbatim.
 
 ## The sweep
 
-Deterministic means the same six sources every run, in the same order, whether or not the
+Deterministic means the same seven sources every run, in the same order, whether or not the
 session "feels" finished. Skipping a source because it looks unlikely is how a yes becomes wrong.
 
 ### 1. Todo list
@@ -143,6 +143,54 @@ stops being run. It changes the verdict only when the item's own disposition tur
 issue says — then it is `AMBIGUOUS` and belongs in a question, phrased as "I could not read
 #123; is it the one covering X?".
 
+### 7. Background processes
+
+Two layers, both every run:
+
+1. **This session's background tasks** — every `run_in_background` command and Monitor started
+   this session, by you or a subagent, that has not reported completion.
+2. **What the OS says** — run the helper:
+
+   ```
+   node <repo>/tools/stray-processes/check.mjs <work-tree>
+   ```
+
+   `<repo>` is the clone this skill is linked from: resolve it from **this file's real path**
+   (`~/.claude/skills/are-we-done` is a link; its target's `../../tools/stray-processes/check.mjs`
+   is the script), not from the working directory. It prints one line of JSON:
+   - `session` — the Claude process PID, or `null` if it could not be found; then only orphans are
+     detectable, and the output says so.
+   - `candidates` — processes the session's Bash/PowerShell tool shells started (`why: "session"`,
+     with `shell` naming the tool shell at the root of the tree), and orphans whose parent is gone
+     and whose command line or working directory is inside the work tree (`why: "orphan"`). The
+     tool shell running the check is left out, and so are MCP servers.
+   - `foreign` — inside the work tree but owned by something still alive outside the session: an
+     editor, the user's own terminal. Never stopped.
+
+Also, if `git config core.fsmonitor` is `true`, the fsmonitor daemon watches the tree and holds it
+open; it counts as a candidate.
+
+## Clean-up (section 3b)
+
+Only on shape A or B. For each candidate, keep it only on evidence from the session record — the
+user asked for it to stay up, or the session is still waiting on what it produces. Otherwise:
+
+1. Stop the session's own background tasks with **TaskStop**.
+2. Kill the rest by the root of each tree — the `shell` PID for `session` candidates, the PID
+   itself for orphans:
+
+   ```
+   node <repo>/tools/stray-processes/check.mjs <work-tree> --kill 4412,5120
+   ```
+
+   It kills whole trees (`taskkill /T /F` on Windows; SIGTERM then SIGKILL elsewhere), refuses
+   any PID that is not a current candidate, and returns `killed`, `refused`, `failed`, and
+   `remaining`.
+3. `git fsmonitor--daemon stop` if the daemon was running.
+
+Anything in `failed` or `remaining`, anything kept, and anything `foreign` still blocks deleting the
+folder; name it in the output with its PID and what it is, so the user does not have to hunt for it.
+
 ## Output templates
 
 ### Shape A — yes
@@ -153,7 +201,15 @@ Done — nothing undecided.
 <One sentence naming what was completed, and what was parked.>
 ```
 
-Two lines of text, one blank line between them. That is the whole output. Resist every urge to
+Two lines of text, one blank line between them. That is the whole output, apart from the clean-up
+line below and the deferral block.
+
+**The clean-up line.** Only when 3b stopped, kept, or could not touch something; otherwise nothing.
+
+```
+Stopped: vite dev server, 2 idle bash shells, orphaned node (test runner). Still running: node 5120 (`npm run dev`, kept at your request) — it will block deleting the folder.
+```
+ Resist every urge to
 add a third line: no bullet list of what was done, no "let me know if", no next steps, no caveat.
 The brevity is the signal that the sweep came back clean.
 
@@ -198,8 +254,8 @@ with the tool call and no preamble — do not narrate the questions in prose fir
 blockers, the blocker list comes first and the questions follow it in the same turn; that list
 is the only text allowed to precede them.
 
-After the answers come back, state the resulting disposition in one line per item and stop;
-acting on them is a separate request.
+After the answers come back, state the resulting disposition in one line per item, then the
+clean-up line if 3b did anything, and stop; acting on them is a separate request.
 
 ### Shape C — blockers
 
