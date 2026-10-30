@@ -157,15 +157,25 @@ Two layers, both every run:
 
    `<repo>` is the clone this skill is linked from: resolve it from **this file's real path**
    (`~/.claude/skills/are-we-done` is a link; its target's `../../tools/stray-processes/check.mjs`
-   is the script), not from the working directory. It prints one line of JSON:
+   is the script), not from the working directory. Run it on its own, never in a pipeline: Git
+   Bash can leave pipeline members parentless, which hides the session. It prints one line of JSON:
    - `session` — the Claude process PID, or `null` if it could not be found; then only orphans are
-     detectable, and the output says so.
+     detectable, and a `warning` field says so. Run it again once, unpiped, before trusting that.
    - `candidates` — processes the session's Bash/PowerShell tool shells started (`why: "session"`,
      with `shell` naming the tool shell at the root of the tree), and orphans whose parent is gone
      and whose command line or working directory is inside the work tree (`why: "orphan"`). The
      tool shell running the check is left out, and so are MCP servers.
    - `foreign` — inside the work tree but owned by something still alive outside the session: an
      editor, the user's own terminal. Never stopped.
+
+An orphan can be a whole Claude session: a `claude.exe --bg-pty-host` left running after its daemon
+died, with its own Claude process and MCP servers under it. Its command line rarely names the work
+tree, so only the working directory catches it. Kill it by the root PID, which takes the whole tree.
+A background session whose parent is still alive is `foreign`, not an orphan; it may be in use.
+
+`before: true` marks an orphan older than this session. An editor or terminal app launched from a
+shell (`code .`) is parentless too, on every platform, so stop one of these only when it is plainly
+leftover tooling — a Claude session, node, a test runner, a dev server — and name anything else.
 
 Also, if `git config core.fsmonitor` is `true`, the fsmonitor daemon watches the tree and holds it
 open; it counts as a candidate.
@@ -175,7 +185,8 @@ open; it counts as a candidate.
 Only on shape A or B. For each candidate, keep it only on evidence from the session record — the
 user asked for it to stay up, or the session is still waiting on what it produces. Otherwise:
 
-1. Stop the session's own background tasks with **TaskStop**.
+1. Stop the session's own background tasks with **TaskStop**, then run the check again so the
+   list no longer holds them.
 2. Kill the rest by the root of each tree — the `shell` PID for `session` candidates, the PID
    itself for orphans:
 
@@ -209,8 +220,8 @@ line below and the deferral block.
 ```
 Stopped: vite dev server, 2 idle bash shells, orphaned node (test runner). Still running: node 5120 (`npm run dev`, kept at your request) — it will block deleting the folder.
 ```
- Resist every urge to
-add a third line: no bullet list of what was done, no "let me know if", no next steps, no caveat.
+
+Resist every urge to add anything else: no bullet list of what was done, no "let me know if", no next steps, no caveat.
 The brevity is the signal that the sweep came back clean.
 
 **The deferral block.** When anything was parked, the two lines may be followed by a block the
