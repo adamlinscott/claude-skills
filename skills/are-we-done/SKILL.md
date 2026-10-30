@@ -1,6 +1,6 @@
 ---
 name: are-we-done
-description: '[Adam''s Skills] Deterministic close-out gate for a session or work tree. Sweeps a fixed set of sources — the todo list, this session''s own promises, git state, TODO/FIXME markers the diff introduced, test and build state, and any issue or ticket referenced — and checks that every open point has been explicitly decided: done, won''t do, deferred, or handed to another session. Strict by default, with a severity floor that lifts only on evidence of how the project actually works (CI on every push, a user who commits last). A clean sweep returns one line and one sentence, nothing more. An unclean one either asks about the genuinely ambiguous points or names the blockers to fix now, with every issue number carrying its title. It decides nothing for the user and fixes nothing, with one exception: when the answer is yes, or no only because of open questions, it stops the background shells and processes this session left running, so the work tree folder can be deleted. Use when work looks finished and you want to confirm the session can actually close — "are we done?", before ending a session, before shipping, or before handing off.'
+description: '[Adam''s Skills] Deterministic close-out gate for a session or work tree. Sweeps a fixed set of sources — the todo list, this session''s own promises, git state, TODO/FIXME markers the diff introduced, test and build state, and any issue or ticket referenced — and checks that every open point has been explicitly decided: done, won''t do, deferred, or handed to another session. Strict by default, with a severity floor that lifts only on evidence of how the project actually works (CI on every push, a user who commits last). A clean sweep returns one line and one sentence, plus a line on any processes it stopped. An unclean one either asks about the genuinely ambiguous points or names the blockers to fix now, with every issue number carrying its title. It decides nothing for the user and fixes nothing, with one exception: when the answer is yes, or no only because of open questions, it stops the background shells and processes left running in the work tree, so the folder can be deleted. Use when work looks finished and you want to confirm the session can actually close — "are we done?", before ending a session, before shipping, or before handing off.'
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, TaskStop
 ---
 
@@ -14,7 +14,7 @@ parked with a reason is closed. An item nobody ruled on is not, however small.
 
 This skill never edits, commits, or fixes, and never decides on the user's behalf. The one thing
 it changes is process state: on a close (section 3b) it stops the background shells and processes
-this session left behind, without asking.
+left running in the work tree, without asking.
 
 ## 1. Sweep (all seven, in order, every run)
 
@@ -74,7 +74,9 @@ counts). A lifted state is still named in the output; it just stops forcing a no
 
 When the verdict is yes (shape A), or no only because of `AMBIGUOUS` items (shape B), stop every
 process from leg 7 that nothing still needs. Do not ask; the user wants the folder deletable the
-moment the session ends. Never on shape C — work continues and its servers may be in use.
+moment the session ends. On shape A, clean up before the output. On shape B, clean up after the
+answers come back, and skip it if any answer is "do it now" — work continues. Never on shape C — its
+servers may still be in use.
 
 Keep a process only when the session record shows it is still wanted: the user asked for it to stay
 up, or the session is still waiting on its result (that wait is itself `AMBIGUOUS`). Everything else
@@ -95,7 +97,7 @@ touch holding the folder, one `Stopped:` / `Still running:` line follows; when t
 say nothing.
 
 One exception, only when something was deferred: a paste-ready `Parked:` block may follow, so the
-parking outlives the session that decided it. Still read-only — you print it, the user places it,
+parking outlives the session that decided it. You print it, the user places it,
 and `/raise-issue` files any of it that deserves a tracked issue.
 
 A clean close is also the one moment worth mentioning a waiting skills update: on shape A only, run
