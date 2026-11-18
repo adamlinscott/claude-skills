@@ -91,6 +91,16 @@ back, run the check once more and take the clean-up line from that run alone: it
 `self`, `foreign` and `remaining`. A list from earlier in the turn is stale, and "nothing I started is
 running" is not the same fact as "nothing holds the folder".
 
+**A background session is never ended by killing its processes.** The Claude daemon restarts a
+background session whose process dies, in the same folder, so a killed pty host comes straight back
+and keeps holding the tree. Only `claude stop <id>` keeps one down (`bgId` in the check's output).
+So on a close, when the check shows `self.background` and `self.holdsTree`, the session stops
+itself: after the final check, the very last tool call is `check.mjs <work-tree> --release-self 30`,
+which runs `claude stop <self.bgId>` 30 seconds later from outside the tree, once the reply has been
+shown. Never run `--release-self` for any other reason, and never to test it: it stops the session
+that runs it. Another background session holding the tree (a `foreign` root with a `bgId`) is named
+with its `claude stop <bgId>`, and stopped only when the user asks.
+
 ## 4. Output — one of exactly three shapes
 
 Templates in [REFERENCE.md](REFERENCE.md). Never invent a fourth shape and never add a section
@@ -106,11 +116,9 @@ say nothing.
 When the final check says `deletable: false`, the `Still running:` line is **mandatory** and names
 every holder by PID and what it is: each `remaining` process, each `foreign` root with its kind, and,
 when `self.holdsTree`, this session itself. An interactive session needs only a short clause (it ends
-with `/exit`); for a background one (`self.background`) say that `/exit` only closes its view, and
-that the folder frees once the job is stopped or the tree of `self.root`, its pty host, is ended
-(`taskkill /PID <self.root> /T /F` on Windows). Never write or
-imply that nothing is running, or that the folder can now be deleted, unless the final check's
-`deletable` is true.
+with `/exit`); for a background one say it stops itself in 30 seconds (`claude stop <bgId>`), since
+`/exit` only closes its view. Never write or imply that nothing is running, or that the folder can
+now be deleted, unless the final check's `deletable` is true.
 
 One exception, only when something was deferred: a paste-ready `Parked:` block may follow, so the
 parking outlives the session that decided it. You print it, the user places it,

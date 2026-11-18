@@ -169,11 +169,13 @@ Two layers, both every run:
    - `foreign` — inside the work tree but owned by something still alive outside the session: an
      editor, the user's own terminal, another Claude session or a viewer attached to one. Only
      roots are listed, each with a `kind` (`viewer`, `claude-session`, `shell`, `process`) and
-     `under`, how many of its descendants also hold the tree. Never stopped.
+     `under`, how many of its descendants also hold the tree; a background session's root also has its
+     `bgId`. Never stopped.
    - `self` — this session: `holdsTree` when its own working directory, or an MCP server's, its
      console host's or its pty host's, is inside the work tree (`holders` lists them); `background`
      when its parent is another Claude process (a daemon or pty host); `root`, the PID whose tree
-     ends it all (the pty host of a background session, else the session). A session that holds the tree keeps the folder from
+     ends it all (the pty host of a background session, else the session); `bgId`, a background
+     session's id for `claude stop`. A session that holds the tree keeps the folder from
      being deleted until it ends; a background one keeps running after `/exit` closes its view.
    - `deletable` — false whenever the session was not found. Otherwise, on Windows, true only when
      no candidate, no foreign process and not the session itself holds the work tree. On macOS and Linux a working
@@ -218,10 +220,23 @@ user asked for it to stay up, or the session is still waiting on what it produce
 Anything in `failed` or `remaining`, anything kept, and, on Windows, anything `foreign` and the session
 itself when `self.holdsTree` still blocks deleting the folder (macOS and Linux delete a folder that is a
 process's working directory, so there only the first two block it); name each in the output with its PID and what it
-is, so the user does not have to hunt for it. Name foreign roots, not their children. For the session
-itself, say how it ends: a short clause for an interactive one (`/exit`), and for a background one
-(`self.background`) that `/exit` only closes its view, so the job must be stopped or the tree of
-`self.root` ended (`taskkill /PID <self.root> /T /F` on Windows). Only `deletable: true` lets the output say nothing about processes.
+is, so the user does not have to hunt for it. Name foreign roots, not their children, and give a
+background session's `claude stop <bgId>`. For the session itself: a short clause for an interactive
+one (`/exit`); a background one (`self.background`) stops itself, as below. Only `deletable: true`
+lets the output say nothing about processes.
+
+5. **A background session that holds the tree stops itself, last.** Never with `--kill` or
+   `taskkill`: the Claude daemon restarts a background session whose process dies, in the same
+   folder. After the final check, the last tool call is:
+
+   ```
+   node <repo>/tools/stray-processes/check.mjs <work-tree> --release-self 30
+   ```
+
+   It refuses unless this session is a background one that holds this tree, and otherwise starts a
+   process outside the tree and the session (WMI on Windows, a detached `sh` elsewhere) that runs
+   `claude stop <self.bgId>` 30 seconds later, after the reply is shown. It returns
+   `releasing: {id, inSeconds}`. Never run it to test it: it stops the session that runs it.
 
 ## Output templates
 
@@ -244,7 +259,7 @@ Stopped: vite dev server, 2 idle bash shells, orphaned node (test runner). Still
 ```
 
 ```
-Still running: this session (claude 34336, background) — /exit only closes its view, so stop the job or end its pty host with `taskkill /PID 17216 /T /F`; powershell 56420 (your terminal, open in the folder); claude 27512 (another session started in the folder).
+Still running: this session (background) — it stops itself in 30 s (`claude stop 09f115bf`); powershell 56420 (your terminal, open in the folder); claude 27512 (another background session in the folder: `claude stop 2eb5c37c`).
 ```
 
 Resist every urge to add anything else: no bullet list of what was done, no "let me know if", no next steps, no caveat.

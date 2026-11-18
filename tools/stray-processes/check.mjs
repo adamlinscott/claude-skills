@@ -12,6 +12,9 @@
 //   node check.mjs [<work-tree>]                  list (default: git top level of the cwd)
 //   node check.mjs [<work-tree>] --kill 12,34     kill those trees (candidates only); adds
 //                                                 killed, refused, failed, and remaining
+//   node check.mjs [<work-tree>] --release-self 30  stop THIS background session 30 s from now with
+//                                                 claude stop <id>, if it holds the work tree; adds
+//                                                 releasing (or releaseRefused). Ends the caller.
 //
 // candidates  started by this session's Bash/PowerShell tool shells (subagents' included), or
 //             orphans — parent gone — whose command line or cwd is inside the work tree
@@ -25,21 +28,27 @@
 //             its console host's or its pty host's, is inside the work tree (it then holds the folder until the session
 //             ends); background when its parent is another Claude process (a daemon or pty host), so
 //             closing its view with /exit does not end it; root is the PID whose tree ends it all
-//             (the pty host of a background session, else the session)
+//             (the pty host of a background session, else the session); bgId, the id `claude stop`
+//             takes. Never kill a background session: the daemon restarts it; stop it instead
 // deletable   true only when the session was found and no candidate (or, after --kill, nothing
 //             remaining) holds the tree, and on Windows also no foreign process and not the session
 //             itself (macOS and Linux delete a folder that is some process's working directory). The
 //             one field that says whether the folder can be deleted right now.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 const win = process.platform === "win32";
 const argv = process.argv.slice(2);
 const killAt = argv.indexOf("--kill");
 const killList = killAt >= 0 ? (argv[killAt + 1] ?? "").split(",").map(Number).filter(Boolean) : null;
-const positional = argv.filter((a, i) => !a.startsWith("--") && !(killAt >= 0 && i === killAt + 1));
+const releaseAt = argv.indexOf("--release-self");
+const releaseIn = releaseAt >= 0 ? Math.max(5, Number(argv[releaseAt + 1]) || 30) : null;
+const positional = argv.filter(
+  (a, i) => !a.startsWith("--") && !(killAt >= 0 && i === killAt + 1) && !(releaseAt >= 0 && i === releaseAt + 1),
+);
 
 function run(cmd, args) {
   return execFileSync(cmd, args, {
@@ -230,12 +239,21 @@ function classify() {
   const foreignPids = new Set(unowned.map((f) => f.pid));
   const roots = unowned
     .filter((f) => !descendsFrom(byPid.get(f.pid), foreignPids))
-    .map((f) => ({ ...f, kind: kindOf(byPid.get(f.pid)), under: unowned.filter((g) => descendsFrom(byPid.get(g.pid), new Set([f.pid]))).length }));
+    .map((f) => {
+      const p = byPid.get(f.pid);
+      const id = bgIdOf(p);
+      return { ...f, kind: kindOf(p), ...(id && { bgId: id }), under: unowned.filter((g) => descendsFrom(byPid.get(g.pid), new Set([f.pid]))).length };
+    });
   return { candidates, foreign: roots };
 }
 
 // What a foreign root is, so the output can name it: a viewer attached to a background session,
 // another Claude session, a shell (a terminal), or anything else.
+// A background session's id, the one `claude stop <id>` takes: its pty host's pipe ends in -pty-<id>.
+function bgIdOf(p) {
+  return (p && isClaude(p) && p.cmd.match(/--bg-pty-host\s+\S*-pty-([A-Za-z0-9]+)/)?.[1]) || null;
+}
+
 function kindOf(p) {
   // `claude attach <id>`, or `node .../claude attach <id>` for an npm install.
   if (isClaude(p) && /^\s*(?:(?:"[^"]*"|\S+)\s+)?(?:"[^"]*"|\S*claude(?:\.exe|\.js)?)"?\s+attach(\s|$)/.test(p.cmd)) return "viewer";
@@ -269,7 +287,7 @@ function selfOf() {
   const host = background && /--bg-pty-host\b/.test(parent.cmd) ? parent : null;
   const own = procs.filter((p) => p.pid === session.pid || p.pid === host?.pid || isSessionConsole(p) || (descendsFrom(p, new Set([session.pid])) && !toolShellOf(p)));
   const holders = own.filter(inTree).map((p) => ({ pid: p.pid, name: p.name }));
-  return { pid: session.pid, root: host?.pid ?? session.pid, holdsTree: holders.length > 0, holders, background };
+  return { pid: session.pid, root: host?.pid ?? session.pid, bgId: host ? bgIdOf(host) : null, holdsTree: holders.length > 0, holders, background };
 }
 
 // Windows refuses to delete a folder any process uses as its working directory or has a file open
@@ -294,6 +312,42 @@ const alive = (pid) => {
     return e.code === "EPERM";
   }
 };
+
+// --release-self [seconds]: stop this background session that many seconds from now with
+// `claude stop <id>`, from a process started outside the work tree and outside the session's own
+// process tree and job, so the reply is shown first and the stopper itself holds nothing. Never by
+// killing its processes: the Claude daemon restarts a background session whose process dies, in the
+// same folder, so only `claude stop` keeps it down. Only for a background session that holds this
+// work tree; an interactive one ends with /exit.
+if (releaseIn !== null) {
+  const self = out.self;
+  const claudeExe = session ? firstToken(session.cmd) || session.exe : "";
+  if (!self?.background || !self.holdsTree || !self.bgId || !claudeExe) {
+    out.releasing = null;
+    out.releaseRefused = !self
+      ? "session not found"
+      : !self.background
+        ? "not a background session: /exit ends it"
+        : !self.holdsTree
+          ? "this session does not hold this work tree"
+          : "no background session id found to stop";
+  } else {
+    const away = os.tmpdir();
+    if (win) {
+      const stopper = `powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds ${releaseIn}; & '${claudeExe.replaceAll("'", "''")}' stop ${self.bgId}"`;
+      // WMI starts it as a child of the WMI service, so it outlives this session's job object.
+      run("powershell.exe", [
+        "-NoProfile", "-NonInteractive", "-Command",
+        `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${stopper.replaceAll("'", "''")}'; CurrentDirectory = '${away.replaceAll("'", "''")}' } | Out-Null`,
+      ]);
+    } else {
+      spawn("sh", ["-c", `sleep ${releaseIn}; '${claudeExe.replaceAll("'", "'\\''")}' stop ${self.bgId}`], {
+        cwd: away, detached: true, stdio: "ignore",
+      }).unref();
+    }
+    out.releasing = { id: self.bgId, inSeconds: releaseIn };
+  }
+}
 
 if (killList) {
   const allowed = new Set(candidates.map((c) => c.pid));
