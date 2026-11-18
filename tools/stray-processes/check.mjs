@@ -21,8 +21,8 @@
 //             roots are listed, each with a kind (viewer, claude-session, shell, process) and how
 //             many of its descendants also hold the tree (under). Never killed; named so the user
 //             knows what holds the folder. After --kill it is the list as it stands after the kills.
-// self        this Claude session: holdsTree when its working directory, or one of its MCP servers'
-//             or console host's, is inside the work tree (it then holds the folder until the session
+// self        this Claude session: holdsTree when its working directory, or one of its MCP servers',
+//             its console host's or its pty host's, is inside the work tree (it then holds the folder until the session
 //             ends); background when its parent is another Claude process (a daemon or pty host), so
 //             closing its view with /exit does not end it; root is the PID whose tree ends it all
 //             (the pty host of a background session, else the session)
@@ -237,7 +237,8 @@ function classify() {
 // What a foreign root is, so the output can name it: a viewer attached to a background session,
 // another Claude session, a shell (a terminal), or anything else.
 function kindOf(p) {
-  if (isClaude(p) && /^\s*(?:"[^"]*"|\S+)\s+attach\s/.test(p.cmd)) return "viewer";
+  // `claude attach <id>`, or `node .../claude attach <id>` for an npm install.
+  if (isClaude(p) && /^\s*(?:(?:"[^"]*"|\S+)\s+)?(?:"[^"]*"|\S*claude(?:\.exe|\.js)?)"?\s+attach(\s|$)/.test(p.cmd)) return "viewer";
   if (isClaude(p)) return "claude-session";
   if (runsShell(p)) return "shell";
   return "process";
