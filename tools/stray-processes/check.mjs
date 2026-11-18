@@ -18,6 +18,13 @@
 //             (`before: true` marks an orphan older than this session)
 // foreign     inside the work tree but owned by something else that is still alive (an editor,
 //             the user's own terminal). Never killed; named so the user knows what holds the folder.
+// self        this Claude session: holdsTree when its working directory, or one of its MCP servers'
+//             or console host's, is inside the work tree (it then holds the folder until the session
+//             ends); background when its parent is another Claude process (a daemon or pty host), so
+//             closing its view with /exit does not end it
+// deletable   true only when no candidate (or, after --kill, nothing remaining), no foreign process
+//             and not the session itself holds the work tree. The one field that says whether the
+//             folder can be deleted right now.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -223,7 +230,18 @@ function killTree(pid) {
 }
 
 const { candidates, foreign } = classify();
-const out = { workTree, session: session?.pid ?? null, candidates, foreign };
+
+// The session and what it runs outside its tool shells (MCP servers, a console host) end only when
+// the session does, so classify() leaves them out; they still hold the folder while it runs.
+function selfOf() {
+  if (!session) return null;
+  const own = procs.filter((p) => p.pid === session.pid || (descendsFrom(p, new Set([session.pid])) && !toolShellOf(p)));
+  const holders = own.filter(inTree).map((p) => ({ pid: p.pid, name: p.name }));
+  return { pid: session.pid, holdsTree: holders.length > 0, holders, background: isClaude(parentOf(session) ?? { name: "", cmd: "" }) };
+}
+
+const out = { workTree, session: session?.pid ?? null, self: selfOf(), candidates, foreign };
+out.deletable = candidates.length === 0 && foreign.length === 0 && !out.self?.holdsTree;
 if (!session) {
   out.warning =
     "No Claude session found above this process, so only orphans are reported. If the check ran " +
@@ -254,7 +272,11 @@ if (killList) {
   }
   procs = listProcesses();
   byPid = new Map(procs.map((p) => [p.pid, p]));
-  out.remaining = classify().candidates;
+  const after = classify();
+  out.remaining = after.candidates;
+  out.foreign = after.foreign;
+  out.self = selfOf();
+  out.deletable = after.candidates.length === 0 && after.foreign.length === 0 && !out.self?.holdsTree;
 }
 
 console.log(JSON.stringify(out));

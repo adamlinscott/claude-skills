@@ -164,9 +164,16 @@ Two layers, both every run:
    - `candidates` — processes the session's Bash/PowerShell tool shells started (`why: "session"`,
      with `shell` naming the tool shell at the root of the tree), and orphans whose parent is gone
      and whose command line or working directory is inside the work tree (`why: "orphan"`). The
-     tool shell running the check is left out, and so are MCP servers.
+     tool shell running the check is left out, and so are the session's MCP servers, which `self`
+     reports instead.
    - `foreign` — inside the work tree but owned by something still alive outside the session: an
-     editor, the user's own terminal. Never stopped.
+     editor, the user's own terminal, another Claude session. Never stopped.
+   - `self` — this session: `holdsTree` when its own working directory, or an MCP server's, is
+     inside the work tree (`holders` lists them), and `background` when its parent is another
+     Claude process (a daemon or pty host). A session that holds the tree keeps the folder from
+     being deleted until it ends; a background one keeps running after `/exit` closes its view.
+   - `deletable` — true only when no candidate, no foreign process and not the session itself holds
+     the work tree. It is the only field that says whether the folder can be deleted now.
 
 An orphan can be a whole Claude session: a `claude.exe --bg-pty-host` left running after its daemon
 died, with its own Claude process and MCP servers under it. Its command line rarely names the work
@@ -199,8 +206,15 @@ user asked for it to stay up, or the session is still waiting on what it produce
    `remaining`.
 3. `git fsmonitor--daemon stop` if the daemon was running.
 
-Anything in `failed` or `remaining`, anything kept, and anything `foreign` still blocks deleting the
-folder; name it in the output with its PID and what it is, so the user does not have to hunt for it.
+4. **Run the check one last time**, as the last tool call before the output (after the kills, and
+   after carrying out any answers to shape-B questions), and read `deletable`, `self`, `foreign` and
+   `remaining` from that run only.
+
+Anything in `failed` or `remaining`, anything kept, anything `foreign`, and the session itself when
+`self.holdsTree` still blocks deleting the folder; name each in the output with its PID and what it
+is, so the user does not have to hunt for it. For the session itself, say how it ends: `/exit` for an
+interactive session, and for a background one (`self.background`) stopping the job itself, since
+`/exit` only closes its view. Only `deletable: true` lets the output say nothing about processes.
 
 ## Output templates
 
@@ -216,9 +230,14 @@ Two lines of text, one blank line between them. That is the whole output, apart 
 line below and the deferral block.
 
 **The clean-up line.** Only when 3b stopped, kept, or could not touch something; otherwise nothing.
+When the final check's `deletable` is false it is mandatory, and it names every holder.
 
 ```
 Stopped: vite dev server, 2 idle bash shells, orphaned node (test runner). Still running: node 5120 (`npm run dev`, kept at your request) — it will block deleting the folder.
+```
+
+```
+Still running: this session (claude 34336, with its MCP servers) — it's a background session, so /exit won't free the folder: stop the job itself; powershell 56420 (your terminal, open in the folder); claude 33524 (another session started in the folder).
 ```
 
 Resist every urge to add anything else: no bullet list of what was done, no "let me know if", no next steps, no caveat.
