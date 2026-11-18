@@ -24,7 +24,8 @@
 // self        this Claude session: holdsTree when its working directory, or one of its MCP servers'
 //             or console host's, is inside the work tree (it then holds the folder until the session
 //             ends); background when its parent is another Claude process (a daemon or pty host), so
-//             closing its view with /exit does not end it
+//             closing its view with /exit does not end it; root is the PID whose tree ends it all
+//             (the pty host of a background session, else the session)
 // deletable   true only when the session was found and no candidate (or, after --kill, nothing
 //             remaining) holds the tree, and on Windows also no foreign process and not the session
 //             itself (macOS and Linux delete a folder that is some process's working directory). The
@@ -236,7 +237,7 @@ function classify() {
 // What a foreign root is, so the output can name it: a viewer attached to a background session,
 // another Claude session, a shell (a terminal), or anything else.
 function kindOf(p) {
-  if (/(^|\s)attach(\s|$)/.test(p.cmd) && isClaude(p)) return "viewer";
+  if (isClaude(p) && /^\s*(?:"[^"]*"|\S+)\s+attach\s/.test(p.cmd)) return "viewer";
   if (isClaude(p)) return "claude-session";
   if (runsShell(p)) return "shell";
   return "process";
@@ -258,11 +259,16 @@ const { candidates, foreign } = classify();
 
 // The session and what it runs outside its tool shells (MCP servers, a console host) end only when
 // the session does, so classify() leaves them out; they still hold the folder while it runs.
+// A background session runs under its own pty host (claude --bg-pty-host), which starts in the same
+// folder and outlives the session's view; it is the root to end, not the session process.
 function selfOf() {
   if (!session) return null;
-  const own = procs.filter((p) => p.pid === session.pid || isSessionConsole(p) || (descendsFrom(p, new Set([session.pid])) && !toolShellOf(p)));
+  const parent = parentOf(session);
+  const background = !!parent && isClaude(parent);
+  const host = background && /--bg-pty-host\b/.test(parent.cmd) ? parent : null;
+  const own = procs.filter((p) => p.pid === session.pid || p.pid === host?.pid || isSessionConsole(p) || (descendsFrom(p, new Set([session.pid])) && !toolShellOf(p)));
   const holders = own.filter(inTree).map((p) => ({ pid: p.pid, name: p.name }));
-  return { pid: session.pid, holdsTree: holders.length > 0, holders, background: isClaude(parentOf(session) ?? { name: "", cmd: "" }) };
+  return { pid: session.pid, root: host?.pid ?? session.pid, holdsTree: holders.length > 0, holders, background };
 }
 
 // Windows refuses to delete a folder any process uses as its working directory or has a file open

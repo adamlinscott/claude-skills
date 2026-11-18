@@ -107,8 +107,8 @@ When the final check says `deletable: false`, the `Still running:` line is **man
 every holder by PID and what it is: each `remaining` process, each `foreign` root with its kind, and,
 when `self.holdsTree`, this session itself. An interactive session needs only a short clause (it ends
 with `/exit`); for a background one (`self.background`) say that `/exit` only closes its view, and
-that the folder frees once the job is stopped or its process tree is ended (`taskkill /PID <pid> /T /F`
-on Windows). Never write or
+that the folder frees once the job is stopped or the tree of `self.root`, its pty host, is ended
+(`taskkill /PID <self.root> /T /F` on Windows). Never write or
 imply that nothing is running, or that the folder can now be deleted, unless the final check's
 `deletable` is true.
 
