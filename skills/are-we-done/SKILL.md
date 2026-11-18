@@ -1,6 +1,6 @@
 ---
 name: are-we-done
-description: '[Adam''s Skills] Deterministic close-out gate for a session or work tree. Sweeps a fixed set of sources — the todo list, this session''s own promises, git state, TODO/FIXME markers the diff introduced, test and build state, and any issue or ticket referenced — and checks that every open point has been explicitly decided: done, won''t do, deferred, or handed to another session. Strict by default, with a severity floor that lifts only on evidence of how the project actually works (CI on every push, a user who commits last). A clean sweep returns one line and one sentence, plus a line on any processes it stopped. An unclean one either asks about the genuinely ambiguous points or names the blockers to fix now, with every issue number carrying its title. It decides nothing for the user and fixes nothing, with one exception: when the answer is yes, or no only because of open questions, it stops the background shells and processes left running in the work tree, so the folder can be deleted. Use when work looks finished and you want to confirm the session can actually close — "are we done?", before ending a session, before shipping, or before handing off.'
+description: '[Adam''s Skills] Deterministic close-out gate for a session or work tree. Sweeps a fixed set of sources — the todo list, this session''s own promises, git state, TODO/FIXME markers the diff introduced, test and build state, and any issue or ticket referenced — and checks that every open point has been explicitly decided: done, won''t do, deferred, or handed to another session. Strict by default, with a severity floor that lifts only on evidence of how the project actually works (CI on every push, a user who commits last). A clean sweep returns one line and one sentence, plus a line on any processes it stopped or that still hold the folder. An unclean one either asks about the genuinely ambiguous points or names the blockers to fix now, with every issue number carrying its title. It decides nothing for the user and fixes nothing, with one exception: when the answer is yes, or no only because of open questions, it stops the background shells and processes left running in the work tree, so the folder can be deleted. Use when work looks finished and you want to confirm the session can actually close — "are we done?", before ending a session, before shipping, or before handing off.'
 allowed-tools: Read, Grep, Glob, Bash, AskUserQuestion, TaskStop
 ---
 
@@ -40,8 +40,10 @@ commands and what counts as a hit.
    `(unverified)`; a missing `gh` is an environment gap, not an undecided point.
 7. **Background processes** — this session's background tasks, plus every process its tool shells
    (subagents' included) started that is still running, plus orphans whose command line or working
-   directory is inside the work tree. These are what stop the folder being deleted later. Not open
-   points in themselves; they feed section 3b.
+   directory is inside the work tree, plus **the session itself**: a Claude session whose working
+   directory (or one of its MCP servers') is inside the work tree holds the folder until it ends,
+   and a background session keeps running after its viewer is closed with `/exit`. These are what
+   stop the folder being deleted later. Not open points in themselves; they feed section 3b.
 
 ## 2. Classify
 
@@ -84,6 +86,11 @@ up, or the session is still waiting on its result (that wait is itself `AMBIGUOU
 and goes. MCP servers and the user's own terminals and editors are never touched. Commands in
 [REFERENCE.md](REFERENCE.md).
 
+**The last tool call before the output is the check.** After every stop, and after the answers come
+back, run the check once more and take the clean-up line from that run alone: its `deletable`,
+`self`, `foreign` and `remaining`. A list from earlier in the turn is stale, and "nothing I started is
+running" is not the same fact as "nothing holds the folder".
+
 ## 4. Output — one of exactly three shapes
 
 Templates in [REFERENCE.md](REFERENCE.md). Never invent a fourth shape and never add a section
@@ -96,19 +103,29 @@ brevity is the deliverable here. If 3b stopped or kept anything, or found a proc
 touch holding the folder, one `Stopped:` / `Still running:` line follows; when there was nothing,
 say nothing.
 
+When the final check says `deletable: false`, the `Still running:` line is **mandatory** and names
+every holder by PID and what it is: each `remaining` process, each `foreign` root with its kind, and,
+when `self.holdsTree`, this session itself. An interactive session needs only a short clause (it ends
+with `/exit`); for a background one (`self.background`) say that `/exit` only closes its view, and
+that the folder frees once the job is stopped or the tree of `self.root`, its pty host, is ended
+(`taskkill /PID <self.root> /T /F` on Windows). Never write or
+imply that nothing is running, or that the folder can now be deleted, unless the final check's
+`deletable` is true.
+
 One exception, only when something was deferred: a paste-ready `Parked:` block may follow, so the
 parking outlives the session that decided it. You print it, the user places it,
 and `/raise-issue` files any of it that deserves a tracked issue.
 
 A clean close is also the one moment worth mentioning a waiting skills update: on shape A only, run
-`/check-skill-updates` if it is installed and append its single line. Never on B or C — an update
+`/check-skill-updates` if it is installed, before the final check, and append its single line. Never on B or C — an update
 offer beside an unanswered question or a blocker dilutes both.
 
 **B — Ambiguous items exist (no blockers).** Ask, via the **AskUserQuestion** tool — one question
 per ambiguous item, max four, each offering the real options (do it now / defer / won't do).
 Open with the tool call; do not narrate the questions in prose first. Then stop and wait; the
 answers are the user's, and carrying them out is a separate ask. Report what 3b stopped after the
-answers, beneath the dispositions.
+answers, beneath the dispositions, under the same rule as shape A: the final check's `deletable`
+decides whether a `Still running:` line is mandatory.
 
 **C — Blockers exist.** A short, flat list — blockers first, then anything ambiguous underneath.
 One line each: what is broken, where (`file:line`), and what it blocks. Every referenced item as
@@ -125,6 +142,9 @@ as questions only, never also as bullets in the list.
   issue title that will not resolve), that is an open point, not an assumption.
 - **A single unresolved point makes the answer no.** This gate exists to be strict; a
   yes that is nearly true is the failure mode it is built to prevent.
+- **Never claim the folder is free without the check saying so.** The user deletes the folder on
+  the strength of the close-out; a process left unnamed, the session included, makes that claim a
+  lie. Only `deletable: true` from the final run of the check allows silence about processes.
 
 ## Relationship to other skills
 

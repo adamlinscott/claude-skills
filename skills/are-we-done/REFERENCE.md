@@ -164,9 +164,21 @@ Two layers, both every run:
    - `candidates` — processes the session's Bash/PowerShell tool shells started (`why: "session"`,
      with `shell` naming the tool shell at the root of the tree), and orphans whose parent is gone
      and whose command line or working directory is inside the work tree (`why: "orphan"`). The
-     tool shell running the check is left out, and so are MCP servers.
+     tool shell running the check is left out, and so are the session's MCP servers, which `self`
+     reports instead.
    - `foreign` — inside the work tree but owned by something still alive outside the session: an
-     editor, the user's own terminal. Never stopped.
+     editor, the user's own terminal, another Claude session or a viewer attached to one. Only
+     roots are listed, each with a `kind` (`viewer`, `claude-session`, `shell`, `process`) and
+     `under`, how many of its descendants also hold the tree. Never stopped.
+   - `self` — this session: `holdsTree` when its own working directory, or an MCP server's, its
+     console host's or its pty host's, is inside the work tree (`holders` lists them); `background`
+     when its parent is another Claude process (a daemon or pty host); `root`, the PID whose tree
+     ends it all (the pty host of a background session, else the session). A session that holds the tree keeps the folder from
+     being deleted until it ends; a background one keeps running after `/exit` closes its view.
+   - `deletable` — false whenever the session was not found. Otherwise, on Windows, true only when
+     no candidate, no foreign process and not the session itself holds the work tree. On macOS and Linux a working
+     directory does not stop deletion, so there only candidates count. It is the only field that
+     says whether the folder can be deleted now.
 
 An orphan can be a whole Claude session: a `claude.exe --bg-pty-host` left running after its daemon
 died, with its own Claude process and MCP servers under it. Its command line rarely names the work
@@ -199,8 +211,17 @@ user asked for it to stay up, or the session is still waiting on what it produce
    `remaining`.
 3. `git fsmonitor--daemon stop` if the daemon was running.
 
-Anything in `failed` or `remaining`, anything kept, and anything `foreign` still blocks deleting the
-folder; name it in the output with its PID and what it is, so the user does not have to hunt for it.
+4. **Run the check one last time**, as the last tool call before the output (after the kills, and
+   after the answers to shape-B questions come back), and read `deletable`, `self`, `foreign` and
+   `remaining` from that run only.
+
+Anything in `failed` or `remaining`, anything kept, and, on Windows, anything `foreign` and the session
+itself when `self.holdsTree` still blocks deleting the folder (macOS and Linux delete a folder that is a
+process's working directory, so there only the first two block it); name each in the output with its PID and what it
+is, so the user does not have to hunt for it. Name foreign roots, not their children. For the session
+itself, say how it ends: a short clause for an interactive one (`/exit`), and for a background one
+(`self.background`) that `/exit` only closes its view, so the job must be stopped or the tree of
+`self.root` ended (`taskkill /PID <self.root> /T /F` on Windows). Only `deletable: true` lets the output say nothing about processes.
 
 ## Output templates
 
@@ -215,14 +236,19 @@ Done — nothing undecided.
 Two lines of text, one blank line between them. That is the whole output, apart from the clean-up
 line below and the deferral block.
 
-**The clean-up line.** Only when 3b stopped, kept, or could not touch something; otherwise nothing.
+**The clean-up line.** When 3b stopped or kept something, or the final check's `deletable` is false
+(then it is mandatory and names every holder); otherwise nothing.
 
 ```
 Stopped: vite dev server, 2 idle bash shells, orphaned node (test runner). Still running: node 5120 (`npm run dev`, kept at your request) — it will block deleting the folder.
 ```
 
+```
+Still running: this session (claude 34336, background) — /exit only closes its view, so stop the job or end its pty host with `taskkill /PID 17216 /T /F`; powershell 56420 (your terminal, open in the folder); claude 27512 (another session started in the folder).
+```
+
 Resist every urge to add anything else: no bullet list of what was done, no "let me know if", no next steps, no caveat.
-The brevity is the signal that the sweep came back clean.
+The brevity is the signal that the sweep came back clean; a mandatory clean-up line does not change that.
 
 **The deferral block.** When anything was parked, the two lines may be followed by a block the
 user can lift straight out — nothing else. One line per deferred item: what it is, why it was
@@ -266,7 +292,8 @@ blockers, the blocker list comes first and the questions follow it in the same t
 is the only text allowed to precede them.
 
 After the answers come back, state the resulting disposition in one line per item, then the
-clean-up line if 3b did anything, and stop; acting on them is a separate request.
+clean-up line if 3b did anything or the final check's `deletable` is false, and stop; acting on them
+is a separate request.
 
 ### Shape C — blockers
 
