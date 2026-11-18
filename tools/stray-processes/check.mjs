@@ -17,14 +17,18 @@
 //             orphans — parent gone — whose command line or cwd is inside the work tree
 //             (`before: true` marks an orphan older than this session)
 // foreign     inside the work tree but owned by something else that is still alive (an editor,
-//             the user's own terminal). Never killed; named so the user knows what holds the folder.
+//             the user's own terminal, another Claude session or a viewer attached to one). Only
+//             roots are listed, each with a kind (viewer, claude-session, shell, process) and how
+//             many of its descendants also hold the tree (under). Never killed; named so the user
+//             knows what holds the folder. After --kill it is the list as it stands after the kills.
 // self        this Claude session: holdsTree when its working directory, or one of its MCP servers'
 //             or console host's, is inside the work tree (it then holds the folder until the session
 //             ends); background when its parent is another Claude process (a daemon or pty host), so
 //             closing its view with /exit does not end it
-// deletable   true only when no candidate (or, after --kill, nothing remaining), no foreign process
-//             and not the session itself holds the work tree. The one field that says whether the
-//             folder can be deleted right now.
+// deletable   true only when the session was found and no candidate (or, after --kill, nothing
+//             remaining) holds the tree, and on Windows also no foreign process and not the session
+//             itself (macOS and Linux delete a folder that is some process's working directory). The
+//             one field that says whether the folder can be deleted right now.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -197,11 +201,17 @@ const descendsFrom = (p, pids) => {
   return false;
 };
 
+// A background session's console host is its sibling, started by the same daemon at the same moment;
+// it belongs to the session, not to anyone else. created is in 100 ns ticks on Windows, ms elsewhere.
+const isSessionConsole = (p) =>
+  !!session && /^conhost\.exe$/i.test(p.name) && p.ppid === session.ppid &&
+  Math.abs(p.created - session.created) < (win ? 2e7 : 2000);
+
 function classify() {
   const candidates = [];
   const foreign = [];
   for (const p of procs) {
-    if (ownChain.has(p.pid) || p.pid === session?.pid) continue;
+    if (ownChain.has(p.pid) || p.pid === session?.pid || isSessionConsole(p)) continue;
     const shell = toolShellOf(p);
     if (shell && ownChain.has(shell.pid)) continue;
     const entry = { pid: p.pid, name: p.name, cmd: p.cmd.slice(0, 300) };
@@ -212,9 +222,24 @@ function classify() {
     }
     else if (inTree(p)) foreign.push(entry);
   }
-  // The session's MCP servers end with it, and an orphan's children go with its tree.
+  // The session's MCP servers end with it (self reports them), an orphan's children go with its tree,
+  // and a foreign process's children are named through it: only roots are listed, each with its kind.
   const owners = new Set([session?.pid, ...candidates.filter((c) => c.why === "orphan").map((c) => c.pid)]);
-  return { candidates, foreign: foreign.filter((f) => !descendsFrom(byPid.get(f.pid), owners)) };
+  const unowned = foreign.filter((f) => !descendsFrom(byPid.get(f.pid), owners));
+  const foreignPids = new Set(unowned.map((f) => f.pid));
+  const roots = unowned
+    .filter((f) => !descendsFrom(byPid.get(f.pid), foreignPids))
+    .map((f) => ({ ...f, kind: kindOf(byPid.get(f.pid)), under: unowned.filter((g) => descendsFrom(byPid.get(g.pid), new Set([f.pid]))).length }));
+  return { candidates, foreign: roots };
+}
+
+// What a foreign root is, so the output can name it: a viewer attached to a background session,
+// another Claude session, a shell (a terminal), or anything else.
+function kindOf(p) {
+  if (/(^|\s)attach(\s|$)/.test(p.cmd) && isClaude(p)) return "viewer";
+  if (isClaude(p)) return "claude-session";
+  if (runsShell(p)) return "shell";
+  return "process";
 }
 
 function killTree(pid) {
@@ -235,13 +260,19 @@ const { candidates, foreign } = classify();
 // the session does, so classify() leaves them out; they still hold the folder while it runs.
 function selfOf() {
   if (!session) return null;
-  const own = procs.filter((p) => p.pid === session.pid || (descendsFrom(p, new Set([session.pid])) && !toolShellOf(p)));
+  const own = procs.filter((p) => p.pid === session.pid || isSessionConsole(p) || (descendsFrom(p, new Set([session.pid])) && !toolShellOf(p)));
   const holders = own.filter(inTree).map((p) => ({ pid: p.pid, name: p.name }));
   return { pid: session.pid, holdsTree: holders.length > 0, holders, background: isClaude(parentOf(session) ?? { name: "", cmd: "" }) };
 }
 
+// Windows refuses to delete a folder any process uses as its working directory or has a file open
+// in; macOS and Linux delete it regardless, so there only leftover candidates count. Without the
+// session found, nothing can be vouched for.
+const deletableNow = (cands, fgn, self) =>
+  !!session && cands.length === 0 && (!win || (fgn.length === 0 && !self?.holdsTree));
+
 const out = { workTree, session: session?.pid ?? null, self: selfOf(), candidates, foreign };
-out.deletable = candidates.length === 0 && foreign.length === 0 && !out.self?.holdsTree;
+out.deletable = deletableNow(candidates, foreign, out.self);
 if (!session) {
   out.warning =
     "No Claude session found above this process, so only orphans are reported. If the check ran " +
@@ -276,7 +307,7 @@ if (killList) {
   out.remaining = after.candidates;
   out.foreign = after.foreign;
   out.self = selfOf();
-  out.deletable = after.candidates.length === 0 && after.foreign.length === 0 && !out.self?.holdsTree;
+  out.deletable = deletableNow(after.candidates, after.foreign, out.self);
 }
 
 console.log(JSON.stringify(out));
